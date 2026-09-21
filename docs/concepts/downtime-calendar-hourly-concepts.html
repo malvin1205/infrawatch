@@ -1,0 +1,2843 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InfraWatch — Downtime Calendar & Hourly Incident Inspector (5 Production Concepts)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* =========================================================
+       DESIGN SYSTEM & CSS TOKENS (Swiss Minimalist NOC Engine)
+       ========================================================= */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+      /* Active Modal Width Constraint (Defaults to InfraWatch real modal width 760px) */
+      --modal-max-width: 760px;
+      
+      /* Dark Theme Palettes (Default) */
+      --bg-base: #030712;
+      --bg-surface-1: #080E1E;
+      --bg-surface-2: #0B132B;
+      --bg-surface-3: #0F172A;
+      --bg-surface-hover: #1E293B;
+      --bg-surface-active: #334155;
+      
+      --border-subtle: rgba(255, 255, 255, 0.07);
+      --border-medium: rgba(255, 255, 255, 0.14);
+      --border-strong: rgba(255, 255, 255, 0.22);
+      --border-accent: rgba(56, 189, 248, 0.4);
+
+      --text-primary: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --text-muted: #64748B;
+      --text-dim: #475569;
+
+      --accent: #38BDF8;
+      --accent-hover: #0EA5E9;
+      --accent-glow: rgba(56, 189, 248, 0.25);
+
+      --success: #10B981;
+      --success-bg: rgba(16, 185, 129, 0.12);
+      --success-border: rgba(16, 185, 129, 0.3);
+
+      --warning: #F59E0B;
+      --warning-bg: rgba(245, 158, 11, 0.12);
+      --warning-border: rgba(245, 158, 11, 0.3);
+
+      --orange: #F97316;
+      --orange-bg: rgba(249, 115, 22, 0.14);
+      --orange-border: rgba(249, 115, 22, 0.35);
+
+      --critical: #EF4444;
+      --critical-bg: rgba(239, 68, 68, 0.14);
+      --critical-border: rgba(239, 68, 68, 0.35);
+      --critical-glow: rgba(239, 68, 68, 0.3);
+
+      --chronic-gray: #475569;
+      --chronic-bg: rgba(71, 85, 105, 0.18);
+
+      --r-xs: 4px;
+      --r-sm: 6px;
+      --r-md: 10px;
+      --r-lg: 14px;
+      --r-pill: 9999px;
+
+      --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
+      --shadow-md: 0 6px 24px rgba(0, 0, 0, 0.5);
+      --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.65);
+    }
+
+    [data-theme="light"] {
+      --bg-base: #F8FAFC;
+      --bg-surface-1: #F1F5F9;
+      --bg-surface-2: #FFFFFF;
+      --bg-surface-3: #FFFFFF;
+      --bg-surface-hover: #F1F5F9;
+      --bg-surface-active: #E2E8F0;
+
+      --border-subtle: rgba(0, 0, 0, 0.06);
+      --border-medium: rgba(0, 0, 0, 0.12);
+      --border-strong: rgba(0, 0, 0, 0.18);
+      --border-accent: rgba(2, 132, 199, 0.4);
+
+      --text-primary: #0F172A;
+      --text-secondary: #475569;
+      --text-muted: #64748B;
+      --text-dim: #94A3B8;
+
+      --accent: #0284C7;
+      --accent-hover: #0369A1;
+      --accent-glow: rgba(2, 132, 199, 0.2);
+
+      --chronic-gray: #94A3B8;
+      --chronic-bg: rgba(148, 163, 184, 0.15);
+
+      --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
+      --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.08);
+      --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.12);
+    }
+
+    body {
+      font-family: var(--font);
+      background-color: var(--bg-base);
+      color: var(--text-primary);
+      min-height: 100vh;
+      line-height: 1.5;
+      padding-bottom: 90px;
+      transition: background-color 0.25s ease, color 0.25s ease;
+      overflow-x: hidden;
+    }
+
+    /* ── TOP ANNOUNCER & HEADER ──────────────────────────── */
+    .top-announcer {
+      background: linear-gradient(90deg, rgba(56, 189, 248, 0.12), rgba(239, 68, 68, 0.12));
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 8px 32px;
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .announcer-tag {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--accent);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .announcer-tag::before {
+      content: '';
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    .header-container {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 28px 24px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .header-titles h1 {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }
+
+    .header-titles h1 span {
+      background: linear-gradient(135deg, #38BDF8 0%, #F59E0B 55%, #EF4444 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header-subtitle {
+      font-size: 13.5px;
+      color: var(--text-secondary);
+      margin-top: 6px;
+      max-width: 820px;
+    }
+
+    /* Header Controls */
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .toolbar-chip-group {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--bg-surface-2);
+      border: 1px solid var(--border-medium);
+      padding: 4px 8px;
+      border-radius: var(--r-pill);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .tool-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-secondary);
+      padding: 4px 10px;
+      border-radius: var(--r-pill);
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+      white-space: nowrap;
+    }
+    .tool-btn:hover {
+      color: var(--text-primary);
+      background: var(--bg-surface-hover);
+    }
+    .tool-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #030712;
+      font-weight: 700;
+    }
+
+    /* ── CONCEPT SELECTION TABS ─────────────────────────── */
+    .concept-nav-wrapper {
+      max-width: 1280px;
+      margin: 0 auto 20px;
+      padding: 0 24px;
+    }
+
+    .concept-nav-label {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .concept-tabs-grid {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+      scrollbar-width: thin;
+    }
+
+    .concept-tab-btn {
+      flex: 1 0 220px;
+      background: var(--bg-surface-2);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--r-md);
+      padding: 10px 14px;
+      cursor: pointer;
+      text-align: left;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      position: relative;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .concept-tab-btn:hover {
+      border-color: var(--border-strong);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .concept-tab-btn.active {
+      background: var(--bg-surface-3);
+      border-color: var(--accent);
+      box-shadow: 0 4px 18px var(--accent-glow);
+    }
+
+    .concept-tab-btn.active::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      left: 14px;
+      right: 14px;
+      height: 2px;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+
+    .concept-kicker {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .concept-tab-btn.active .concept-kicker {
+      color: var(--accent);
+    }
+
+    .concept-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1.25;
+    }
+
+    .concept-desc {
+      font-size: 11px;
+      color: var(--text-secondary);
+      line-height: 1.3;
+      margin-top: 2px;
+    }
+
+    /* ── REAL MODAL FRAME CONTAINER (Preview Mode) ───────── */
+    .modal-viewport-shell {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      justify-content: center;
+    }
+
+    .modal-dialog-preview {
+      width: 100%;
+      max-width: var(--modal-max-width);
+      background: var(--bg-surface-2);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--r-lg);
+      box-shadow: var(--shadow-lg);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* Real Modal Chrome Header */
+    .modal-chrome-header {
+      background: var(--bg-surface-1);
+      border-bottom: 1px solid var(--border-medium);
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .modal-chrome-title-group {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    .modal-chrome-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .modal-chrome-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .modal-chrome-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .modal-width-indicator {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid var(--border-accent);
+      padding: 2px 8px;
+      border-radius: var(--r-pill);
+    }
+
+    .modal-chrome-close {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 4px;
+    }
+    .modal-chrome-close:hover {
+      color: var(--text-primary);
+    }
+
+    /* ── INNER WORKSPACE WRAPPER ─────────────────────────── */
+    .workspace-wrap {
+      width: 100%;
+      padding: 20px 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ── CALENDAR CARD (Modernized Master Component) ─────── */
+    .calendar-card {
+      background: var(--bg-surface-2);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--r-md);
+      padding: 18px 20px;
+      box-shadow: var(--shadow-sm);
+      position: relative;
+    }
+
+    .cal-header-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .cal-title-block h2 {
+      font-size: 16px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .cal-title-block p {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    /* Quick Month Stats */
+    .cal-stats-strip {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .mini-stat-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11.5px;
+      padding: 3px 8px;
+      background: var(--bg-surface-1);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-pill);
+      color: var(--text-secondary);
+    }
+    .mini-stat-pill strong {
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+    }
+
+    /* Weekday labels */
+    .weekdays-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 6px;
+      margin-bottom: 6px;
+      text-align: center;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    /* Days grid */
+    .days-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+
+    .day-cell {
+      background: var(--bg-surface-3);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-sm);
+      padding: 8px 8px 6px;
+      min-height: 74px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+      user-select: none;
+    }
+
+    .day-cell:hover {
+      border-color: var(--border-strong);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .day-cell.is-selected {
+      border-color: var(--accent);
+      background: rgba(56, 189, 248, 0.08);
+      box-shadow: 0 0 14px var(--accent-glow);
+    }
+
+    .day-cell.is-empty {
+      background: transparent;
+      border-color: transparent;
+      cursor: default;
+      pointer-events: none;
+    }
+
+    .day-top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .day-number {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .day-incident-chip {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 4px;
+      border-radius: var(--r-pill);
+    }
+    .chip-crit { background: var(--critical); color: #FFF; }
+    .chip-warn { background: var(--warning); color: #000; }
+    .chip-ok { background: var(--success); color: #000; }
+
+    .day-middle-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin: 2px 0 1px;
+    }
+
+    .day-pct-val {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .day-sub-info {
+      font-size: 9.5px;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Micro 24-hour hour distribution tick strip inside Day Cell */
+    .day-24h-strip {
+      display: grid;
+      grid-template-columns: repeat(24, 1fr);
+      gap: 1px;
+      height: 5px;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 3px;
+    }
+
+    .strip-hour-tick {
+      height: 100%;
+      background: rgba(16, 185, 129, 0.25);
+    }
+    .strip-hour-tick.tick-chronic {
+      background: rgba(239, 68, 68, 0.45);
+    }
+    .strip-hour-tick.tick-spike {
+      background: var(--critical);
+      box-shadow: 0 0 4px var(--critical);
+    }
+
+    .cal-footer-note {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 10px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    /* ── CONCEPT STAGE PANELS ────────────────────────────── */
+    .concept-panel-section {
+      display: none;
+      animation: conceptFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .concept-panel-section.active {
+      display: block;
+    }
+
+    @keyframes conceptFadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .inspector-card {
+      background: var(--bg-surface-2);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--r-md);
+      padding: 18px 20px;
+      box-shadow: var(--shadow-sm);
+      position: relative;
+    }
+
+    .inspector-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .inspector-title-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .selected-date-badge {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .meta-pill {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: var(--r-pill);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .meta-pill.pill-crit {
+      background: var(--critical-bg);
+      border: 1px solid var(--critical-border);
+      color: var(--critical);
+    }
+    .meta-pill.pill-neutral {
+      background: var(--bg-surface-1);
+      border: 1px solid var(--border-medium);
+      color: var(--text-secondary);
+    }
+
+    /* Global Noise Cancellation Switch */
+    .noise-toggle-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-surface-1);
+      border: 1px solid var(--border-medium);
+      padding: 4px 10px;
+      border-radius: var(--r-pill);
+    }
+
+    .noise-toggle-label {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+
+    .switch-ui {
+      width: 32px;
+      height: 17px;
+      background: var(--bg-surface-hover);
+      border-radius: var(--r-pill);
+      position: relative;
+      cursor: pointer;
+      transition: background 0.2s ease;
+      border: 1px solid var(--border-medium);
+    }
+    .switch-ui::after {
+      content: '';
+      position: absolute;
+      top: 1px;
+      left: 1px;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: #FFF;
+      transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .switch-ui.is-checked {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .switch-ui.is-checked::after {
+      transform: translateX(15px);
+      background: #030712;
+    }
+
+
+    /* =========================================================
+       CONCEPT 1: THE NOC FLIGHT RECORDER (DUAL SCRUBBER)
+       ========================================================= */
+    .chrono-flight-box {
+      background: var(--bg-surface-3);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-md);
+      padding: 16px;
+      margin-bottom: 16px;
+      position: relative;
+    }
+
+    .flight-head-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .flight-head-row strong {
+      color: var(--text-primary);
+    }
+
+    /* 24-Hour Binned Stacked Bar Rail */
+    .flight-timeline-rail {
+      display: grid;
+      grid-template-columns: repeat(24, 1fr);
+      gap: 2.5px;
+      height: 60px;
+      align-items: flex-end;
+      padding: 3px 0;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .flight-hour-col {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      height: 100%;
+      position: relative;
+      transition: all 0.15s ease;
+    }
+
+    .flight-hour-col:hover {
+      transform: translateY(-2px);
+    }
+
+    .flight-hour-col.is-active-hour .flight-bar-stacked {
+      outline: 2px solid #FFFFFF;
+      outline-offset: 1px;
+    }
+
+    .flight-bar-stacked {
+      width: 100%;
+      min-height: 5px;
+      border-radius: 2px 2px 1px 1px;
+      display: flex;
+      flex-direction: column-reverse;
+      overflow: hidden;
+      transition: all 0.2s ease;
+    }
+
+    .bar-seg-chronic {
+      background: var(--chronic-gray);
+      opacity: 0.6;
+    }
+    .bar-seg-spike {
+      background: var(--critical);
+      box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+    }
+
+    .flight-recover-pip {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--success);
+      margin-bottom: 2px;
+      box-shadow: 0 0 4px var(--success);
+    }
+
+    .flight-hour-markers {
+      display: grid;
+      grid-template-columns: repeat(24, 1fr);
+      gap: 2.5px;
+      margin-top: 5px;
+      text-align: center;
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      color: var(--text-muted);
+    }
+
+    /* Delta State Callout HUD - Responsive Grid */
+    .flight-delta-hud {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 10px;
+      align-items: center;
+      background: var(--bg-surface-2);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--r-sm);
+      padding: 10px 14px;
+      margin-top: 12px;
+    }
+
+    .hud-title-col {
+      display: flex;
+      flex-direction: column;
+    }
+    .hud-hour-title {
+      font-family: var(--font-mono);
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .hud-hour-sub {
+      font-size: 10.5px;
+      color: var(--text-muted);
+    }
+
+    .hud-kpi-item {
+      display: flex;
+      flex-direction: column;
+    }
+    .hud-kpi-val {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .hud-kpi-lbl {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    /* Filter & Table Toolbar */
+    .table-controls-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .table-chips {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+
+    .filter-chip {
+      background: var(--bg-surface-3);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--r-pill);
+      padding: 3px 10px;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .filter-chip:hover {
+      color: var(--text-primary);
+      border-color: var(--border-strong);
+    }
+    .filter-chip.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #030712;
+      font-weight: 700;
+    }
+
+    .search-wrap {
+      position: relative;
+      min-width: 200px;
+    }
+    .search-wrap input {
+      width: 100%;
+      background: var(--bg-surface-3);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--r-pill);
+      padding: 5px 12px 5px 28px;
+      font-size: 11.5px;
+      color: var(--text-primary);
+      outline: none;
+    }
+    .search-wrap input:focus {
+      border-color: var(--accent);
+    }
+    .search-wrap svg {
+      position: absolute;
+      left: 9px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+    }
+
+    /* Production Data Table */
+    .prod-table-card {
+      background: var(--bg-surface-3);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-sm);
+      overflow-x: auto;
+    }
+
+    .prod-thead {
+      display: grid;
+      grid-template-columns: 2fr 1.5fr 1fr 1.2fr 60px;
+      min-width: 540px;
+      padding: 8px 14px;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid var(--border-subtle);
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .prod-trow {
+      display: grid;
+      grid-template-columns: 2fr 1.5fr 1fr 1.2fr 60px;
+      min-width: 540px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      align-items: center;
+      font-size: 12px;
+      transition: background 0.15s ease;
+    }
+    .prod-trow:hover {
+      background: var(--bg-surface-hover);
+    }
+    .prod-trow:last-child {
+      border-bottom: none;
+    }
+
+    .prod-trow.row-spike {
+      background: rgba(239, 68, 68, 0.05);
+      border-left: 3px solid var(--critical);
+    }
+    .prod-trow.row-chronic {
+      opacity: 0.75;
+    }
+
+    .cell-target {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .cell-ip {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .cell-hostname {
+      font-size: 10.5px;
+      color: var(--text-muted);
+    }
+
+    .cell-interval {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    .cell-downtime {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .status-tag {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      font-weight: 700;
+      padding: 1.5px 7px;
+      border-radius: var(--r-pill);
+      display: inline-block;
+      width: fit-content;
+    }
+    .tag-spike {
+      background: var(--critical-bg);
+      border: 1px solid var(--critical-border);
+      color: var(--critical);
+    }
+    .tag-chronic {
+      background: var(--chronic-bg);
+      border: 1px solid var(--border-medium);
+      color: var(--text-muted);
+    }
+
+    .cell-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 4px;
+    }
+    .btn-action-icon {
+      background: transparent;
+      border: 1px solid var(--border-medium);
+      color: var(--text-secondary);
+      border-radius: var(--r-xs);
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .btn-action-icon:hover {
+      background: var(--bg-surface-active);
+      color: var(--text-primary);
+      border-color: var(--accent);
+    }
+
+
+    /* =========================================================
+       CONCEPT 2: TOPOLOGY CASCADE & INCIDENT MATRIX
+       ========================================================= */
+    .topology-container {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+
+    .incident-focus-card {
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(15, 23, 42, 0.6) 100%);
+      border: 1px solid var(--critical-border);
+      border-radius: var(--r-md);
+      padding: 14px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 14px;
+    }
+
+    .focus-left {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .focus-alert-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      background: var(--critical);
+      color: #FFF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+
+    .focus-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .focus-subtitle {
+      font-size: 11.5px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    .focus-kpis {
+      display: flex;
+      gap: 14px;
+    }
+
+    .topology-row-card {
+      background: var(--bg-surface-3);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-md);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .topo-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .topo-name-block {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .topo-name {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .topo-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: var(--r-pill);
+      background: var(--bg-surface-1);
+      color: var(--text-secondary);
+    }
+
+    .topo-track-24 {
+      display: grid;
+      grid-template-columns: repeat(24, 1fr);
+      gap: 2px;
+      height: 20px;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 3px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .topo-cell-hour {
+      height: 100%;
+      background: rgba(16, 185, 129, 0.3);
+      transition: all 0.15s ease;
+    }
+    .topo-cell-hour:hover {
+      filter: brightness(1.4);
+    }
+    .topo-cell-hour.is-cell-spike {
+      background: var(--critical);
+      box-shadow: 0 0 6px var(--critical);
+    }
+    .topo-cell-hour.is-cell-chronic {
+      background: var(--chronic-gray);
+      opacity: 0.5;
+    }
+
+    .chronic-accordion-wrap {
+      border: 1px dashed var(--border-medium);
+      border-radius: var(--r-sm);
+      overflow: hidden;
+      margin-top: 6px;
+    }
+
+    .chronic-accordion-toggle {
+      width: 100%;
+      background: var(--bg-surface-1);
+      border: none;
+      padding: 8px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+
+    /* =========================================================
+       CONCEPT 3: GANTT WATERFALL & CONCURRENT TIMELINE
+       ========================================================= */
+    .gantt-master-wrap {
+      background: var(--bg-surface-3);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-sm);
+      padding: 16px;
+      margin-bottom: 16px;
+      position: relative;
+      user-select: none;
+    }
+
+    .gantt-concurrency-chart {
+      height: 42px;
+      margin-left: 140px;
+      margin-bottom: 10px;
+      position: relative;
+      border-bottom: 1px solid var(--border-medium);
+    }
+
+    .concurrency-curve-svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+    .gantt-time-ruler {
+      display: flex;
+      margin-left: 140px;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 5px;
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      color: var(--text-muted);
+      justify-content: space-between;
+    }
+
+    .gantt-needle-line {
+      position: absolute;
+      top: 16px;
+      bottom: 16px;
+      width: 2px;
+      background: #38BDF8;
+      box-shadow: 0 0 8px #38BDF8;
+      pointer-events: none;
+      z-index: 50;
+      transition: left 0.05s linear;
+    }
+
+    .gantt-needle-hud {
+      position: absolute;
+      top: 0px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #38BDF8;
+      color: #030712;
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+
+    .gantt-swimlanes-list {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-top: 8px;
+      max-height: 380px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .gantt-swimlane-row {
+      display: flex;
+      align-items: center;
+      height: 28px;
+      border-radius: var(--r-xs);
+    }
+
+    .gantt-row-label {
+      width: 140px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding-right: 10px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+    }
+
+    .gantt-track-lane {
+      flex: 1;
+      height: 14px;
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 2px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .gantt-outage-bar {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      background: var(--critical);
+      border-radius: 2px;
+      box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);
+    }
+    .gantt-outage-bar.bar-chronic {
+      background: var(--chronic-gray);
+      opacity: 0.5;
+      box-shadow: none;
+    }
+
+
+    /* =========================================================
+       CONCEPT 4: HOURLY SPLIT-CARD LEDGER (AUDIT ACCORDION)
+       ========================================================= */
+    .ledger-container {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .ledger-hour-card {
+      background: var(--bg-surface-3);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-sm);
+      overflow: hidden;
+      transition: all 0.2s ease;
+    }
+
+    .ledger-hour-card.has-incident {
+      border-color: var(--critical-border);
+      background: rgba(239, 68, 68, 0.04);
+    }
+
+    .ledger-hour-card.is-expanded {
+      border-color: var(--accent);
+    }
+
+    .ledger-card-header {
+      padding: 10px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+    }
+    .ledger-card-header:hover {
+      background: var(--bg-surface-hover);
+    }
+
+    .ledger-hour-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .ledger-time-text {
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .ledger-detail-panel {
+      padding: 12px 14px;
+      border-top: 1px solid var(--border-subtle);
+      background: rgba(0, 0, 0, 0.15);
+      display: none;
+    }
+    .ledger-hour-card.is-expanded .ledger-detail-panel {
+      display: block;
+    }
+
+    .terminal-log-box {
+      background: #000000;
+      border: 1px solid var(--border-medium);
+      border-radius: var(--r-xs);
+      padding: 10px 12px;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: #A3E635;
+      line-height: 1.45;
+      margin-top: 8px;
+      overflow-x: auto;
+    }
+
+
+    /* =========================================================
+       CONCEPT 5: SEGMENTED HOURLY MATRIX & SLIDE DRAWER
+       ========================================================= */
+    .hourly-segmented-bar {
+      display: grid;
+      grid-template-columns: repeat(24, 1fr);
+      gap: 3px;
+      margin-bottom: 16px;
+    }
+
+    .seg-hour-btn {
+      background: var(--bg-surface-3);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-xs);
+      padding: 6px 2px;
+      text-align: center;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      transition: all 0.15s ease;
+    }
+    .seg-hour-btn:hover {
+      border-color: var(--border-strong);
+      transform: translateY(-2px);
+    }
+    .seg-hour-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #030712;
+      font-weight: 700;
+    }
+    .seg-hour-btn.active .seg-dot {
+      background: #030712;
+    }
+
+    .seg-hour-txt {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .seg-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+    .seg-dot.dot-crit { background: var(--critical); box-shadow: 0 0 5px var(--critical); }
+    .seg-dot.dot-chronic { background: var(--chronic-gray); }
+
+    /* Slide-Over Drawer */
+    .drawer-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      z-index: 1000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.22s ease;
+    }
+    .drawer-overlay.is-open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .slide-drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 460px;
+      max-width: 90vw;
+      background: var(--bg-surface-2);
+      border-left: 1px solid var(--border-strong);
+      box-shadow: var(--shadow-lg);
+      z-index: 1001;
+      transform: translateX(100%);
+      transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .slide-drawer.is-open {
+      transform: translateX(0);
+    }
+
+    .drawer-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .drawer-title-group h3 {
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .drawer-title-group p {
+      font-size: 11.5px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    .drawer-close-btn {
+      background: transparent;
+      border: 1px solid var(--border-medium);
+      color: var(--text-secondary);
+      border-radius: var(--r-xs);
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    .drawer-body {
+      padding: 18px 20px;
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .telemetry-card {
+      background: var(--bg-surface-3);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-sm);
+      padding: 14px;
+    }
+
+    .keyboard-hint-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--text-muted);
+      background: var(--bg-surface-1);
+      border: 1px solid var(--border-subtle);
+      padding: 2px 7px;
+      border-radius: var(--r-pill);
+    }
+    kbd {
+      background: var(--bg-surface-3);
+      border: 1px solid var(--border-medium);
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 9.5px;
+      color: var(--text-primary);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Announcement Bar -->
+  <div class="top-announcer">
+    <div class="announcer-tag">
+      <span>InfraWatch UI/UX Pro Max · 5 Production Concepts for Hourly Downtime Triage</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span class="keyboard-hint-pill"><kbd>1</kbd>–<kbd>5</kbd> Concepts · <kbd>&larr;</kbd> <kbd>&rarr;</kbd> Scrub Hours · <kbd>N</kbd> Noise Mute · <kbd>T</kbd> Theme</span>
+    </div>
+  </div>
+
+  <!-- Main Header -->
+  <header class="header-container">
+    <div class="header-titles">
+      <h1>Hourly Incident Inspector &amp; <span>Downtime Calendar</span></h1>
+      <p class="header-subtitle">
+        Directly answering: <strong>"Apa aja yang down di jam tertentu?"</strong> 
+        Separating chronic 24/7 background noise from active transient incident spikes.
+      </p>
+    </div>
+
+    <!-- Master Toolbar with Width Selector -->
+    <div class="header-actions">
+      <!-- Width Preset Toggle -->
+      <div class="toolbar-chip-group">
+        <span style="font-size: 11.5px; color: var(--text-muted); margin-right: 2px;">Width:</span>
+        <button class="tool-btn active" id="btnWidth760" type="button" title="Actual InfraWatch Modal Width">760px (Real Modal)</button>
+        <button class="tool-btn" id="btnWidth880" type="button" title="Slightly expanded width">880px</button>
+        <button class="tool-btn" id="btnWidth1200" type="button" title="Full desktop width">1200px (Wide)</button>
+      </div>
+
+      <!-- Simulation Days -->
+      <div class="toolbar-chip-group">
+        <span style="font-size: 11.5px; color: var(--text-muted); margin-right: 2px;">Day:</span>
+        <button class="tool-btn active" id="btnDay14" type="button">Sep 14</button>
+        <button class="tool-btn" id="btnDay10" type="button">Sep 10 (64h)</button>
+        <button class="tool-btn" id="btnDay6" type="button">Sep 6</button>
+      </div>
+
+      <!-- Theme & Sound -->
+      <div class="toolbar-chip-group">
+        <button class="tool-btn active" id="btnThemeDark" type="button">Dark</button>
+        <button class="tool-btn" id="btnThemeLight" type="button">Light</button>
+        <div style="width: 1px; height: 14px; background: var(--border-subtle); margin: 0 2px;"></div>
+        <button class="tool-btn active" id="btnSoundToggle" type="button">Haptics: ON</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── 5 CONCEPT NAVIGATION TABS ───────────────────────── -->
+  <nav class="concept-nav-wrapper">
+    <div class="concept-nav-label">
+      <span>Active Operational Concept:</span>
+      <span style="color: var(--accent);">Switch Concept to Compare</span>
+    </div>
+
+    <div class="concept-tabs-grid" role="tablist">
+      <!-- Concept 1 -->
+      <button class="concept-tab-btn active" data-concept="concept-flight" role="tab">
+        <span class="concept-kicker">Concept 01 · Recommended</span>
+        <span class="concept-title">NOC Flight Recorder</span>
+        <span class="concept-desc">Dual-track scrubber + Delta State Inspector. Use arrow keys to scrub hours.</span>
+      </button>
+
+      <!-- Concept 2 -->
+      <button class="concept-tab-btn" data-concept="concept-topology" role="tab">
+        <span class="concept-kicker">Concept 02</span>
+        <span class="concept-title">Topology Cascade Matrix</span>
+        <span class="concept-desc">Root-cause grouping by Subnet / Rack. Quarantines 24h noise.</span>
+      </button>
+
+      <!-- Concept 3 -->
+      <button class="concept-tab-btn" data-concept="concept-gantt" role="tab">
+        <span class="concept-kicker">Concept 03</span>
+        <span class="concept-title">Continuous Gantt Swimlanes</span>
+        <span class="concept-desc">Synchronized cursor needle tracking concurrent downtime volume.</span>
+      </button>
+
+      <!-- Concept 4 -->
+      <button class="concept-tab-btn" data-concept="concept-ledger" role="tab">
+        <span class="concept-kicker">Concept 04</span>
+        <span class="concept-title">Hourly Split-Card Ledger</span>
+        <span class="concept-desc">Time-slot accordion. Steady hours collapsed, incident hours expanded.</span>
+      </button>
+
+      <!-- Concept 5 -->
+      <button class="concept-tab-btn" data-concept="concept-drawer" role="tab">
+        <span class="concept-kicker">Concept 05</span>
+        <span class="concept-title">Segmented Hourly Matrix</span>
+        <span class="concept-desc">24 segmented hour pills with slide-over diagnostics telemetry drawer.</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ── REAL MODAL FRAME SHELL ─────────────────────────── -->
+  <div class="modal-viewport-shell">
+    <div class="modal-dialog-preview" id="modalDialogPreview">
+      <!-- Authentic Modal Chrome Header -->
+      <div class="modal-chrome-header">
+        <div class="modal-chrome-title-group">
+          <span class="modal-chrome-title">Availability Breakdown</span>
+          <span class="modal-chrome-sub">· Historical SLA &amp; Downtime Analysis</span>
+        </div>
+        <div class="modal-chrome-controls">
+          <span class="modal-width-indicator" id="dialogWidthBadge">Width: 760px (Real Modal)</span>
+          <button class="modal-chrome-close" type="button" title="Simulate Modal Close">&times;</button>
+        </div>
+      </div>
+
+      <!-- Inner Content -->
+      <div class="workspace-wrap">
+
+        <!-- REFINED DOWNTIME CALENDAR (Master View) -->
+        <section class="calendar-card">
+          <div class="cal-header-bar">
+            <div class="cal-title-block">
+              <h2>Downtime Calendar <span style="font-size: 12px; font-weight: 500; color: var(--text-muted);">· blackbox-ping-internal · Sep 2026</span></h2>
+              <p>Click any date cell to update the active day across all 5 concepts.</p>
+            </div>
+
+            <!-- Quick Summary Stats -->
+            <div class="cal-stats-strip">
+              <div class="mini-stat-pill">Fleet: <strong>102 Hosts</strong></div>
+              <div class="mini-stat-pill">Month SLA: <strong style="color:var(--warning)">84.2%</strong></div>
+              <div class="mini-stat-pill">Chronic: <strong style="color:var(--text-muted)">15 Hosts</strong></div>
+              <div class="mini-stat-pill" style="border-color:var(--critical-border); color:var(--critical)">Today's Incidents: <strong>1</strong></div>
+            </div>
+          </div>
+
+          <!-- Weekday Headers -->
+          <div class="weekdays-grid">
+            <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+          </div>
+
+          <!-- Calendar Month Grid (15 Days populated) -->
+          <div class="days-grid" id="masterDaysGrid">
+            <!-- Offset -->
+            <div class="day-cell is-empty"></div>
+
+            <!-- Sep 1 -->
+            <div class="day-cell" data-day="1" data-date="Tue, Sep 1" data-hosts="9" data-pct="90.6%">
+              <div class="day-top-row"><span class="day-number">1</span><span class="day-incident-chip chip-crit">9h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--warning)">90.6%</span><span class="day-sub-info">0 inc</span></div>
+              <div class="day-24h-strip" title="9 chronic hosts down all 24h">
+                <span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span>
+              </div>
+            </div>
+
+            <!-- Sep 2 -->
+            <div class="day-cell" data-day="2" data-date="Wed, Sep 2" data-hosts="8" data-pct="89.7%">
+              <div class="day-top-row"><span class="day-number">2</span><span class="day-incident-chip chip-crit">8h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--warning)">89.7%</span><span class="day-sub-info">0 inc</span></div>
+              <div class="day-24h-strip"><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span></div>
+            </div>
+
+            <!-- Sep 3 -->
+            <div class="day-cell" data-day="3" data-date="Thu, Sep 3" data-hosts="8" data-pct="89.7%">
+              <div class="day-top-row"><span class="day-number">3</span><span class="day-incident-chip chip-crit">8h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--warning)">89.7%</span><span class="day-sub-info">0 inc</span></div>
+              <div class="day-24h-strip"><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span></div>
+            </div>
+
+            <!-- Sep 4 -->
+            <div class="day-cell" data-day="4" data-date="Fri, Sep 4" data-hosts="9" data-pct="89.2%">
+              <div class="day-top-row"><span class="day-number">4</span><span class="day-incident-chip chip-crit">9h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--warning)">89.2%</span><span class="day-sub-info">0 inc</span></div>
+              <div class="day-24h-strip"><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span></div>
+            </div>
+
+            <!-- Sep 5 -->
+            <div class="day-cell" data-day="5" data-date="Sat, Sep 5" data-hosts="9" data-pct="88.5%">
+              <div class="day-top-row"><span class="day-number">5</span><span class="day-incident-chip chip-crit">9h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--critical)">88.5%</span><span class="day-sub-info">0 inc</span></div>
+              <div class="day-24h-strip"><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span></div>
+            </div>
+
+            <!-- Sep 6 (Weekend flap) -->
+            <div class="day-cell" data-day="6" data-date="Sun, Sep 6" data-hosts="18" data-pct="88.5%">
+              <div class="day-top-row"><span class="day-number">6</span><span class="day-incident-chip chip-crit">18h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--critical)">88.5%</span><span class="day-sub-info" style="color:var(--critical)">1 inc (03h)</span></div>
+              <div class="day-24h-strip">
+                <span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-spike" title="03:00 Backup Node Flap"></span><span class="strip-hour-tick tick-spike"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span>
+              </div>
+            </div>
+
+            <!-- Sep 7 -->
+            <div class="day-cell" data-day="7" data-date="Mon, Sep 7" data-hosts="10" data-pct="88.5%">
+              <div class="day-top-row"><span class="day-number">7</span><span class="day-incident-chip chip-crit">10h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--critical)">88.5%</span><span class="day-sub-info">0 inc</span></div>
+              <div class="day-24h-strip"><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span></div>
+            </div>
+
+            <!-- Sep 8 -->
+            <div class="day-cell" data-day="8" data-date="Tue, Sep 8" data-hosts="10" data-pct="88.5%">
+              <div class="day-top-row"><span class="day-number">8</span><span class="day-incident-chip chip-crit">10h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--critical)">88.5%</span><span class="day-sub-info">0 inc</span></div>
+              <div class="day-24h-strip"><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span></div>
+            </div>
+
+            <!-- Sep 9 -->
+            <div class="day-cell" data-day="9" data-date="Wed, Sep 9" data-hosts="34" data-pct="88.4%">
+              <div class="day-top-row"><span class="day-number">9</span><span class="day-incident-chip chip-crit">34h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--critical)">88.4%</span><span class="day-sub-info" style="color:var(--critical)">1 inc (21h)</span></div>
+              <div class="day-24h-strip"><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-spike"></span><span class="strip-hour-tick tick-spike"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span></div>
+            </div>
+
+            <!-- Sep 10 (Major Outage: 64 hosts) -->
+            <div class="day-cell" data-day="10" data-date="Thu, Sep 10" data-hosts="64" data-pct="81.5%">
+              <div class="day-top-row"><span class="day-number">10</span><span class="day-incident-chip chip-crit">64h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--critical)">81.5%</span><span class="day-sub-info" style="color:var(--critical)">Switch Down</span></div>
+              <div class="day-24h-strip">
+                <span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-spike" title="09:00 Core Switch Flap"></span><span class="strip-hour-tick tick-spike"></span><span class="strip-hour-tick tick-spike"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span>
+              </div>
+            </div>
+
+            <!-- Sep 11 -->
+            <div class="day-cell" data-day="11" data-date="Fri, Sep 11" data-hosts="19" data-pct="79.5%">
+              <div class="day-top-row"><span class="day-number">11</span><span class="day-incident-chip chip-crit">19h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--critical)">79.5%</span><span class="day-sub-info">0 inc</span></div>
+              <div class="day-24h-strip"><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span></div>
+            </div>
+
+            <!-- Sep 12 -->
+            <div class="day-cell" data-day="12" data-date="Sat, Sep 12" data-hosts="16" data-pct="79.5%">
+              <div class="day-top-row"><span class="day-number">12</span><span class="day-incident-chip chip-crit">16h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--critical)">79.5%</span><span class="day-sub-info">0 inc</span></div>
+              <div class="day-24h-strip"><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span></div>
+            </div>
+
+            <!-- Sep 13 -->
+            <div class="day-cell" data-day="13" data-date="Sun, Sep 13" data-hosts="16" data-pct="79.5%">
+              <div class="day-top-row"><span class="day-number">13</span><span class="day-incident-chip chip-crit">16h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--critical)">79.5%</span><span class="day-sub-info">0 inc</span></div>
+              <div class="day-24h-strip"><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span></div>
+            </div>
+
+            <!-- Sep 14 (Selected by default) -->
+            <div class="day-cell is-selected" data-day="14" data-date="Mon, Sep 14" data-hosts="16" data-pct="80.47%">
+              <div class="day-top-row"><span class="day-number">14</span><span class="day-incident-chip chip-crit">16h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--critical)">80.5%</span><span class="day-sub-info" style="color:var(--critical)">1 inc (14h)</span></div>
+              <div class="day-24h-strip">
+                <span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-spike" title="14:15 Node Spike"></span><span class="strip-hour-tick tick-spike"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span>
+              </div>
+            </div>
+
+            <!-- Sep 15 -->
+            <div class="day-cell" data-day="15" data-date="Tue, Sep 15" data-hosts="15" data-pct="80.8%">
+              <div class="day-top-row"><span class="day-number">15</span><span class="day-incident-chip chip-crit">15h</span></div>
+              <div class="day-middle-row"><span class="day-pct-val" style="color:var(--critical)">80.8%</span><span class="day-sub-info">0 inc</span></div>
+              <div class="day-24h-strip"><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span><span class="strip-hour-tick tick-chronic"></span></div>
+            </div>
+          </div>
+
+          <!-- Calendar Legend & Global Noise Mute -->
+          <div class="cal-footer-note">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span>Legend:</span>
+              <span style="display:inline-flex; align-items:center; gap:4px;"><span style="width:7px; height:7px; border-radius:50%; background:var(--critical);"></span> Active Spike</span>
+              <span style="display:inline-flex; align-items:center; gap:4px;"><span style="width:7px; height:7px; border-radius:50%; background:var(--chronic-gray);"></span> 24h Chronic</span>
+              <span style="display:inline-flex; align-items:center; gap:4px;"><span style="width:7px; height:7px; border-radius:50%; background:var(--success);"></span> Healthy</span>
+            </div>
+
+            <div class="noise-toggle-wrap">
+              <label class="noise-toggle-label" for="globalNoiseSwitch">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                <span>Mute 24h Chronic Noise</span>
+              </label>
+              <div class="switch-ui" id="globalNoiseSwitch" role="checkbox" aria-checked="false" tabindex="0"></div>
+            </div>
+          </div>
+        </section>
+
+
+        <!-- =====================================================
+             CONCEPT 1: THE NOC FLIGHT RECORDER (DUAL SCRUBBER)
+             ===================================================== -->
+        <section class="concept-panel-section active" id="concept-flight">
+          <div class="inspector-card">
+            <div class="inspector-header">
+              <div class="inspector-title-group">
+                <span class="selected-date-badge" id="c1DateDisplay">Mon, Sep 14, 2026</span>
+                <span class="meta-pill pill-crit" id="c1PillStatus">1 Active Incident Spike</span>
+                <span class="meta-pill pill-neutral" id="c1PillHosts">16 Total Down Hosts</span>
+              </div>
+
+              <div style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">
+                <kbd>&larr;</kbd> <kbd>&rarr;</kbd> to scrub hours
+              </div>
+            </div>
+
+            <!-- Flight Recorder Scrubber Box -->
+            <div class="chrono-flight-box">
+              <div class="flight-head-row">
+                <span><strong>24-Hour Binned Outage Rail</strong> (UTC)</span>
+                <span id="c1ScrubberReadout">Selected: <strong>All 24 Hours</strong></span>
+              </div>
+
+              <!-- 24-Hour Interactive Bar Track -->
+              <div class="flight-timeline-rail" id="c1TrackRail" title="Click or hover any hour to inspect its exact outage delta">
+                <!-- Dynamically populated 24 hours -->
+              </div>
+
+              <!-- Hour Markers -->
+              <div class="flight-hour-markers" id="c1HourMarkers">
+                <!-- 00h to 23h labels -->
+              </div>
+
+              <!-- Delta State Callout HUD -->
+              <div class="flight-delta-hud">
+                <div class="hud-title-col">
+                  <span class="hud-hour-title" id="c1HudHour">14:00 – 15:00 UTC</span>
+                  <span class="hud-hour-sub" id="c1HudSub">Peak incident window</span>
+                </div>
+                <div class="hud-kpi-item">
+                  <span class="hud-kpi-val" style="color:var(--critical)" id="c1HudNewDrops">+1 Host</span>
+                  <span class="hud-kpi-lbl">New In Hour</span>
+                </div>
+                <div class="hud-kpi-item">
+                  <span class="hud-kpi-val" style="color:var(--success)" id="c1HudRecoveries">0</span>
+                  <span class="hud-kpi-lbl">Recovered</span>
+                </div>
+                <div class="hud-kpi-item">
+                  <span class="hud-kpi-val" style="color:var(--text-muted)" id="c1HudChronic">15 Hosts</span>
+                  <span class="hud-kpi-lbl">Chronic Baseline</span>
+                </div>
+                <div>
+                  <button class="tool-btn active" id="c1BtnResetHour" style="font-size:11px; padding:3px 10px;">Reset to 24h</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Filter & Search Bar -->
+            <div class="table-controls-bar">
+              <div class="table-chips" id="c1FilterChips">
+                <button class="filter-chip active" data-filter="all">All (<span id="c1CountAll">16</span>)</button>
+                <button class="filter-chip" data-filter="spike">Active Spikes (<span id="c1CountSpike">1</span>)</button>
+                <button class="filter-chip" data-filter="chronic">Chronic (<span id="c1CountChronic">15</span>)</button>
+              </div>
+
+              <div class="search-wrap">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" placeholder="Filter host IP..." id="c1SearchInput">
+              </div>
+            </div>
+
+            <!-- Dynamic Host Table -->
+            <div class="prod-table-card">
+              <div class="prod-thead">
+                <div>Target Host &amp; Probe</div>
+                <div>Outage Window</div>
+                <div>Downtime</div>
+                <div>Category</div>
+                <div style="text-align:right">Action</div>
+              </div>
+              <div id="c1HostRowsList">
+                <!-- Populated via JS -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+
+        <!-- =====================================================
+             CONCEPT 2: TOPOLOGY CASCADE & INCIDENT MATRIX
+             ===================================================== -->
+        <section class="concept-panel-section" id="concept-topology">
+          <div class="inspector-card">
+            <div class="inspector-header">
+              <div class="inspector-title-group">
+                <span class="selected-date-badge">Topology Cascade Matrix</span>
+                <span class="meta-pill pill-crit">Root-Cause Correlated</span>
+              </div>
+              <span style="font-size:11.5px; color:var(--text-secondary);">Subnet &amp; Rack Breakdown</span>
+            </div>
+
+            <div class="topology-container">
+              <!-- Active Incident Correlated Banner -->
+              <div class="incident-focus-card">
+                <div class="focus-left">
+                  <div class="focus-alert-icon">!</div>
+                  <div>
+                    <div class="focus-title">Incident #INC-9402: Probe Dropout</div>
+                    <div class="focus-subtitle">
+                      Subnet <strong>192.168.9.0/24</strong> (Rack-B Core). Started at 14:15:20 UTC · Lasted 1h 30m.
+                    </div>
+                  </div>
+                </div>
+
+                <div class="focus-kpis">
+                  <div class="hud-kpi-item">
+                    <span class="hud-kpi-val" style="color:var(--critical)">1 Host</span>
+                    <span class="hud-kpi-lbl">Correlated Drops</span>
+                  </div>
+                  <div class="hud-kpi-item">
+                    <span class="hud-kpi-val" style="color:var(--warning)">ICMP 100%</span>
+                    <span class="hud-kpi-lbl">Packet Loss</span>
+                  </div>
+                  <div class="hud-kpi-item">
+                    <span class="hud-kpi-val">15:45 UTC</span>
+                    <span class="hud-kpi-lbl">Auto-Recovered</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Subnet Rows -->
+              <div class="topology-row-card">
+                <div class="topo-head">
+                  <div class="topo-name-block">
+                    <span class="topo-name">192.168.9.0/24 — Core Applications</span>
+                    <span class="topo-badge" style="color:var(--critical); background:var(--critical-bg)">1 Incident Spike (14h)</span>
+                  </div>
+                  <span style="font-size:10px; font-family:var(--font-mono); color:var(--text-muted);">24h Strip</span>
+                </div>
+                <div class="topo-track-24" id="c2TrackSubnet1"></div>
+              </div>
+
+              <div class="topology-row-card">
+                <div class="topo-head">
+                  <div class="topo-name-block">
+                    <span class="topo-name">10.20.0.0/16 — DMZ Edge Gateways</span>
+                    <span class="topo-badge" style="color:var(--success); background:var(--success-bg)">100% Healthy</span>
+                  </div>
+                  <span style="font-size:10px; font-family:var(--font-mono); color:var(--text-muted);">24h Strip</span>
+                </div>
+                <div class="topo-track-24">
+                  <span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span><span class="topo-cell-hour"></span>
+                </div>
+              </div>
+
+              <!-- Collapsible Chronic Baseline Section -->
+              <div class="chronic-accordion-wrap">
+                <button class="chronic-accordion-toggle" id="btnToggleChronicSection" type="button">
+                  <span>&#9662; 15 Chronic Decommissioned Targets (Offline 24/7)</span>
+                  <span style="font-family:var(--font-mono); font-size:10.5px;">Quarantined</span>
+                </button>
+                <div id="chronicSectionBody" style="display:none; padding:10px 14px; background:var(--bg-surface-3);">
+                  <div style="font-size:11.5px; color:var(--text-muted); margin-bottom:6px;">
+                    These 15 hardware targets have been offline continuously. They do not represent daily operational degradation.
+                  </div>
+                  <div id="c2ChronicHostsList" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Filtered Table for Concept 2 -->
+            <div class="prod-table-card">
+              <div class="prod-thead">
+                <div>Target Host &amp; Subnet</div>
+                <div>Outage Window</div>
+                <div>Downtime</div>
+                <div>Assessment</div>
+                <div style="text-align:right">Action</div>
+              </div>
+              <div id="c2HostRowsList"></div>
+            </div>
+          </div>
+        </section>
+
+
+        <!-- =====================================================
+             CONCEPT 3: GANTT WATERFALL & CONCURRENT TIMELINE
+             ===================================================== -->
+        <section class="concept-panel-section" id="concept-gantt">
+          <div class="inspector-card">
+            <div class="inspector-header">
+              <div class="inspector-title-group">
+                <span class="selected-date-badge">Continuous Gantt Swimlanes</span>
+                <span class="meta-pill pill-neutral">Synchronized Time Needle</span>
+              </div>
+              <span style="font-size:11.5px; color:var(--text-muted);">Hover to scrub needle</span>
+            </div>
+
+            <!-- Master Gantt Interactive Area -->
+            <div class="gantt-master-wrap" id="ganttMasterBox">
+              <div class="gantt-needle-line" id="ganttNeedleLine" style="left: 62%;">
+                <div class="gantt-needle-hud" id="ganttNeedleHud">14:15 UTC · 16 Down</div>
+              </div>
+
+              <div class="gantt-concurrency-chart">
+                <div style="position:absolute; left:-130px; top:10px; font-family:var(--font-mono); font-size:9.5px; color:var(--text-muted); width:120px;">
+                  Concurrent Down &rarr;
+                </div>
+                <svg class="concurrency-curve-svg" preserveAspectRatio="none" viewBox="0 0 100 30" id="ganttSvgCurve">
+                  <path d="M 0,20 L 58,20 L 59,5 L 66,5 L 67,20 L 100,20" fill="none" stroke="rgba(56, 189, 248, 0.8)" stroke-width="2"/>
+                  <path d="M 0,20 L 58,20 L 59,5 L 66,5 L 67,20 L 100,20 L 100,30 L 0,30 Z" fill="rgba(56, 189, 248, 0.15)"/>
+                </svg>
+              </div>
+
+              <div class="gantt-time-ruler">
+                <span>00:00</span><span>04:00</span><span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span><span>24:00</span>
+              </div>
+
+              <div class="gantt-swimlanes-list" id="ganttLanesContainer"></div>
+            </div>
+
+            <!-- Gantt Host Table -->
+            <div class="prod-table-card">
+              <div class="prod-thead">
+                <div>Target Host</div>
+                <div>Outage Window</div>
+                <div>Downtime</div>
+                <div>Concurrent State</div>
+                <div style="text-align:right">Action</div>
+              </div>
+              <div id="c3HostRowsList"></div>
+            </div>
+          </div>
+        </section>
+
+
+        <!-- =====================================================
+             CONCEPT 4: HOURLY SPLIT-CARD LEDGER (AUDIT ACCORDION)
+             ===================================================== -->
+        <section class="concept-panel-section" id="concept-ledger">
+          <div class="inspector-card">
+            <div class="inspector-header">
+              <div class="inspector-title-group">
+                <span class="selected-date-badge">Hourly Split-Card Ledger</span>
+                <span class="meta-pill pill-crit">Audit Trail</span>
+              </div>
+              <span style="font-size:11.5px; color:var(--text-secondary);">Steady hours collapsed</span>
+            </div>
+
+            <!-- Ledger Accordion List -->
+            <div class="ledger-container" id="ledgerAccordionList">
+              <div class="ledger-hour-card">
+                <div class="ledger-card-header">
+                  <div class="ledger-hour-title">
+                    <span class="ledger-time-text">00:00 – 13:00 UTC</span>
+                    <span class="meta-pill pill-neutral">13 Quiet Hours</span>
+                  </div>
+                  <span style="font-size:11.5px; color:var(--text-muted);">Steady State · 15 Chronic Baseline</span>
+                </div>
+              </div>
+
+              <!-- Hour 14:00 (Incident Hour) -->
+              <div class="ledger-hour-card has-incident is-expanded">
+                <div class="ledger-card-header">
+                  <div class="ledger-hour-title">
+                    <span class="ledger-time-text" style="color:var(--critical)">14:00 – 15:00 UTC</span>
+                    <span class="meta-pill pill-crit">⚠️ Active Incident (+1 Host Drop)</span>
+                  </div>
+                  <span style="font-size:11.5px; color:var(--critical); font-weight:600;">16 Hosts Down</span>
+                </div>
+
+                <div class="ledger-detail-panel">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+                    <div>
+                      <strong style="color:var(--text-primary); font-size:12.5px;">Incident Log at 14:15 UTC</strong>
+                      <p style="font-size:11px; color:var(--text-secondary);">Host 192.168.9.102 dropped offline during ICMP cycle.</p>
+                    </div>
+                    <span class="status-tag tag-spike">Severity: Warning</span>
+                  </div>
+
+                  <div class="terminal-log-box">
+                    [14:15:18] probe_icmp_duration_seconds{instance="192.168.9.102"} timeout=5s<br>
+                    [14:15:23] ERROR: Destination Host Unreachable (ICMP Type 3, Code 1)<br>
+                    [14:15:23] Alertmanager dispatched -> #noc-alerts-sev2<br>
+                    [15:45:10] RECOVERY: Probe succeeded (duration=1.2ms, packets_rx=5/5)
+                  </div>
+                </div>
+              </div>
+
+              <!-- Hour 15:00 -->
+              <div class="ledger-hour-card has-incident">
+                <div class="ledger-card-header">
+                  <div class="ledger-hour-title">
+                    <span class="ledger-time-text">15:00 – 16:00 UTC</span>
+                    <span class="meta-pill" style="background:var(--success-bg); color:var(--success); border:1px solid var(--success-border)">Auto-Recovery 15:45</span>
+                  </div>
+                  <span style="font-size:11.5px; color:var(--success);">Returned to 15 baseline</span>
+                </div>
+              </div>
+
+              <!-- Hour 16:00 to 24:00 -->
+              <div class="ledger-hour-card">
+                <div class="ledger-card-header">
+                  <div class="ledger-hour-title">
+                    <span class="ledger-time-text">16:00 – 24:00 UTC</span>
+                    <span class="meta-pill pill-neutral">8 Quiet Hours</span>
+                  </div>
+                  <span style="font-size:11.5px; color:var(--text-muted);">Steady State · 0 Alerts</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ledger Table -->
+            <div class="prod-table-card">
+              <div class="prod-thead">
+                <div>Target Host</div>
+                <div>Incident Timing</div>
+                <div>Duration</div>
+                <div>Audit Status</div>
+                <div style="text-align:right">Action</div>
+              </div>
+              <div id="c4HostRowsList"></div>
+            </div>
+          </div>
+        </section>
+
+
+        <!-- =====================================================
+             CONCEPT 5: SEGMENTED HOURLY MATRIX & SLIDE DRAWER
+             ===================================================== -->
+        <section class="concept-panel-section" id="concept-drawer">
+          <div class="inspector-card">
+            <div class="inspector-header">
+              <div class="inspector-title-group">
+                <span class="selected-date-badge">24 Segmented Hour Pills</span>
+                <span class="meta-pill pill-neutral">Slide Drawer</span>
+              </div>
+              <span style="font-size:11.5px; color:var(--accent);">Click hour to open drawer</span>
+            </div>
+
+            <!-- 24 Segmented Hour Buttons -->
+            <div class="hourly-segmented-bar" id="c5SegmentedBar"></div>
+
+            <!-- Main Day Summary Card in Concept 5 -->
+            <div style="background:var(--bg-surface-3); border:1px solid var(--border-subtle); border-radius:var(--r-sm); padding:14px; margin-bottom:16px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                  <h4 style="font-size:13.5px; font-weight:700; color:var(--text-primary);" id="c5SelectedHourTitle">Hour 14:00 UTC Selected</h4>
+                  <p style="font-size:11.5px; color:var(--text-secondary); margin-top:2px;">
+                    1 Active incident spike detected. Inspect telemetry in drawer.
+                  </p>
+                </div>
+                <button class="tool-btn active" id="btnOpenDrawer" style="padding:5px 12px; font-size:11.5px;">
+                  Open Hour Drawer &rarr;
+                </button>
+              </div>
+            </div>
+
+            <!-- Table -->
+            <div class="prod-table-card">
+              <div class="prod-thead">
+                <div>Target Host</div>
+                <div>Outage Window</div>
+                <div>Downtime</div>
+                <div>Classification</div>
+                <div style="text-align:right">Action</div>
+              </div>
+              <div id="c5HostRowsList"></div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ── SLIDE-OVER TELEMETRY DRAWER (CONCEPT 5) ─────────── -->
+  <div class="drawer-overlay" id="drawerOverlay"></div>
+  <aside class="slide-drawer" id="slideDrawer">
+    <div class="drawer-header">
+      <div class="drawer-title-group">
+        <h3 id="drawerHourHeading">Hour 14:00 – 15:00 UTC Diagnostics</h3>
+        <p>Telemetry, packet loss and root-cause logs</p>
+      </div>
+      <button class="drawer-close-btn" id="btnCloseDrawer" aria-label="Close Drawer">&times;</button>
+    </div>
+
+    <div class="drawer-body">
+      <!-- Quick Metric Counters -->
+      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px;">
+        <div class="telemetry-card">
+          <div style="font-size:10.5px; color:var(--text-muted);">Total Down</div>
+          <div style="font-size:17px; font-weight:700; color:var(--critical);" id="drawerDownCount">16</div>
+        </div>
+        <div class="telemetry-card">
+          <div style="font-size:10.5px; color:var(--text-muted);">New Incident</div>
+          <div style="font-size:17px; font-weight:700; color:var(--critical);">+1 Host</div>
+        </div>
+        <div class="telemetry-card">
+          <div style="font-size:10.5px; color:var(--text-muted);">SLA in Hour</div>
+          <div style="font-size:17px; font-weight:700; color:var(--warning);">78.4%</div>
+        </div>
+      </div>
+
+      <!-- Active Incidents In this Hour -->
+      <div>
+        <h4 style="font-size:12.5px; font-weight:700; margin-bottom:6px; color:var(--text-primary);">
+          Active Incidents Starting in This Hour:
+        </h4>
+        <div class="telemetry-card" style="border-color:var(--critical-border);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div>
+              <div style="font-family:var(--font-mono); font-weight:700; font-size:12.5px; color:var(--text-primary);">
+                192.168.9.102
+              </div>
+              <div style="font-size:10.5px; color:var(--text-muted);">blackbox-ping-internal · ICMP Probe</div>
+            </div>
+            <span class="status-tag tag-spike">Incident Flap</span>
+          </div>
+          <div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">
+            Failure Window: <strong>14:15:20 &rarr; 15:45:10 UTC (1h 30m)</strong><br>
+            Root Cause: <em>No response to ICMP Echo (100% loss)</em>
+          </div>
+        </div>
+      </div>
+
+      <!-- 15 Chronic Baseline Hosts in this Hour -->
+      <div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <h4 style="font-size:12.5px; font-weight:700; color:var(--text-secondary);">
+            Chronic 24h Baseline Hosts (15):
+          </h4>
+          <span style="font-size:10.5px; color:var(--text-muted);">Offline all day</span>
+        </div>
+        <div style="max-height:140px; overflow-y:auto; border:1px solid var(--border-subtle); border-radius:var(--r-sm); padding:8px 10px; font-family:var(--font-mono); font-size:10.5px; color:var(--text-muted); background:var(--bg-surface-3);">
+          192.168.9.101 &bull; 192.168.9.17 &bull; 192.168.9.187 &bull; 192.168.9.203 &bull; 192.168.9.210 &bull; 192.168.9.250 &bull; 192.168.9.35 &bull; 192.168.9.40 &bull; 192.168.9.48 &bull; 192.168.9.52 &bull; 192.168.9.60 &bull; 192.168.9.71 &bull; 192.168.9.83 &bull; 192.168.9.92 &bull; 192.168.9.99
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div style="display:flex; gap:8px; margin-top:auto;">
+        <button class="tool-btn active" style="flex:1; padding:7px; justify-content:center;">
+          View in Prometheus Graph
+        </button>
+        <button class="tool-btn" style="flex:1; padding:7px; justify-content:center;" onclick="alert('Incident post-mortem template copied!')">
+          Copy Incident MD
+        </button>
+      </div>
+    </div>
+  </aside>
+
+
+  <!-- =====================================================
+       CLIENT-SIDE JAVASCRIPT & DATA CONTROLLER
+       ===================================================== -->
+  <script>
+    const chronicHosts = [
+      { ip: "192.168.9.101", name: "node-infra-01", job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" },
+      { ip: "192.168.9.17",  name: "node-backup-02", job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" },
+      { ip: "192.168.9.187", name: "node-db-rep03",  job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" },
+      { ip: "192.168.9.203", name: "node-san-vol01", job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" },
+      { ip: "192.168.9.210", name: "node-san-vol02", job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" },
+      { ip: "192.168.9.250", name: "node-gw-legacy", job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" },
+      { ip: "192.168.9.35",  name: "node-worker-08", job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" },
+      { ip: "192.168.9.40",  name: "node-worker-12", job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" },
+      { ip: "192.168.9.48",  name: "node-worker-15", job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" },
+      { ip: "192.168.9.52",  name: "node-worker-18", job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" },
+      { ip: "192.168.9.60",  name: "node-api-int01", job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" },
+      { ip: "192.168.9.71",  name: "node-api-int04", job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" },
+      { ip: "192.168.9.83",  name: "node-metrics-02",job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" },
+      { ip: "192.168.9.92",  name: "node-ingress-02",job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" },
+      { ip: "192.168.9.99",  name: "node-auth-ldap",  job: "ICMP Ping", interval: "00:00 – 24:00", startH: 0, endH: 24, dur: "24h 00m", type: "chronic", status: "24h Outage" }
+    ];
+
+    const dayScenarios = {
+      "14": {
+        dateStr: "Mon, Sep 14, 2026",
+        pct: "80.47%",
+        spikes: [
+          { ip: "192.168.9.102", name: "node-k8s-master-02", job: "ICMP Ping", interval: "14:15 – 15:45", startH: 14, endH: 15, dur: "1h 30m", type: "spike", status: "Active Spike (14h)" }
+        ],
+        hourlyDistribution: [15,15,15,15,15,15,15,15,15,15,15,15,15,15,16,16,15,15,15,15,15,15,15,15],
+        peakHour: 14
+      },
+      "10": {
+        dateStr: "Thu, Sep 10, 2026",
+        pct: "81.50%",
+        spikes: [
+          { ip: "192.168.9.102", name: "node-k8s-master-02", job: "ICMP Ping", interval: "09:10 – 11:30", startH: 9, endH: 11, dur: "2h 20m", type: "spike", status: "Cascade Outage" },
+          { ip: "192.168.9.105", name: "node-app-worker-01", job: "ICMP Ping", interval: "09:10 – 11:30", startH: 9, endH: 11, dur: "2h 20m", type: "spike", status: "Cascade Outage" },
+          { ip: "192.168.9.106", name: "node-app-worker-02", job: "ICMP Ping", interval: "09:10 – 11:30", startH: 9, endH: 11, dur: "2h 20m", type: "spike", status: "Cascade Outage" },
+          { ip: "192.168.9.107", name: "node-app-worker-03", job: "ICMP Ping", interval: "09:10 – 11:30", startH: 9, endH: 11, dur: "2h 20m", type: "spike", status: "Cascade Outage" }
+        ],
+        hourlyDistribution: [15,15,15,15,15,15,15,15,15,64,64,64,15,15,15,15,15,15,15,15,15,15,15,15],
+        peakHour: 9
+      },
+      "6": {
+        dateStr: "Sun, Sep 6, 2026",
+        pct: "88.50%",
+        spikes: [
+          { ip: "192.168.9.22", name: "node-backup-agent", job: "ICMP Ping", interval: "03:00 – 04:30", startH: 3, endH: 4, dur: "1h 30m", type: "spike", status: "Backup Flap" },
+          { ip: "192.168.9.23", name: "node-backup-vault", job: "ICMP Ping", interval: "03:00 – 04:30", startH: 3, endH: 4, dur: "1h 30m", type: "spike", status: "Backup Flap" },
+          { ip: "192.168.9.24", name: "node-backup-sync",  job: "ICMP Ping", interval: "03:00 – 04:30", startH: 3, endH: 4, dur: "1h 30m", type: "spike", status: "Backup Flap" }
+        ],
+        hourlyDistribution: [15,15,15,18,18,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15],
+        peakHour: 3
+      }
+    };
+
+    let activeDay = "14";
+    let activeHourFilter = null;
+    let muteNoise = false;
+    let activeConcept = "concept-flight";
+    let audioEnabled = true;
+    let audioCtx = null;
+
+    function playHaptic(freq = 600, dur = 0.035, type = 'sine') {
+      if (!audioEnabled) return;
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + dur);
+        gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + dur);
+      } catch (e) {}
+    }
+
+    function getCurScenario() {
+      return dayScenarios[activeDay] || dayScenarios["14"];
+    }
+
+    function getAllHostsForDay() {
+      const scen = getCurScenario();
+      return [...scen.spikes, ...chronicHosts];
+    }
+
+    function getFilteredHosts(typeFilter = 'all', searchQ = '') {
+      let list = getAllHostsForDay();
+
+      if (muteNoise) {
+        list = list.filter(h => h.type !== 'chronic');
+      }
+
+      if (activeHourFilter !== null) {
+        list = list.filter(h => h.startH <= activeHourFilter && h.endH >= activeHourFilter);
+      }
+
+      if (typeFilter === 'spike') {
+        list = list.filter(h => h.type === 'spike');
+      } else if (typeFilter === 'chronic') {
+        list = list.filter(h => h.type === 'chronic');
+      }
+
+      if (searchQ) {
+        const q = searchQ.toLowerCase().trim();
+        list = list.filter(h => h.ip.includes(q) || h.name.toLowerCase().includes(q) || h.job.toLowerCase().includes(q));
+      }
+
+      return list;
+    }
+
+    function renderHostRows(containerId, list) {
+      const el = document.getElementById(containerId);
+      if (!el) return;
+
+      if (!list || list.length === 0) {
+        el.innerHTML = `
+          <div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 12px;">
+            No affected hosts match current filter.
+          </div>
+        `;
+        return;
+      }
+
+      el.innerHTML = list.map(h => {
+        const isSpike = h.type === 'spike';
+        const tagClass = isSpike ? 'tag-spike' : 'tag-chronic';
+        const rowClass = isSpike ? 'row-spike' : 'row-chronic';
+
+        return `
+          <div class="prod-trow ${rowClass}">
+            <div class="cell-target">
+              <span class="cell-ip">
+                ${h.ip}
+                ${isSpike ? '<span style="width:5px; height:5px; border-radius:50%; background:var(--critical);"></span>' : ''}
+              </span>
+              <span class="cell-hostname">${h.name} &bull; ${h.job}</span>
+            </div>
+            <div class="cell-interval">${h.interval}</div>
+            <div class="cell-downtime">${h.dur}</div>
+            <div><span class="status-tag ${tagClass}">${h.status}</span></div>
+            <div class="cell-actions">
+              <button class="btn-action-icon" title="Copy IP" onclick="navigator.clipboard.writeText('${h.ip}'); playHaptic(800);">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+              <button class="btn-action-icon" title="View Telemetry" onclick="openDrawerForHost('${h.ip}')">
+                &rarr;
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    /* ── CONCEPT 1: FLIGHT RECORDER ──────────────────────── */
+    function renderConcept1() {
+      const scen = getCurScenario();
+      document.getElementById('c1DateDisplay').textContent = scen.dateStr;
+      
+      const track = document.getElementById('c1TrackRail');
+      const hourLabels = document.getElementById('c1HourMarkers');
+      track.innerHTML = '';
+      hourLabels.innerHTML = '';
+
+      scen.hourlyDistribution.forEach((cnt, h) => {
+        const col = document.createElement('div');
+        col.className = 'flight-hour-col';
+        if (activeHourFilter === h) col.classList.add('is-active-hour');
+
+        const isPeak = h === scen.peakHour && scen.spikes.length > 0;
+        const maxH = 64;
+        const barHeightPct = Math.max(12, Math.min(100, (cnt / maxH) * 100));
+
+        const spikeCount = isPeak ? scen.spikes.length : 0;
+        const chronicCount = Math.max(0, cnt - spikeCount);
+
+        let innerBar = '';
+        if (spikeCount > 0) {
+          innerBar += `<div class="bar-seg-spike" style="height:${(spikeCount/cnt)*100}%;"></div>`;
+        }
+        innerBar += `<div class="bar-seg-chronic" style="height:${(chronicCount/cnt)*100}%;"></div>`;
+
+        col.innerHTML = `
+          ${isPeak ? '<span class="flight-recover-pip"></span>' : ''}
+          <div class="flight-bar-stacked" style="height:${barHeightPct}%;">${innerBar}</div>
+        `;
+
+        col.addEventListener('click', () => {
+          selectFlightHour(h);
+        });
+
+        track.appendChild(col);
+
+        const lbl = document.createElement('span');
+        lbl.textContent = h % 3 === 0 ? `${h}h` : '·';
+        hourLabels.appendChild(lbl);
+      });
+
+      updateConcept1HUD();
+    }
+
+    function selectFlightHour(h) {
+      if (activeHourFilter === h) {
+        activeHourFilter = null;
+      } else {
+        activeHourFilter = h;
+      }
+      playHaptic(activeHourFilter !== null ? 700 : 500);
+      renderAllActiveViews();
+    }
+
+    function updateConcept1HUD() {
+      const scen = getCurScenario();
+      const hudHour = document.getElementById('c1HudHour');
+      const hudSub = document.getElementById('c1HudSub');
+      const hudDrops = document.getElementById('c1HudNewDrops');
+      const hudRec = document.getElementById('c1HudRecoveries');
+      const hudChronic = document.getElementById('c1HudChronic');
+      const readout = document.getElementById('c1ScrubberReadout');
+
+      if (activeHourFilter === null) {
+        readout.innerHTML = `Selected: <strong>All 24 Hours (Full Fleet)</strong>`;
+        hudHour.textContent = "All 24 Hours";
+        hudSub.textContent = "Entire day overview";
+        hudDrops.textContent = `+${scen.spikes.length} Hosts`;
+        hudRec.textContent = `${scen.spikes.length} Recovered`;
+        hudChronic.textContent = "15 Baseline";
+      } else {
+        const nextH = activeHourFilter + 1;
+        const hStr = `${activeHourFilter.toString().padStart(2, '0')}:00 – ${nextH.toString().padStart(2, '0')}:00 UTC`;
+        readout.innerHTML = `Selected: <strong>Hour ${hStr}</strong>`;
+        hudHour.textContent = hStr;
+
+        const isIncidentHour = activeHourFilter === scen.peakHour;
+        if (isIncidentHour) {
+          hudSub.textContent = `Active incident window (+${scen.spikes.length} hosts)`;
+          hudDrops.textContent = `+${scen.spikes.length} Drops`;
+          hudRec.textContent = "0";
+        } else {
+          hudSub.textContent = "Steady state; no new dropouts";
+          hudDrops.textContent = "0 Drops";
+          hudRec.textContent = "0";
+        }
+        hudChronic.textContent = "15 Baseline";
+      }
+
+      const allList = getFilteredHosts('all');
+      document.getElementById('c1CountAll').textContent = allList.length;
+      document.getElementById('c1CountSpike').textContent = allList.filter(h => h.type === 'spike').length;
+      document.getElementById('c1CountChronic').textContent = allList.filter(h => h.type === 'chronic').length;
+
+      renderHostRows('c1HostRowsList', allList);
+    }
+
+    /* ── CONCEPT 2: TOPOLOGY MATRIX ──────────────────────── */
+    function renderConcept2() {
+      const scen = getCurScenario();
+      const track = document.getElementById('c2TrackSubnet1');
+      if (!track) return;
+      track.innerHTML = '';
+
+      for (let h = 0; h < 24; h++) {
+        const cell = document.createElement('div');
+        cell.className = 'topo-cell-hour';
+        if (h === scen.peakHour && scen.spikes.length > 0) {
+          cell.classList.add('is-cell-spike');
+          cell.title = `Hour ${h}:00 UTC - ${scen.spikes.length} host drops`;
+        } else {
+          cell.classList.add('is-cell-chronic');
+          cell.title = `Hour ${h}:00 UTC - Chronic baseline`;
+        }
+
+        cell.addEventListener('click', () => {
+          selectFlightHour(h);
+        });
+        track.appendChild(cell);
+      }
+
+      const chronicList = document.getElementById('c2ChronicHostsList');
+      if (chronicList) {
+        chronicList.innerHTML = chronicHosts.map(h => `
+          <span style="background:var(--bg-surface-2); border:1px solid var(--border-medium); padding:2px 7px; border-radius:var(--r-pill); font-size:10.5px; font-family:var(--font-mono);">
+            ${h.ip}
+          </span>
+        `).join('');
+      }
+
+      renderHostRows('c2HostRowsList', getFilteredHosts('all'));
+    }
+
+    /* ── CONCEPT 3: GANTT SWIMLANES ──────────────────────── */
+    function renderConcept3() {
+      const container = document.getElementById('ganttLanesContainer');
+      if (!container) return;
+      container.innerHTML = '';
+
+      const hosts = getAllHostsForDay();
+      hosts.forEach(h => {
+        const row = document.createElement('div');
+        row.className = 'gantt-swimlane-row';
+
+        let leftPct = 0;
+        let widthPct = 100;
+        const isSpike = h.type === 'spike';
+
+        if (isSpike) {
+          leftPct = (h.startH / 24) * 100;
+          widthPct = ((h.endH - h.startH + 0.5) / 24) * 100;
+        }
+
+        row.innerHTML = `
+          <div class="gantt-row-label" title="${h.ip}">
+            <span style="width:5px; height:5px; border-radius:50%; background:${isSpike ? 'var(--critical)' : 'var(--chronic-gray)'};"></span>
+            <span>${h.ip}</span>
+          </div>
+          <div class="gantt-track-lane">
+            <div class="gantt-outage-bar ${isSpike ? '' : 'bar-chronic'}" style="left:${leftPct}%; width:${widthPct}%;"></div>
+          </div>
+        `;
+        container.appendChild(row);
+      });
+
+      renderHostRows('c3HostRowsList', getFilteredHosts('all'));
+    }
+
+    /* ── CONCEPT 4 & 5 ───────────────────────────────────── */
+    function renderConcept4() {
+      renderHostRows('c4HostRowsList', getFilteredHosts('all'));
+    }
+
+    function renderConcept5() {
+      const scen = getCurScenario();
+      const bar = document.getElementById('c5SegmentedBar');
+      if (!bar) return;
+      bar.innerHTML = '';
+
+      for (let h = 0; h < 24; h++) {
+        const btn = document.createElement('div');
+        btn.className = 'seg-hour-btn';
+        if (activeHourFilter === h) btn.classList.add('active');
+
+        const isPeak = h === scen.peakHour && scen.spikes.length > 0;
+        btn.innerHTML = `
+          <span class="seg-hour-txt">${h.toString().padStart(2, '0')}</span>
+          <span class="seg-dot ${isPeak ? 'dot-crit' : 'dot-chronic'}"></span>
+        `;
+
+        btn.addEventListener('click', () => {
+          selectFlightHour(h);
+          document.getElementById('c5SelectedHourTitle').textContent = `Hour ${h.toString().padStart(2, '0')}:00 UTC Selected`;
+        });
+        bar.appendChild(btn);
+      }
+
+      renderHostRows('c5HostRowsList', getFilteredHosts('all'));
+    }
+
+    function renderAllActiveViews() {
+      renderConcept1();
+      renderConcept2();
+      renderConcept3();
+      renderConcept4();
+      renderConcept5();
+    }
+
+    /* ── WIDTH PRESET CONTROLLER ─────────────────────────── */
+    const widthButtons = {
+      "760": document.getElementById('btnWidth760'),
+      "880": document.getElementById('btnWidth880'),
+      "1200": document.getElementById('btnWidth1200')
+    };
+    const modalDialogPreview = document.getElementById('modalDialogPreview');
+    const dialogWidthBadge = document.getElementById('dialogWidthBadge');
+
+    function setModalWidth(pxWidth, activeBtn) {
+      document.documentElement.style.setProperty('--modal-max-width', `${pxWidth}px`);
+      Object.values(widthButtons).forEach(b => b.classList.remove('active'));
+      activeBtn.classList.add('active');
+      dialogWidthBadge.textContent = pxWidth === 760 ? `Width: 760px (Real Modal)` : `Width: ${pxWidth}px`;
+      playHaptic(650);
+    }
+
+    widthButtons["760"].addEventListener('click', function() { setModalWidth(760, this); });
+    widthButtons["880"].addEventListener('click', function() { setModalWidth(880, this); });
+    widthButtons["1200"].addEventListener('click', function() { setModalWidth(1200, this); });
+
+    /* ── EVENT BINDINGS ──────────────────────────────────── */
+    const conceptTabBtns = document.querySelectorAll('.concept-tab-btn');
+    const conceptSections = document.querySelectorAll('.concept-panel-section');
+
+    conceptTabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        conceptTabBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeConcept = btn.dataset.concept;
+
+        conceptSections.forEach(sec => {
+          sec.classList.toggle('active', sec.id === activeConcept);
+        });
+        playHaptic(750);
+      });
+    });
+
+    const masterDayCells = document.querySelectorAll('.day-cell:not(.is-empty)');
+    masterDayCells.forEach(cell => {
+      cell.addEventListener('click', () => {
+        masterDayCells.forEach(c => c.classList.remove('is-selected'));
+        cell.classList.add('is-selected');
+        const day = cell.dataset.day;
+        activeDay = dayScenarios[day] ? day : "14";
+        playHaptic(650);
+        renderAllActiveViews();
+      });
+    });
+
+    document.getElementById('btnDay14').addEventListener('click', function() { setSimDay("14", this); });
+    document.getElementById('btnDay10').addEventListener('click', function() { setSimDay("10", this); });
+    document.getElementById('btnDay6').addEventListener('click', function() { setSimDay("6", this); });
+
+    function setSimDay(d, btn) {
+      document.querySelectorAll('.toolbar-chip-group .tool-btn').forEach(b => {
+        if (b.id.startsWith('btnDay')) b.classList.remove('active');
+      });
+      btn.classList.add('active');
+      activeDay = d;
+      masterDayCells.forEach(c => c.classList.toggle('is-selected', c.dataset.day === d));
+      playHaptic(700);
+      renderAllActiveViews();
+    }
+
+    const noiseSwitch = document.getElementById('globalNoiseSwitch');
+    noiseSwitch.addEventListener('click', () => {
+      muteNoise = !muteNoise;
+      noiseSwitch.classList.toggle('is-checked', muteNoise);
+      noiseSwitch.setAttribute('aria-checked', muteNoise.toString());
+      playHaptic(muteNoise ? 850 : 450);
+      renderAllActiveViews();
+    });
+
+    const btnDark = document.getElementById('btnThemeDark');
+    const btnLight = document.getElementById('btnThemeLight');
+    btnDark.addEventListener('click', () => {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      btnDark.classList.add('active');
+      btnLight.classList.remove('active');
+      playHaptic(500);
+    });
+    btnLight.addEventListener('click', () => {
+      document.documentElement.setAttribute('data-theme', 'light');
+      btnLight.classList.add('active');
+      btnDark.classList.remove('active');
+      playHaptic(800);
+    });
+
+    const btnSound = document.getElementById('btnSoundToggle');
+    btnSound.addEventListener('click', function() {
+      audioEnabled = !audioEnabled;
+      this.classList.toggle('active', audioEnabled);
+      this.textContent = audioEnabled ? 'Haptics: ON' : 'Haptics: MUTED';
+      if (audioEnabled) playHaptic(800);
+    });
+
+    document.querySelectorAll('#c1FilterChips .filter-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#c1FilterChips .filter-chip').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const filter = btn.dataset.filter;
+        renderHostRows('c1HostRowsList', getFilteredHosts(filter, document.getElementById('c1SearchInput').value));
+        playHaptic(600);
+      });
+    });
+
+    document.getElementById('c1SearchInput').addEventListener('input', (e) => {
+      const activeFilter = document.querySelector('#c1FilterChips .filter-chip.active')?.dataset.filter || 'all';
+      renderHostRows('c1HostRowsList', getFilteredHosts(activeFilter, e.target.value));
+    });
+
+    document.getElementById('c1BtnResetHour').addEventListener('click', () => {
+      activeHourFilter = null;
+      renderAllActiveViews();
+      playHaptic(500);
+    });
+
+    const btnToggleChronic = document.getElementById('btnToggleChronicSection');
+    const chronicBody = document.getElementById('chronicSectionBody');
+    btnToggleChronic.addEventListener('click', () => {
+      const isOpen = chronicBody.style.display === 'block';
+      chronicBody.style.display = isOpen ? 'none' : 'block';
+      playHaptic(600);
+    });
+
+    const ganttBox = document.getElementById('ganttMasterBox');
+    const ganttNeedle = document.getElementById('ganttNeedleLine');
+    const ganttHud = document.getElementById('ganttNeedleHud');
+
+    ganttBox.addEventListener('mousemove', (e) => {
+      const rect = ganttBox.getBoundingClientRect();
+      const trackStart = 140 + 16;
+      const trackWidth = rect.width - trackStart - 16;
+      const x = Math.max(trackStart, Math.min(e.clientX - rect.left, trackStart + trackWidth));
+      const pct = (x - trackStart) / trackWidth;
+      const hour = Math.floor(pct * 24);
+
+      ganttNeedle.style.left = `${x}px`;
+      const scen = getCurScenario();
+      const isPeak = hour === scen.peakHour && scen.spikes.length > 0;
+      const downCount = isPeak ? 15 + scen.spikes.length : 15;
+      ganttHud.textContent = `${hour.toString().padStart(2, '0')}:00 UTC · ${downCount} Down`;
+    });
+
+    const slideDrawer = document.getElementById('slideDrawer');
+    const drawerOverlay = document.getElementById('drawerOverlay');
+    const btnCloseDrawer = document.getElementById('btnCloseDrawer');
+    const btnOpenDrawer = document.getElementById('btnOpenDrawer');
+
+    function openDrawer() {
+      slideDrawer.classList.add('is-open');
+      drawerOverlay.classList.add('is-open');
+      playHaptic(700);
+    }
+    function closeDrawer() {
+      slideDrawer.classList.remove('is-open');
+      drawerOverlay.classList.remove('is-open');
+      playHaptic(400);
+    }
+    btnOpenDrawer.addEventListener('click', openDrawer);
+    btnCloseDrawer.addEventListener('click', closeDrawer);
+    drawerOverlay.addEventListener('click', closeDrawer);
+
+    window.openDrawerForHost = function(ip) {
+      document.getElementById('drawerHourHeading').textContent = `Target Telemetry: ${ip}`;
+      openDrawer();
+    };
+
+    window.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT') return;
+      if (e.key >= '1' && e.key <= '5') {
+        const idx = parseInt(e.key, 10) - 1;
+        conceptTabBtns[idx]?.click();
+      } else if (e.key === 'ArrowRight') {
+        if (activeHourFilter === null) activeHourFilter = 0;
+        else activeHourFilter = Math.min(23, activeHourFilter + 1);
+        playHaptic(650);
+        renderAllActiveViews();
+      } else if (e.key === 'ArrowLeft') {
+        if (activeHourFilter === null) activeHourFilter = 23;
+        else activeHourFilter = Math.max(0, activeHourFilter - 1);
+        playHaptic(650);
+        renderAllActiveViews();
+      } else if (e.key.toLowerCase() === 't') {
+        if (document.documentElement.getAttribute('data-theme') === 'dark') {
+          btnLight.click();
+        } else {
+          btnDark.click();
+        }
+      } else if (e.key.toLowerCase() === 'n') {
+        noiseSwitch.click();
+      } else if (e.key === 'Escape') {
+        closeDrawer();
+        activeHourFilter = null;
+        renderAllActiveViews();
+      }
+    });
+
+    renderAllActiveViews();
+  </script>
+</body>
+</html>

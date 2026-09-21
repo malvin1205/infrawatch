@@ -1,0 +1,1151 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   AVAILABILITY BREAKDOWN (scoped to .avb)
+   Layout only: one scroll container, sticky header/footer, the fleet ring.
+   Colour + type come from the app-wide tokens (see the .avb rule below, which
+   re-points its local token names at the globals) so this modal matches every
+   other dialog and follows light/dark mode. Every selector is prefixed .avb —
+   nothing leaks out.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.avb {
+  /* This modal's local token names now just re-point to the app-wide tokens
+     so its colour composition and type match every other dialog. (It used to
+     ship a bespoke IBM Plex + teal theme that also ignored light mode.) The
+     .avb rules below reference these local names, so nothing else needs to
+     change and nothing leaks out of the modal. */
+  --bg-page: var(--bg);
+  --bg-panel: var(--surface);
+  --bg-surface: var(--surface-raised);
+  --bg-raised: var(--surface-hover);
+  --border: var(--border-strong);
+  --border-soft: var(--border-subtle);
+  --text-hi: var(--text-primary);
+  --text-mid: var(--text-secondary);
+  --text-low: var(--text-muted);
+  --warn: var(--warning);
+  --crit: var(--critical);
+  --ok: var(--success);
+  --avb-font-ui: var(--font);
+  --avb-font-mono: var(--font-mono);
+  /* --accent inherits the global accent */
+
+  font-family: var(--font);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  max-width: 1200px !important;
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.avb *,
+.avb *::before,
+.avb *::after { box-sizing: border-box; }
+
+/* ── Fixed chrome: header / footer ─────────────────────────────────────── */
+.avb .avail-modal-header {
+  flex: 0 0 auto;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 18px;
+}
+.avb .avail-modal-title {
+  font-family: var(--avb-font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: var(--text-hi);
+}
+.avb .avail-modal-subtitle { font-size: 11.5px; color: var(--text-mid); }
+.avb .avb-job-scope-pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-soft);
+  color: var(--accent, #38bdf8);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+.avb .modal-title-sub { color: var(--text-low); }
+.avb .avail-updating-badge {
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  color: var(--accent);
+  border-radius: 4px;
+  font-weight: 500;
+}
+.avb .avail-updating-spinner {
+  border-color: rgba(56, 189, 248, 0.3);
+  border-top-color: var(--accent);
+}
+.avb .avail-range-select {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-hi);
+  font-family: var(--avb-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+.avb .avail-range-select:hover { border-color: var(--border); background-color: var(--bg-raised); }
+.avb .avail-range-select:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.28);
+  outline: none;
+}
+.avb .icon-action {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-mid);
+  border-radius: 5px;
+}
+.avb .icon-action:hover { background: var(--bg-raised); color: var(--text-hi); }
+.avb .modal-close { color: var(--text-mid); }
+.avb .modal-close:hover { color: var(--text-hi); }
+
+.avb .avail-modal-footer {
+  flex: 0 0 auto;
+  background: var(--bg-page);
+  border-top: 1px solid var(--border);
+  color: var(--text-low);
+  font-size: 10.5px;
+  padding: 9px 18px;
+}
+.avb .avail-footer-link { color: var(--accent); }
+.avb .avail-footer-link:hover { color: var(--accent); }
+
+/* ── The one and only scroll container ─────────────────────────────────── */
+.avb .avb-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg-panel);
+  scrollbar-width: thin;
+  scrollbar-color: #2b3540 transparent;
+}
+.avb .avb-scroll::-webkit-scrollbar { width: 10px; }
+.avb .avb-scroll::-webkit-scrollbar-thumb {
+  background: #2b3540; border-radius: 6px; border: 3px solid var(--bg-panel);
+}
+/* kill every nested vertical scroll — the body and its lists just flow */
+.avb .avail-modal-body {
+  display: block;
+  overflow: visible;
+  max-height: none;
+  padding: 16px 18px 22px;
+  gap: 0;
+}
+.avb .avail-attention-list { overflow: visible; max-height: none; }
+/* Range switch (24h -> 30d etc) can take several seconds under a slow
+   Prometheus fan-out — dim + freeze the stale content so it reads as
+   "refreshing", not "hung". Transition is delayed on the way in so a fast
+   (cached) refresh never flashes it. */
+.avb .avail-modal-body.is-refreshing {
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 0.15s ease 0.3s;
+}
+/* wide audit table may scroll HORIZONTALLY only — never a second y-scrollbar */
+.avb .audit-table-responsive { overflow-x: auto; overflow-y: visible; }
+
+/* ── Sticky tab bar ───────────────────────────────────────────────────── */
+.avb .avail-subnav-bar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  margin: 0;
+  padding: 10px 18px;
+  gap: 6px;
+  background: var(--bg-panel);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+.avb .avail-subnav-btn {
+  font-family: var(--avb-font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-mid);
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 6px 12px;
+}
+.avb .avail-subnav-btn:hover { background: var(--bg-surface); color: var(--text-hi); }
+.avb .avail-subnav-btn.is-active {
+  color: var(--accent);
+  background: rgba(56, 189, 248, 0.08);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+.avb .avail-subnav-badge {
+  font-family: var(--avb-font-mono);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: rgba(227, 165, 61, 0.12);
+  border: 1px solid rgba(227, 165, 61, 0.35);
+  color: var(--warn);
+  border-radius: 4px;
+}
+/* One vertical rhythm for the whole pane: sections flow at a single gap,
+   no per-section margins stacking on top of each other. */
+.avb .avail-subnav-pane {
+  animation: avbPaneIn 0.18s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.avb .avail-subnav-pane > * { margin-top: 0; margin-bottom: 0; }
+.avb .avail-subnav-pane > .audit-divider { display: none; }
+@keyframes avbPaneIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── Section titles: thin vertical accent, sentence case ───────────────── */
+.avb .avb-sec-title {
+  font-family: var(--avb-font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-hi);
+  margin: 0;
+  padding-left: 9px;
+  border-left: 2px solid var(--accent);
+}
+.avb .avb-sec-titlewrap { min-width: 0; }
+.avb .avb-sec-titlewrap .avail-attention-subtitle {
+  padding-left: 11px;
+  color: var(--text-low);
+  font-size: 10.5px;
+}
+
+/* ── Hero grid ────────────────────────────────────────────────────────── */
+.avb .avail-hero-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 0; }
+.avb .avail-hero-card {
+  position: relative;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 15px;
+  box-shadow: none;
+}
+.avb .avail-hero-content { display: flex; flex-direction: column; gap: 0; }
+.avb .avail-hero-header { display: flex; align-items: center; gap: 5px; margin-bottom: 10px; }
+.avb .avail-hero-title {
+  font-family: var(--avb-font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-mid);
+}
+.avb .avail-info-btn { color: var(--text-low); }
+.avb .avail-info-btn:hover { color: var(--text-mid); }
+.avb .avail-hero-value {
+  font-family: var(--avb-font-mono);
+  font-size: 1.9rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text-hi);
+  line-height: 1;
+  margin: 0;
+}
+.avb .avail-hero-desc { font-size: 10.5px; color: var(--text-low); margin: 5px 0 0; }
+
+/* Fleet card — the single "bold moment": teal gradient strip on top edge */
+.avb .avail-hero-fleet::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  border-radius: 8px 8px 0 0;
+  background: linear-gradient(90deg, var(--accent) 0%, rgba(56, 189, 248, 0.35) 45%, transparent 100%);
+}
+.avb .avb-fleet-body { display: flex; align-items: center; gap: 14px; }
+.avb .avb-fleet-figures { min-width: 0; }
+.avb .avb-ring { flex: 0 0 auto; display: block; }
+.avb .avb-ring-track { stroke: var(--border); }
+.avb .avb-ring-value {
+  stroke: var(--accent);
+  transition: stroke-dashoffset 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Fleet "limited data" note */
+.avb .avail-hero-data-warning {
+  margin-top: 12px;
+  border-left: 2px solid var(--warn);
+  color: var(--text-mid);
+}
+.avb .avail-hero-data-warning .ahw-icon,
+.avb .avail-hero-data-warning .ahw-action { color: var(--warn); }
+.avb .avail-hero-data-warning .ahw-text { color: var(--text-mid); }
+
+/* Healthy Hosts — uptime/downtime split bar + legend */
+.avb .avb-splitbar {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--border);
+  margin: 12px 0 7px;
+}
+.avb .avb-splitbar-up { background: var(--ok); transition: width 0.4s ease; }
+.avb .avb-splitbar-down { background: var(--text-low); transition: width 0.4s ease; }
+.avb .avail-split-legend {
+  display: flex;
+  gap: 14px;
+  font-family: var(--avb-font-mono);
+  font-size: 10px;
+  color: var(--text-mid);
+  margin: 0;
+}
+.avb .avail-split-legend strong { color: var(--text-hi); font-weight: 500; }
+.avb .legend-dot { width: 6px; height: 6px; border-radius: 2px; }
+.avb .dot-up { background: var(--ok); }
+.avb .dot-down { background: var(--text-low); }
+
+/* ── Availability Trend (empty-state shell) ───────────────────────────── */
+.avb .avb-trend-section { margin: 0; }
+.avb .avb-trend-section .avb-sec-title { margin-bottom: 9px; }
+.avb .avb-trend-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px 8px;
+}
+.avb .avb-trend-plot {
+  position: relative;
+  height: 128px;
+  margin-left: 34px;
+  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.avb .avb-trend-grid { position: absolute; inset: 0; }
+.avb .avb-trend-grid span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--y);
+  border-top: 1px dashed rgba(35, 43, 53, 0.9);
+}
+.avb .avb-trend-grid span i {
+  position: absolute;
+  left: -34px;
+  top: -6px;
+  width: 30px;
+  text-align: right;
+  font-family: var(--avb-font-mono);
+  font-size: 9px;
+  font-style: normal;
+  color: var(--text-low);
+}
+.avb .avb-trend-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-align: center;
+  padding: 0 12px;
+}
+.avb .avb-trend-empty svg { color: var(--text-low); }
+.avb .avb-trend-empty p { margin: 4px 0 0; font-size: 11.5px; color: var(--text-mid); }
+.avb .avb-trend-empty span { font-size: 10px; color: var(--text-low); max-width: 320px; }
+.avb .avb-trend-svg-wrap {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.avb .avb-trend-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.avb .avb-trend-area { fill: var(--accent); opacity: 0.12; stroke: none; }
+.avb .avb-trend-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+/* SLA target reference line (audit 4.6) — dashed and in the critical colour so
+   it reads as the threshold being missed, never as another data series. */
+.avb .avb-trend-target {
+  stroke: var(--crit);
+  stroke-width: 1px;
+  stroke-dasharray: 4 3;
+  opacity: 0.75;
+}
+
+.avb .avb-trend-target-note {
+  margin-top: 2px;
+  color: var(--crit);
+  opacity: 0.85;
+}
+
+.avb .avb-trend-xaxis {
+  display: flex;
+  justify-content: space-between;
+  margin: 5px 0 0 34px;
+  font-family: var(--avb-font-mono);
+  font-size: 9px;
+  color: var(--text-low);
+}
+
+/* Interactive hover overlay (crosshair + dot + tooltip) */
+.avb .avb-trend-hover {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  z-index: 2;
+  cursor: crosshair;
+}
+.avb .avb-trend-hover .avb-trend-cross,
+.avb .avb-trend-hover .avb-trend-dot,
+.avb .avb-trend-hover .avb-trend-tip {
+  position: absolute;
+  opacity: 0;
+  transition: opacity 0.08s linear;
+  pointer-events: none;
+}
+.avb .avb-trend-hover.active .avb-trend-cross,
+.avb .avb-trend-hover.active .avb-trend-dot,
+.avb .avb-trend-hover.active .avb-trend-tip { opacity: 1; }
+.avb .avb-trend-cross {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  margin-left: -0.5px;
+  background: var(--accent);
+  opacity: 0.35;
+}
+.avb .avb-trend-dot {
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.2);
+}
+.avb .avb-trend-tip {
+  transform: translate(-50%, calc(-100% - 8px));
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: var(--bg-elevated, #1c2330);
+  border: 1px solid var(--border);
+  color: var(--text-high, #e6edf3);
+  font-family: var(--avb-font-mono);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+.avb .avb-trend-tip.flip-x { transform: translate(-100%, calc(-100% - 8px)); }
+.avb .avb-trend-tip.flip-y { transform: translate(-50%, 8px); }
+.avb .avb-trend-tip.flip-x.flip-y { transform: translate(-100%, 8px); }
+
+/* Persistent pin (set by clicking an Outage Rail event) — same shape as the
+   hover crosshair/dot/tip above, but stays visible without a pointer over
+   the chart, and never intercepts clicks itself. */
+.avb .avb-trend-pin { pointer-events: none; cursor: default; }
+.avb .avb-trend-pin.hidden { display: none; }
+.avb .avb-trend-pin:not(.hidden) .avb-trend-cross,
+.avb .avb-trend-pin:not(.hidden) .avb-trend-dot,
+.avb .avb-trend-pin:not(.hidden) .avb-trend-tip { opacity: 1; }
+.avb .avb-trend-pin .avb-trend-dot {
+  background: var(--text-hi, #e6edf3);
+  box-shadow: 0 0 0 3px rgba(230, 237, 243, 0.25);
+}
+.avb .avb-trend-pin .avb-trend-tip { border-color: var(--text-hi, #e6edf3); }
+
+/* Explicit drop/recovery markers on the Trend line — "the trend moved
+   because a host went down/came back" should never have to be inferred from
+   the slope alone, and each needs an actual mark to click, not just the
+   line's general vicinity. */
+.avb .avb-trend-recovery-tick {
+  stroke: var(--ok, #10b981);
+  stroke-width: 1px;
+  opacity: 0.35;
+}
+.avb .avb-trend-drop-tick {
+  stroke: var(--crit, #ef4444);
+  stroke-width: 1px;
+  opacity: 0.3;
+}
+
+/* ── Section header row (title + Reset zoom) — Trend and Outage Today ── */
+.avb .avb-sec-titlewrap-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+.avb .avb-sec-titlewrap-row .avb-sec-title { margin-bottom: 0; }
+.avb .avb-zoom-reset { flex: 0 0 auto; }
+
+/* Drag-to-zoom selection box, shared by the Trend chart and Outage Today
+   (_attachZoomDrag draws this into whichever plot element it's bound to). */
+.avb .avb-zoom-box {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(88, 166, 255, 0.16);
+  border-left: 1px solid var(--accent);
+  border-right: 1px solid var(--accent);
+  pointer-events: none;
+  z-index: 3;
+}
+.avb .avb-zoom-box.hidden { display: none; }
+.avb .avb-trend-plot { cursor: crosshair; }
+
+.avb .avb-trend-hint {
+  margin-top: 4px;
+  color: var(--text-low);
+  opacity: 0.75;
+}
+
+/* ── Event detail panel (click a Trend point) ──
+   Structured rows instead of a one-line tooltip: exact time, UP/DOWN state,
+   and every drop/recovery near the click with its host, start -> recovery
+   span, duration and this window's availability for that host. */
+.avb .avb-event-detail {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+}
+.avb .avb-evd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.avb .avb-evd-time {
+  font-family: var(--avb-font-mono);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-hi);
+}
+.avb .avb-evd-state {
+  font-family: var(--avb-font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  letter-spacing: 0.02em;
+}
+.avb .avb-evd-state.is-up { background: rgba(16, 185, 129, 0.15); color: var(--ok, #10b981); }
+.avb .avb-evd-state.is-down { background: rgba(239, 68, 68, 0.15); color: var(--crit, #ef4444); }
+.avb .avb-evd-incident-badge {
+  font-family: var(--avb-font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  letter-spacing: 0.03em;
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warn, #f59e0b);
+}
+.avb .avb-evd-sub { margin: 4px 0 0; font-size: 11px; color: var(--text-low); }
+.avb .avb-evd-more { font-size: 10.5px; color: var(--text-low); }
+.avb .avb-evd-rows { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+/* Secondary rows (other hosts changing near the same moment) sit visually
+   behind the primary — the one row that IS the clicked event — so there is
+   never doubt about which result belongs to the click itself. */
+.avb .avb-evd-rows-secondary { margin-top: 6px; opacity: 0.75; }
+.avb .avb-evd-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+}
+.avb .avb-evd-row.is-primary {
+  border-color: var(--accent, #6ea8ff);
+  box-shadow: 0 0 0 1px var(--accent, #6ea8ff) inset;
+}
+.avb .avb-evd-row-top { display: flex; align-items: center; gap: 6px; }
+.avb .avb-evd-badge {
+  flex: 0 0 auto;
+  font-family: var(--avb-font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+}
+.avb .avb-evd-badge.is-down { background: rgba(239, 68, 68, 0.15); color: var(--crit, #ef4444); }
+.avb .avb-evd-badge.is-rec { background: rgba(16, 185, 129, 0.15); color: var(--ok, #10b981); }
+.avb .avb-evd-host { flex: 1 1 auto; min-width: 0; font-size: 12px; font-weight: 600; color: var(--text-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.avb .avb-evd-role { flex: 0 0 auto; font-size: 9.5px; color: var(--text-low); background: var(--bg-panel); border-radius: 4px; padding: 1px 5px; }
+.avb .avb-evd-status-pill {
+  flex: 0 0 auto;
+  font-family: var(--avb-font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 1px 5px;
+  border-radius: 8px;
+}
+.avb .avb-evd-status-pill.is-ongoing { background: rgba(239, 68, 68, 0.15); color: var(--crit, #ef4444); }
+.avb .avb-evd-status-pill.is-resolved { background: rgba(16, 185, 129, 0.15); color: var(--ok, #10b981); }
+.avb .avb-evd-endpoint { font-family: var(--avb-font-mono); font-size: 10px; color: var(--text-low); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.avb .avb-evd-chain { font-family: var(--avb-font-mono); font-size: 10.5px; color: var(--text-mid); display: flex; align-items: center; gap: 5px; }
+.avb .avb-evd-chain .is-ongoing { color: var(--crit, #ef4444); }
+.avb .avb-evd-chain-arrow { color: var(--text-low); }
+.avb .avb-evd-carried {
+  flex: 0 0 auto;
+  font-family: var(--avb-font-sans, inherit);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: rgba(234, 179, 8, 0.15);
+  color: var(--warn, #eab308);
+  cursor: help;
+}
+.avb .avb-evd-meta { display: flex; align-items: center; gap: 10px; font-size: 10px; color: var(--text-low); }
+.avb .avb-evd-ref { margin-left: auto; font-family: var(--avb-font-mono); opacity: 0.7; }
+
+/* ── Downtime Calendar ──────────────────────────────────────────────────
+   Card box is .avb-trend-card, section title is .avb-sec-title — both
+   reused unchanged (see .avb-trend-section above). Only the grid/cell/
+   detail-panel rules below are new; cell severity reuses the exact
+   .ara-sev-* classes (and therefore --crit/--orange/--warn/--ok tokens)
+   the Hosts Requiring Attention severity dot already uses. ────────────── */
+.avb .avb-calendar-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.avb .avb-calendar-weekday-insight { white-space: nowrap; font-size: 11px; }
+
+.avb .avb-calendar-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--text-mid);
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.avb .avb-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.avb .avb-legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.avb .avb-legend-dot.ara-sev-good { background: var(--ok); }
+.avb .avb-legend-dot.ara-sev-warning { background: var(--warn); }
+.avb .avb-legend-dot.ara-sev-orange { background: var(--orange); }
+.avb .avb-legend-dot.ara-sev-critical { background: var(--crit); }
+
+.avb .avb-calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-bottom: 6px;
+  text-align: center;
+  font-family: var(--avb-font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-low);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.avb .avb-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.avb .avb-calendar-cell {
+  position: relative;
+  min-height: 48px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-family: var(--avb-font-mono);
+  background: var(--bg-surface);
+  color: var(--text-mid);
+  cursor: pointer;
+  transition: transform var(--t-fast, 0.1s ease), outline var(--t-fast, 0.1s ease), border-color var(--t-fast, 0.1s ease);
+}
+.avb .avb-calendar-cell:hover { outline: 2px solid var(--accent); outline-offset: -2px; }
+.avb .avb-calendar-cell.is-selected { outline: 2px solid var(--accent); outline-offset: -2px; }
+.avb .avb-calendar-cell.is-empty {
+  background: transparent !important;
+  border: 1px dashed rgba(255, 255, 255, 0.05);
+  pointer-events: none;
+  cursor: default;
+}
+.avb .avb-calendar-date-num {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+.avb .avb-calendar-avail-pct {
+  font-size: 9.5px;
+  font-weight: 500;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+/* Worst-N highlight is a border treatment layered on top of the severity
+   background, so it reads on any tier (a "worst day" is very often already
+   ara-sev-critical, where a colour-only highlight would be invisible). */
+.avb .avb-calendar-cell.is-worst { box-shadow: inset 0 0 0 2px var(--text-hi); }
+.avb .avb-calendar-cell.ara-sev-critical { background: var(--critical-bg); color: var(--crit); border-color: var(--critical-border); }
+.avb .avb-calendar-cell.ara-sev-orange   { background: var(--orange-bg); color: var(--orange); border-color: var(--orange-border); }
+.avb .avb-calendar-cell.ara-sev-warning  { background: var(--warning-bg); color: var(--warn); border-color: var(--warning-border); }
+.avb .avb-calendar-cell.ara-sev-good     { background: var(--success-bg); color: var(--ok); border-color: var(--success-border); }
+.avb .avb-calendar-badge {
+  position: absolute; top: -4px; right: -4px; min-width: 14px; height: 14px; padding: 0 3px;
+  border-radius: 999px; background: var(--crit); color: #fff;
+  font-family: var(--avb-font-ui); font-size: 8.5px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* The bare number could be read as incidents, minutes or percent. The unit is
+   carried in the badge itself so the grid caption is a reminder, not the only
+   source of truth (audit 1.7) — hidden on narrow cells where it will not fit.
+   Spacing via margin, not a literal space: HTML collapses the latter and the
+   badge rendered as "88hosts". */
+.avb .avb-calendar-badge-unit {
+  font-weight: 500;
+  margin-left: 2px;
+  opacity: 0.85;
+}
+@media (max-width: 1100px) {
+  .avb .avb-calendar-badge-unit { display: none; }
+}
+
+/* Raw fleet totals behind the budget headline — present for anyone who wants
+   to check the arithmetic, demoted so it is not the first thing read. */
+.avb .audit-budget-raw {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--text-low, var(--text-secondary));
+}
+
+/* Shared caption used wherever a stat needs its definition stated in the card
+   rather than hidden behind a hover (audit 1.2 / 1.7 / 6.6). */
+.avb .stat-caption,
+.stat-caption {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-low, var(--text-secondary));
+  margin: 6px 0 0;
+}
+
+@media (max-width: 720px) {
+  .avb .avb-calendar-legend { margin-left: 0; width: 100%; }
+  .avb .avb-calendar-cell { min-height: 42px; }
+  .avb .avb-calendar-avail-pct { font-size: 8.5px; }
+}
+
+/* ── Hosts Requiring Attention ────────────────────────────────────────── */
+.avb .avail-attention-section { display: flex; flex-direction: column; gap: 10px; }
+.avb .avail-attention-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.avb .avail-attention-controls { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+
+.avb .avail-sort-trigger,
+.avb .avail-view-all-btn {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-mid);
+  font-family: var(--avb-font-ui);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+.avb .avail-sort-trigger:hover,
+.avb .avail-view-all-btn:hover,
+.avb .avail-sort-trigger[aria-expanded="true"] {
+  background: var(--bg-raised);
+  border-color: #33404e;
+  color: var(--text-hi);
+}
+.avb .avail-sort-trigger:focus-visible,
+.avb .avail-view-all-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.avb .avail-sort-icon, .avb .avail-sort-chevron { color: var(--text-low); }
+.avb .avail-sort-menu {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+.avb .avail-sort-item { color: var(--text-mid); font-size: 11px; }
+.avb .avail-sort-item:hover, .avb .avail-sort-item:focus-visible {
+  background: rgba(255, 255, 255, 0.05); color: var(--text-hi);
+}
+.avb .avail-sort-item.is-active {
+  background: rgba(56, 189, 248, 0.14);
+  color: var(--accent);
+  font-weight: 500;
+}
+.avb .avail-sort-item.is-active .sort-item-check { color: var(--accent); }
+
+/* table card — merges visually with the stat cards, doesn't float */
+.avb .avail-attention-table-wrap {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.avb .avail-table-header {
+  grid-template-columns: 2.2fr 2fr 1.6fr;
+  padding: 8px 13px;
+  background: var(--bg-page);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--avb-font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-low);
+}
+.avb .ath-sort-btn:hover { color: var(--text-hi); }
+.avb .ath-sort-btn.ath-sorted,
+.avb .ath-sort-btn.ath-sorted .ath-sort-arrow { color: var(--accent); }
+.avb .ath-sort-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.avb .ara-row {
+  grid-template-columns: 2.2fr 2fr 1.6fr;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.avb .ara-row:hover { background: rgba(255, 255, 255, 0.025); }
+.avb .ara-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.avb .ara-severity-dot { border-radius: 2px; width: 6px; height: 6px; }
+.avb .ara-sev-critical { background: var(--crit); }
+.avb .ara-sev-orange   { background: var(--orange); }
+.avb .ara-sev-warning  { background: var(--warn); }
+.avb .ara-sev-good     { background: var(--ok); }
+.avb .ara-hostname { font-family: var(--avb-font-mono); font-size: 11.5px; font-weight: 500; color: var(--text-hi); }
+.avb .ara-job-badge {
+  font-family: var(--avb-font-ui);
+  font-size: 8.5px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-low);
+  border-radius: 3px;
+}
+/* A real 0% reads as a full bar of outage, not an absent one (audit 5.3).
+   Hatched so it is still distinguishable from a partially-filled critical bar. */
+.avb .ara-bar-fill.is-zero {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(0, 0, 0, 0.28) 0px, rgba(0, 0, 0, 0.28) 4px,
+    transparent 4px, transparent 8px
+  );
+}
+
+/* Acknowledgement state in the attention list (audit 4.3) — same badge shape
+   as the existing NO DATA / LIMITED DATA pills so the row reads as one set. */
+.avb .ara-ack-badge {
+  font-family: var(--avb-font-mono);
+  font-size: 8.5px;
+  background: rgba(150, 163, 176, 0.1);
+  color: var(--text-mid);
+  border: 1px solid rgba(150, 163, 176, 0.22);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.avb .ara-unacked-badge {
+  font-family: var(--avb-font-mono);
+  font-size: 8.5px;
+  background: rgba(225, 91, 110, 0.14);
+  color: var(--crit);
+  border: 1px solid rgba(225, 91, 110, 0.35);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-weight: 700;
+}
+
+.avb .ara-limited-badge {
+  font-family: var(--avb-font-mono);
+  background: rgba(227, 165, 61, 0.12);
+  color: var(--warn);
+  border: 1px solid rgba(227, 165, 61, 0.3);
+}
+.avb .ara-nodata-badge {
+  font-family: var(--avb-font-mono);
+  background: rgba(150, 163, 176, 0.1);
+  color: var(--text-mid);
+  border: 1px solid rgba(150, 163, 176, 0.22);
+}
+.avb .ara-avail-pct { font-family: var(--avb-font-mono); font-size: 11.5px; font-weight: 500; }
+.avb .pct-critical { color: var(--crit); }
+.avb .pct-orange   { color: var(--orange); }
+.avb .pct-warning  { color: var(--warn); }
+.avb .pct-good     { color: var(--ok); }
+.avb .pct-muted    { color: var(--text-low); }
+.avb .ara-bar-track { background: var(--border); height: 3px; }
+.avb .bar-fill-critical { background: var(--crit); }
+.avb .bar-fill-orange   { background: var(--orange); }
+.avb .bar-fill-warning  { background: var(--warn); }
+.avb .bar-fill-good     { background: var(--ok); }
+.avb .ara-incidents-text { font-family: var(--avb-font-mono); font-size: 10.5px; font-weight: 500; color: var(--text-hi); }
+.avb .ara-downtime-text { font-family: var(--avb-font-mono); font-size: 9.5px; color: var(--text-low); }
+.avb .ara-chevron { color: var(--text-low); }
+.avb .ara-row:hover .ara-chevron { color: var(--text-mid); }
+
+/* ── Calculations panel ──────────────────────────────────────────────── */
+.avb .avail-calc-panel { border-top: 1px dashed var(--border); }
+.avb .avail-calc-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.avb .avail-calc-title { color: var(--text-hi); font-size: 11px; }
+.avb .avail-calc-item strong { color: var(--text-mid); }
+.avb .avail-calc-item span { color: var(--text-low); }
+.avb .avail-calc-item code { font-family: var(--avb-font-mono); color: var(--text-mid); }
+.avb .badge-limited-data-sample {
+  font-family: var(--avb-font-mono);
+  background: rgba(227, 165, 61, 0.16);
+  color: var(--warn);
+}
+
+/* ═══ TAB 2 — Data Quality & Telemetry Audit ═════════════════════════════ */
+
+/* SLA + Downtime Budget: one card, vertical divider */
+.avb .audit-sla-row.avb-splitcard {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  padding: 0;
+  margin-bottom: 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.avb .avb-splitcard .audit-sla-card {
+  padding: 14px 16px;
+  border-left: 2px solid transparent;
+}
+.avb .avb-splitcard .audit-sla-card + .audit-sla-card { border-left: 1px solid var(--border); }
+.avb .avb-splitcard .audit-sla-card.is-ok  { border-left-color: var(--ok); }
+.avb .avb-splitcard .audit-sla-card.is-mid { border-left-color: var(--warn); }
+.avb .avb-splitcard .audit-sla-card.is-bad { border-left-color: var(--crit); }
+.avb .audit-sla-label {
+  font-family: var(--avb-font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-mid);
+}
+.avb .audit-sla-sub { color: var(--text-low); opacity: 1; }
+.avb .audit-sla-value {
+  font-family: var(--avb-font-mono);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--text-hi);
+}
+.avb .audit-sla-foot { font-family: var(--avb-font-mono); font-size: 10px; color: var(--text-low); }
+.avb .audit-sla-maint { color: var(--warn); }
+
+/* status chips — tinted, never solid */
+.avb .audit-sla-badge,
+.avb .audit-budget-state {
+  font-family: var(--avb-font-mono);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  background: rgba(150, 163, 176, 0.12);
+  color: var(--text-mid);
+}
+.avb .audit-sla-badge.is-ok,  .avb .audit-budget-state.is-ok  { background: rgba(63, 201, 138, 0.14);  color: var(--ok); }
+.avb .audit-sla-badge.is-mid, .avb .audit-budget-state.is-mid { background: rgba(227, 165, 61, 0.14);  color: var(--warn); }
+.avb .audit-sla-badge.is-bad, .avb .audit-budget-state.is-bad { background: rgba(225, 91, 110, 0.14);  color: var(--crit); }
+
+.avb .audit-budget-bar { background: var(--border); height: 4px; }
+.avb .audit-budget-fill { background: var(--ok); }
+.avb .audit-budget-fill.is-mid { background: var(--warn); }
+.avb .audit-budget-fill.is-bad { background: var(--crit); }
+
+/* coverage source one-liner */
+.avb .audit-status { border-left: 2px solid var(--text-low); }
+.avb .audit-status.is-ok   { border-left-color: var(--ok); }
+.avb .audit-status.is-warn { border-left-color: var(--warn); }
+.avb .audit-status.is-bad  { border-left-color: var(--crit); }
+.avb .audit-status-icon { color: var(--text-low); }
+.avb .audit-status.is-ok .audit-status-icon   { color: var(--ok); }
+.avb .audit-status.is-warn .audit-status-icon { color: var(--warn); }
+.avb .audit-status.is-bad .audit-status-icon  { color: var(--crit); }
+.avb .audit-status-text { font-size: 11.5px; color: var(--text-mid); }
+.avb .audit-status-src { font-family: var(--avb-font-mono); font-size: 9.5px; color: var(--text-low); }
+/* Degraded data sources are a caveat on every number in the pane, not a
+   footnote (audit 5.8). */
+.avb .audit-status-src.is-degraded { color: var(--warn); font-weight: 600; }
+
+/* coverage split */
+.avb .audit-section-title { color: var(--text-hi); }
+/* Softer, shorter accent on the "Coverage" heading; consistent gap to the grid. */
+.avb .audit-section .avb-sec-title {
+  padding-left: 8px;
+  margin-bottom: 13px;
+  border-left-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.avb .audit-divider { background: var(--border); }
+.avb .audit-grid { gap: 18px; }
+.avb .audit-card { border-left: 1px solid var(--border); padding-left: 14px; }
+.avb .audit-card:first-child { border-left: none; padding-left: 0; }
+.avb .audit-card-title {
+  font-family: var(--avb-font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-low);
+  margin-bottom: 5px;
+}
+.avb .audit-card-value {
+  font-family: var(--avb-font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-hi);
+}
+.avb .audit-card-sub { font-family: var(--avb-font-mono); font-size: 10px; color: var(--text-low); margin-top: 4px; }
+.avb .text-observed { color: var(--text-hi); }
+.avb .text-missing  { color: var(--warn); }
+.avb .text-maint    { color: var(--text-hi); }
+
+/* telemetry table card */
+.avb .audit-table-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 13px 15px;
+}
+.avb .audit-table-title {
+  font-family: var(--avb-font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-hi);
+  padding-left: 9px;
+  border-left: 2px solid var(--accent);
+}
+.avb .audit-table-count {
+  font-family: var(--avb-font-mono);
+  font-size: 9.5px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-low);
+  border-radius: 4px;
+}
+.avb .audit-filter-chips {
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.avb .audit-chip {
+  font-family: var(--avb-font-ui);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-mid);
+  border-radius: 4px;
+}
+.avb .audit-chip:hover { color: var(--text-hi); }
+.avb .audit-chip.is-active { background: rgba(56, 189, 248, 0.14); color: var(--accent); }
+.avb .audit-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.avb .audit-search-input {
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-hi);
+  font-family: var(--avb-font-mono);
+  font-size: 10.5px;
+}
+.avb .audit-search-input::placeholder { color: var(--text-low); }
+.avb .audit-search-input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.22); }
+
+.avb .audit-table { font-size: 11px; }
+.avb .audit-table th {
+  font-family: var(--avb-font-ui);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-low);
+  background: var(--bg-page);
+  border-bottom: 1px solid var(--border);
+  padding: 7px 10px;
+}
+.avb .audit-table td { border-bottom: 1px solid var(--border-soft); }
+.avb .audit-table tr:hover { background: rgba(255, 255, 255, 0.025); }
+.avb .audit-empty-row { color: var(--text-low); }
+.avb .audit-host-name { font-family: var(--avb-font-mono); font-size: 11px; font-weight: 500; color: var(--text-hi); }
+.avb .audit-host-job { font-family: var(--avb-font-ui); font-size: 9px; color: var(--text-low); }
+.avb .audit-cov-pct { font-family: var(--avb-font-mono); color: var(--text-hi); }
+.avb .audit-cov-pct.is-lim { color: var(--warn); }
+.avb .audit-cov-bar-wrap { background: var(--border); }
+.avb .audit-cov-bar-fill { background: var(--text-low); }
+.avb .audit-cov-bar-fill.bar-limited { background: var(--warn); }
+.avb .audit-table .mono { font-family: var(--avb-font-mono); }
+.avb .audit-table .text-dim { color: var(--text-low); }
+.avb .audit-table .text-ok  { color: var(--ok); }
+.avb .audit-table .text-mid { color: var(--warn); }
+.avb .audit-table .text-bad { color: var(--crit); }
+.avb .audit-table .text-missing { color: var(--warn); }
+.avb .audit-tgt { color: var(--text-low) !important; }
+
+.avb .audit-footer-actions .btn { font-family: var(--avb-font-ui); }
+.avb .btn-secondary {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-mid);
+}
+.avb .btn-secondary:hover { background: var(--bg-raised); color: var(--text-hi); }
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .avb .avail-hero-grid { grid-template-columns: 1fr; }
+  .avb .audit-sla-row.avb-splitcard { grid-template-columns: 1fr; }
+  .avb .avb-splitcard .audit-sla-card + .audit-sla-card { border-left: none; border-top: 1px solid var(--border); }
+  .avb .audit-grid, .avb .audit-grid.has-maint { grid-template-columns: 1fr; }
+  .avb .audit-card { border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 10px; }
+  .avb .audit-card:first-child { border-top: none; padding-top: 0; }
+  .avb .avail-attention-header { flex-direction: column; }
+  .avb .avail-attention-controls { width: 100%; justify-content: space-between; }
+  .avb .avail-table-header { display: none; }
+  .avb .ara-row { grid-template-columns: 1fr; gap: 6px; }
+  .avb .avb-fleet-body { gap: 10px; }
+  .avb .avail-hero-value { font-size: 1.6rem; }
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .avb .avail-subnav-pane { animation: none; }
+  .avb .avb-ring-value,
+  .avb .avb-splitbar-up,
+  .avb .avb-splitbar-down,
+  .avb .ara-bar-fill,
+  .avb .audit-budget-fill,
+  .avb .audit-cov-bar-fill { transition: none; }
+  .avb .avail-updating-spinner { animation-duration: 1.4s; }
+}
+

@@ -1,0 +1,38 @@
+  <!-- Bulk Maintenance Modal — schedules one maintenance window per host
+       selected on the dashboard (Select mode), instead of opening each
+       target's drawer one at a time. Same /api/maintenance/bulk endpoint,
+       same duration presets and SLA-exclusion behavior as the per-target
+       drawer form (target-drawer.js _startMaintenance). -->
+  <div id="bulkMaintenanceModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="bulkMaintenanceModalTitle">
+    <div class="modal-card modal-card-narrow">
+      <div class="modal-header">
+        <h3 class="modal-title" id="bulkMaintenanceModalTitle">Schedule Maintenance</h3>
+        <button id="closeBulkMaintenanceModal" class="modal-close" type="button" aria-label="Close modal">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div id="bulkMaintPreview" style="font-size:12px; color:var(--text-secondary); margin-bottom:14px;"></div>
+
+        <form id="bulkMaintenanceForm" style="display:flex; flex-direction:column; gap:10px;">
+          <div class="form-group">
+            <label class="form-label" for="bulkMaintDuration">Duration</label>
+            <select id="bulkMaintDuration" class="form-select">
+              <option value="30">30 minutes</option>
+              <option value="60" selected>1 hour</option>
+              <option value="120">2 hours</option>
+              <option value="240">4 hours</option>
+              <option value="480">8 hours</option>
+              <option value="1440">24 hours</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="bulkMaintReasonInput">Reason (optional)</label>
+            <input type="text" id="bulkMaintReasonInput" class="form-input" placeholder="Scheduled reboot, firmware update, ...">
+          </div>
+          <div id="bulkMaintError" class="form-error hidden"></div>
+          <p class="form-help" style="margin: 0 0 8px;">Keeps checking these hosts, but stops them raising alarms and excludes the window from their SLA. Hosts already in maintenance are left untouched.</p>
+          <button id="bulkMaintSubmitBtn" type="submit" class="btn btn-warning btn-sm btn-block">Start maintenance</button>
+        </form>
+      </div>
+    </div>
+  </div>

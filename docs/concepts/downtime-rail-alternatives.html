@@ -1,0 +1,602 @@
+<meta charset="utf-8">
+<title>Downtime Rail — 3 Alternatives</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root {
+  --bg:        #0a0e16;
+  --surface:   #111827;
+  --surface-2: #0d1420;
+  --raised:    #1b2435;
+  --border:    #253044;
+  --border-2:  #1a2232;
+  --text:      #e8edf6;
+  --text-2:    #9aa8bf;
+  --text-3:    #64748b;
+  --crit:      #ef4444;
+  --crit-dim:  #7f1d1d;
+  --ok:        #10b981;
+  --warn:      #f59e0b;
+  --accent:    #38bdf8;
+  --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+:root[data-theme="light"] {
+  --bg:#f5f7fa; --surface:#fff; --surface-2:#f0f3f8; --raised:#e8edf4;
+  --border:#d5dce8; --border-2:#e3e9f1;
+  --text:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --crit-dim:#fecaca;
+}
+* { box-sizing: border-box; }
+body {
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:var(--ui); font-size:13px; line-height:1.5;
+  padding-block:24px; padding-left:20px; padding-right:20px;
+}
+.wrap { max-width:1200px; margin:0 auto; }
+
+/* ── chrome ─────────────────────────────────────────────── */
+.top { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+h1 { font-size:19px; margin:0; letter-spacing:-0.02em; font-weight:650; }
+.pill {
+  font-family:var(--mono); font-size:10.5px; padding:2px 8px; border-radius:99px;
+  border:1px solid var(--border); background:var(--surface); color:var(--text-2);
+}
+.pill.real { border-color:#14532d; background:rgba(16,185,129,.1); color:var(--ok); }
+.sub { color:var(--text-2); font-size:12px; margin:0 0 18px; max-width:88ch; }
+.sub b { color:var(--text); font-weight:600; }
+.spacer { flex:1 1 auto; }
+button { font-family:inherit; color:inherit; cursor:pointer; }
+.ghost {
+  background:var(--surface); border:1px solid var(--border); border-radius:6px;
+  padding:4px 10px; font-size:11.5px; color:var(--text-2);
+}
+.ghost:hover { color:var(--text); border-color:var(--text-3); }
+
+/* ── day strip ──────────────────────────────────────────── */
+.days { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+.day {
+  background:var(--surface); border:1px solid var(--border); border-radius:8px;
+  padding:7px 11px; min-width:104px; text-align:left; transition:.14s;
+}
+.day:hover { border-color:var(--text-3); }
+.day.on { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
+.day .d1 { font-size:12px; font-weight:650; }
+.day .d2 { font-family:var(--mono); font-size:10.5px; color:var(--text-2); }
+.day .d3 { font-family:var(--mono); font-size:9.5px; margin-top:3px; }
+.flat  { color:var(--text-3); }
+.busy  { color:var(--crit); }
+
+/* ── concept tabs ───────────────────────────────────────── */
+.tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+.tab {
+  background:var(--surface); border:1px solid var(--border); border-radius:8px;
+  padding:9px 13px; text-align:left; min-width:190px; transition:.14s;
+}
+.tab:hover { border-color:var(--text-3); }
+.tab.on { border-color:var(--accent); background:var(--raised); }
+.tab .t1 { font-size:12.5px; font-weight:650; display:flex; align-items:center; gap:6px; }
+.tab .t2 { font-size:10.5px; color:var(--text-2); margin-top:2px; }
+.tab .k {
+  font-family:var(--mono); font-size:9px; border:1px solid var(--border);
+  border-radius:3px; padding:0 4px; color:var(--text-3);
+}
+.tab.base .t1 { color:var(--text-2); }
+
+/* ── panel ──────────────────────────────────────────────── */
+.panel {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:10px; padding:16px; margin-bottom:14px;
+}
+.phead { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:4px; }
+.phead h2 { font-size:14px; margin:0; font-weight:650; }
+.pnote { font-size:11.5px; color:var(--text-2); margin:0 0 14px; max-width:90ch; }
+.verdict {
+  display:inline-flex; align-items:center; gap:6px; font-family:var(--mono);
+  font-size:10.5px; padding:2px 8px; border-radius:99px; border:1px solid var(--border);
+}
+.verdict.v-flat { color:var(--text-3); }
+.verdict.v-weak { color:var(--warn); border-color:#78350f; background:rgba(245,158,11,.08); }
+.verdict.v-clear{ color:var(--ok); border-color:#14532d; background:rgba(16,185,129,.08); }
+
+/* ── shared: hour axis ──────────────────────────────────── */
+.axis {
+  display:grid; grid-template-columns:repeat(24,1fr); gap:3px;
+  margin-top:5px; font-family:var(--mono); font-size:9px;
+  color:var(--text-3); text-align:center;
+}
+.legend { display:flex; gap:12px; flex-wrap:wrap; font-size:10.5px; color:var(--text-2); }
+.legend i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+
+/* ── baseline rail ──────────────────────────────────────── */
+.rail { display:grid; grid-template-columns:repeat(24,1fr); gap:3px; height:76px; align-items:end; }
+.rail button { background:none; border:none; padding:0; height:100%; display:flex; align-items:flex-end; border-radius:3px; }
+.rail .bar { width:100%; background:var(--crit); border-radius:2px 2px 0 0; min-height:3px; }
+.rail button.on { outline:2px solid var(--text); outline-offset:1px; }
+
+/* ── A: delta strip ─────────────────────────────────────── */
+.delta { position:relative; }
+.delta .ctx {
+  position:absolute; inset:0; display:grid; grid-template-columns:repeat(24,1fr);
+  gap:3px; align-items:end; opacity:.16; pointer-events:none;
+}
+.delta .ctx span { background:var(--text-2); border-radius:1px; }
+.deltagrid { display:grid; grid-template-columns:repeat(24,1fr); gap:3px; height:120px; position:relative; }
+.deltagrid button {
+  background:none; border:none; padding:0; display:grid;
+  grid-template-rows:1fr 1fr; align-items:stretch; border-radius:3px;
+}
+.deltagrid button.on { outline:2px solid var(--text); outline-offset:1px; }
+.dcell-up   { display:flex; align-items:flex-end; }
+.dcell-down { display:flex; align-items:flex-start; }
+.dcell-up   b { width:100%; background:var(--crit); border-radius:2px 2px 0 0; display:block; }
+.dcell-down b { width:100%; background:var(--ok);   border-radius:0 0 2px 2px; display:block; }
+.zero { position:absolute; left:0; right:0; top:50%; height:1px; background:var(--border); pointer-events:none; }
+.zerolbl {
+  position:absolute; right:0; top:50%; transform:translateY(-50%);
+  font-family:var(--mono); font-size:9px; color:var(--text-3); background:var(--surface); padding-left:6px;
+}
+
+/* ── B: matrix ──────────────────────────────────────────── */
+.mtx { overflow-x:auto; }
+.mtx-row { display:grid; grid-template-columns:150px 1fr; gap:8px; align-items:center; min-width:620px; }
+.mtx-head { margin-bottom:5px; }
+.mtx-cells { display:grid; grid-template-columns:repeat(24,1fr); gap:2px; }
+.mtx-cells span { height:15px; border-radius:2px; background:var(--surface-2); }
+.mtx-label { font-family:var(--mono); font-size:11px; color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mtx-body { max-height:330px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; }
+.mtx-body .mtx-row { padding:1px 0; border-radius:4px; }
+.mtx-body .mtx-row:hover { background:var(--raised); }
+.chronic-bar {
+  display:flex; align-items:center; gap:8px; margin-top:8px; padding:8px 10px;
+  background:var(--surface-2); border:1px dashed var(--border); border-radius:6px;
+  font-size:11.5px; color:var(--text-2);
+}
+.chronic-bar b { color:var(--text); font-weight:600; }
+
+/* ── C: incident ledger ─────────────────────────────────── */
+.track { position:relative; height:46px; background:var(--surface-2); border:1px solid var(--border-2); border-radius:6px; overflow:hidden; }
+.track .inc {
+  position:absolute; top:6px; height:22px; background:var(--crit); border-radius:3px;
+  border:none; padding:0; min-width:3px; opacity:.85;
+}
+.track .inc:hover, .track .inc.on { opacity:1; outline:2px solid var(--text); outline-offset:1px; }
+.track .chron { position:absolute; left:0; right:0; bottom:0; height:10px;
+  background:repeating-linear-gradient(135deg,var(--text-3) 0 1px,transparent 1px 5px); opacity:.5; }
+.cards { display:flex; flex-direction:column; gap:7px; margin-top:12px; }
+.card {
+  display:grid; grid-template-columns:96px 1fr auto; gap:12px; align-items:center;
+  background:var(--surface-2); border:1px solid var(--border-2); border-left:3px solid var(--crit);
+  border-radius:6px; padding:9px 12px; text-align:left; width:100%;
+}
+.card:hover, .card.on { border-color:var(--text-3); background:var(--raised); }
+.card .c-t { font-family:var(--mono); font-size:12.5px; font-weight:650; color:var(--accent); }
+.card .c-s { font-size:10.5px; color:var(--text-3); }
+.card .c-m { font-size:12px; }
+.card .c-m b { font-weight:650; }
+.card .c-r { font-family:var(--mono); font-size:11px; color:var(--text-2); text-align:right; }
+.knob { display:flex; align-items:center; gap:9px; margin-top:12px; font-size:11.5px; color:var(--text-2); flex-wrap:wrap; }
+.knob input { accent-color:var(--accent); }
+.knob code { font-family:var(--mono); color:var(--text); }
+
+/* ── shared table ───────────────────────────────────────── */
+.tbl { margin-top:14px; border-top:1px solid var(--border-2); padding-top:12px; }
+.tbl-head { display:flex; align-items:baseline; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+.tbl-head .t { font-size:12px; font-weight:650; }
+.tbl-head .n { font-family:var(--mono); font-size:11px; color:var(--text-3); }
+.rows { max-height:230px; overflow-y:auto; }
+.row { display:grid; grid-template-columns:1.1fr 1.5fr .7fr .9fr; gap:10px;
+  padding:6px 8px; border-radius:5px; font-size:11.5px; align-items:center; }
+.row.h { color:var(--text-3); font-family:var(--mono); font-size:10px;
+  text-transform:uppercase; letter-spacing:.05em; position:sticky; top:0; background:var(--surface); }
+.row:not(.h):nth-child(odd) { background:var(--surface-2); }
+.row .ip { font-family:var(--mono); font-weight:600; }
+.row .iv { font-family:var(--mono); color:var(--text-2); font-size:10.5px; }
+.row .du { font-family:var(--mono); }
+.tag { font-family:var(--mono); font-size:9.5px; padding:1px 6px; border-radius:99px; border:1px solid var(--border); color:var(--text-2); }
+.tag.t-rec  { color:var(--ok);   border-color:#14532d; }
+.tag.t-all  { color:var(--crit); border-color:var(--crit-dim); }
+.tag.t-open { color:var(--warn); border-color:#78350f; }
+.empty { padding:18px; text-align:center; color:var(--text-3); font-size:11.5px; }
+
+footer { color:var(--text-3); font-size:11px; margin-top:20px; }
+kbd { font-family:var(--mono); font-size:10px; border:1px solid var(--border);
+  border-radius:3px; padding:0 4px; color:var(--text-2); }
+@media (max-width:720px) {
+  .row { grid-template-columns:1fr 1fr; }
+  .card { grid-template-columns:1fr; gap:4px; }
+  .card .c-r { text-align:left; }
+}
+</style>
+
+<div class="wrap">
+  <div class="top">
+    <h1>Downtime Rail — 3 Alternatives</h1>
+    <span class="pill real">real data · blackbox-ping-internal · 78 hosts</span>
+    <span class="spacer"></span>
+    <button class="ghost" id="theme">Theme</button>
+  </div>
+  <p class="sub">
+    Every number below is the <b>actual</b> stored fleet history for Sep 8–15, pulled from
+    <code>availability_buckets</code> and verified against Prometheus — not a mock. That matters:
+    the current rail looks fine on invented data and collapses on this fleet, because
+    <b>16 of ~19 hosts are permanently dead</b> and dominate every bar.
+    Pick a day, then switch concepts with <kbd>1</kbd>–<kbd>4</kbd>. Days move with <kbd>←</kbd> <kbd>→</kbd>.
+  </p>
+
+  <div class="days" id="days"></div>
+  <div class="tabs" id="tabs"></div>
+  <div class="panel" id="panel"></div>
+
+  <footer>
+    Prototype only — nothing here is wired to the app. Data frozen from
+    <code>docs/concepts/_downtime_rail_alternatives_data.json</code>.
+  </footer>
+</div>
+
+<script>
+const DATA = {"job":"blackbox-ping-internal","win_start":1788842569,"win_end":1789447369,"days":[{"date":"2026-09-08","ds":1788825600,"pct":88.46,"hosts_down":9,"events":[{"ip":"192.168.9.101","dur":72000,"n":1,"iv":[[14400,86400,1,1]]},{"ip":"192.168.9.187","dur":72000,"n":1,"iv":[[14400,86400,1,1]]},{"ip":"192.168.9.203","dur":72000,"n":1,"iv":[[14400,86400,1,1]]},{"ip":"192.168.9.210","dur":72000,"n":1,"iv":[[14400,86400,1,1]]},{"ip":"192.168.9.250","dur":72000,"n":1,"iv":[[14400,86400,1,1]]},{"ip":"192.168.9.43","dur":72000,"n":1,"iv":[[14400,86400,1,1]]},{"ip":"192.168.9.49","dur":72000,"n":1,"iv":[[14400,86400,1,1]]},{"ip":"192.168.9.50","dur":72000,"n":1,"iv":[[14400,86400,1,1]]},{"ip":"49.128.186.187","dur":72000,"n":1,"iv":[[14400,86400,1,1]]}]},{"date":"2026-09-09","ds":1788912000,"pct":88.43,"hosts_down":34,"events":[{"ip":"192.168.9.101","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.187","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.203","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.210","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.250","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.43","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.49","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.50","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"49.128.186.187","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.17","dur":420,"n":1,"iv":[[63300,63720,0,0]]},{"ip":"192.168.9.27","dur":180,"n":3,"iv":[[81300,81360,0,1],[82800,82860,1,0],[84360,84420,0,0]]},{"ip":"49.128.186.100","dur":120,"n":2,"iv":[[64140,64200,0,0],[83520,83580,0,0]]},{"ip":"192.168.9.48","dur":120,"n":2,"iv":[[78300,78360,0,0],[81120,81180,0,0]]},{"ip":"49.128.186.186","dur":120,"n":2,"iv":[[78180,78240,0,0],[83640,83700,0,0]]},{"ip":"192.168.10.99","dur":120,"n":2,"iv":[[80100,80160,0,0],[86280,86340,0,0]]},{"ip":"192.168.9.36","dur":120,"n":2,"iv":[[84120,84180,0,0],[85620,85680,0,0]]},{"ip":"192.168.9.14","dur":60,"n":1,"iv":[[76920,76980,0,0]]},{"ip":"192.168.9.18","dur":60,"n":1,"iv":[[77610,77670,0,0]]},{"ip":"192.168.9.29","dur":60,"n":1,"iv":[[77400,77460,0,0]]},{"ip":"192.168.9.35","dur":60,"n":1,"iv":[[78180,78240,0,0]]},{"ip":"192.168.9.46","dur":60,"n":1,"iv":[[78150,78210,0,0]]},{"ip":"192.168.10.97","dur":60,"n":1,"iv":[[81510,81570,0,0]]},{"ip":"192.168.9.10","dur":60,"n":1,"iv":[[81060,81120,0,0]]},{"ip":"192.168.9.12","dur":60,"n":1,"iv":[[81570,81630,0,0]]},{"ip":"192.168.9.22","dur":60,"n":1,"iv":[[81000,81060,0,0]]},{"ip":"192.168.9.26","dur":60,"n":1,"iv":[[82230,82290,0,0]]},{"ip":"192.168.9.34","dur":60,"n":1,"iv":[[82590,82650,0,0]]},{"ip":"192.168.9.39","dur":60,"n":1,"iv":[[79830,79890,0,0]]},{"ip":"192.168.9.80","dur":60,"n":1,"iv":[[82020,82080,0,0]]},{"ip":"192.168.9.90","dur":60,"n":1,"iv":[[80850,80910,0,0]]},{"ip":"192.168.9.99","dur":60,"n":1,"iv":[[81120,81180,0,0]]},{"ip":"49.128.186.182","dur":60,"n":1,"iv":[[81060,81120,0,0]]},{"ip":"49.128.186.189","dur":60,"n":1,"iv":[[81600,81660,0,0]]},{"ip":"192.168.9.23","dur":60,"n":1,"iv":[[84960,85020,0,0]]}]},{"date":"2026-09-10","ds":1788998400,"pct":81.52,"hosts_down":64,"events":[{"ip":"192.168.9.101","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.187","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.203","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.210","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.250","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.43","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.49","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.50","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"49.128.186.187","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.17","dur":67020,"n":4,"iv":[[4920,4980,0,0],[9120,9180,0,0],[14820,14880,0,0],[19560,86400,0,1]]},{"ip":"192.168.9.99","dur":65400,"n":4,"iv":[[4920,4980,0,0],[13920,13980,0,0],[15480,15540,0,0],[21180,86400,0,1]]},{"ip":"192.168.9.91","dur":63810,"n":2,"iv":[[3750,3810,0,0],[22650,86400,0,1]]},{"ip":"192.168.9.35","dur":63780,"n":2,"iv":[[18840,18900,0,0],[22680,86400,0,1]]},{"ip":"192.168.9.44","dur":63390,"n":1,"iv":[[23010,86400,0,1]]},{"ip":"192.168.9.45","dur":63390,"n":1,"iv":[[23010,86400,0,1]]},{"ip":"192.168.9.46","dur":63330,"n":1,"iv":[[23070,86400,0,1]]},{"ip":"192.168.9.48","dur":12120,"n":2,"iv":[[10140,10200,0,0],[20280,32340,0,0]]},{"ip":"192.168.9.100","dur":360,"n":3,"iv":[[15360,15450,0,0],[18060,18270,0,0],[24360,24420,0,0]]},{"ip":"192.168.9.13","dur":240,"n":4,"iv":[[1470,1530,0,0],[15330,15390,0,0],[17970,18030,0,0],[27330,27390,0,0]]},{"ip":"192.168.9.21","dur":240,"n":4,"iv":[[2100,2160,0,0],[15540,15600,0,0],[18360,18420,0,0],[18840,18900,0,0]]},{"ip":"192.168.9.29","dur":240,"n":4,"iv":[[1200,1260,0,0],[16560,16620,0,0],[18600,18660,0,0],[26520,26580,0,0]]},{"ip":"192.168.9.38","dur":240,"n":4,"iv":[[60,120,0,0],[1500,1560,0,0],[8400,8460,0,0],[14880,14940,0,0]]},{"ip":"192.168.10.101","dur":180,"n":3,"iv":[[3300,3360,0,0],[11400,11460,0,0],[23280,23340,0,0]]},{"ip":"192.168.100.10","dur":180,"n":3,"iv":[[630,690,0,0],[18150,18210,0,0],[26970,27030,0,0]]},{"ip":"49.128.186.186","dur":180,"n":3,"iv":[[480,540,0,0],[18360,18420,0,1],[21600,21660,1,0]]},{"ip":"49.128.186.99","dur":180,"n":3,"iv":[[540,600,0,0],[15540,15600,0,0],[19980,20040,0,0]]},{"ip":"192.168.10.103","dur":180,"n":3,"iv":[[7080,7140,0,0],[13260,13320,0,0],[24120,24180,0,0]]},{"ip":"192.168.9.39","dur":180,"n":3,"iv":[[4890,4950,0,0],[15210,15270,0,0],[25770,25830,0,0]]},{"ip":"192.168.9.10","dur":180,"n":3,"iv":[[7800,7860,0,0],[11160,11220,0,0],[25500,25560,0,0]]},{"ip":"192.168.9.28","dur":180,"n":3,"iv":[[11640,11700,0,0],[19080,19140,0,0],[19740,19800,0,0]]},{"ip":"192.168.9.90","dur":180,"n":3,"iv":[[17970,18030,0,0],[21750,21810,0,0],[25770,25830,0,0]]},{"ip":"192.168.10.99","dur":120,"n":2,"iv":[[3300,3360,0,0],[15360,15420,0,0]]},{"ip":"192.168.9.11","dur":120,"n":2,"iv":[[3450,3510,0,0],[12450,12510,0,0]]},{"ip":"192.168.9.55","dur":120,"n":2,"iv":[[1380,1440,0,0],[18300,18360,0,0]]},{"ip":"192.168.9.105","dur":120,"n":2,"iv":[[3780,3840,0,0],[16740,16800,0,0]]},{"ip":"192.168.9.36","dur":120,"n":2,"iv":[[3900,3960,0,0],[16020,16080,0,0]]},{"ip":"192.168.9.88","dur":120,"n":2,"iv":[[5100,5160,0,0],[17460,17520,0,0]]},{"ip":"192.168.9.14","dur":120,"n":2,"iv":[[7800,7860,0,0],[15780,15840,0,0]]},{"ip":"192.168.9.75","dur":120,"n":2,"iv":[[7320,7380,0,0],[19140,19200,0,0]]},{"ip":"192.168.9.92","dur":120,"n":2,"iv":[[7710,7770,0,0],[25890,25950,0,0]]},{"ip":"49.128.186.189","dur":120,"n":2,"iv":[[7560,7620,0,0],[11400,11460,0,0]]},{"ip":"192.168.9.26","dur":120,"n":2,"iv":[[12090,12150,0,0],[19290,19350,0,0]]},{"ip":"192.168.9.22","dur":120,"n":2,"iv":[[17400,17460,0,0],[20100,20160,0,0]]},{"ip":"192.168.9.24","dur":120,"n":2,"iv":[[16740,16800,0,0],[16980,17040,0,0]]},{"ip":"192.168.9.71","dur":120,"n":2,"iv":[[19590,19650,0,0],[26430,26490,0,0]]},{"ip":"192.168.9.41","dur":120,"n":2,"iv":[[25020,25080,0,0],[25380,25440,0,0]]},{"ip":"192.168.9.12","dur":60,"n":1,"iv":[[30,90,0,0]]},{"ip":"192.168.9.20","dur":60,"n":1,"iv":[[2880,2940,0,0]]},{"ip":"192.168.9.251","dur":60,"n":1,"iv":[[5700,5760,0,0]]},{"ip":"192.168.9.106","dur":60,"n":1,"iv":[[8310,8370,0,0]]},{"ip":"192.168.10.102","dur":60,"n":1,"iv":[[17520,17580,0,0]]},{"ip":"192.168.10.98","dur":60,"n":1,"iv":[[15450,15510,0,0]]},{"ip":"192.168.9.204","dur":60,"n":1,"iv":[[16050,16110,0,0]]},{"ip":"192.168.9.37","dur":60,"n":1,"iv":[[16440,16500,0,0]]},{"ip":"192.168.9.74","dur":60,"n":1,"iv":[[15810,15870,0,0]]},{"ip":"49.128.186.100","dur":60,"n":1,"iv":[[16740,16800,0,0]]},{"ip":"192.168.10.100","dur":60,"n":1,"iv":[[20130,20190,0,0]]},{"ip":"192.168.10.97","dur":60,"n":1,"iv":[[18570,18630,0,0]]},{"ip":"192.168.9.18","dur":60,"n":1,"iv":[[18810,18870,0,0]]},{"ip":"192.168.9.81","dur":60,"n":1,"iv":[[18480,18540,0,0]]},{"ip":"192.168.9.60","dur":60,"n":1,"iv":[[24660,24720,0,0]]},{"ip":"192.168.9.87","dur":60,"n":1,"iv":[[24660,24720,0,0]]},{"ip":"192.168.9.123","dur":60,"n":1,"iv":[[25800,25860,0,0]]},{"ip":"192.168.9.34","dur":60,"n":1,"iv":[[27030,27090,0,0]]}]},{"date":"2026-09-11","ds":1789084800,"pct":79.48,"hosts_down":19,"events":[{"ip":"192.168.9.101","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.17","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.187","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.203","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.210","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.250","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.35","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.43","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.44","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.45","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.46","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.49","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.50","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.91","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.99","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"49.128.186.187","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.100","dur":420,"n":4,"iv":[[33540,33600,0,0],[33720,33840,0,0],[33960,34140,0,0],[34200,34260,0,0]]},{"ip":"192.168.10.103","dur":60,"n":1,"iv":[[11760,11820,0,0]]},{"ip":"192.168.9.72","dur":60,"n":1,"iv":[[30000,30060,0,0]]}]},{"date":"2026-09-12","ds":1789171200,"pct":79.49,"hosts_down":16,"events":[{"ip":"192.168.9.101","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.17","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.187","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.203","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.210","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.250","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.35","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.43","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.44","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.45","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.46","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.49","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.50","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.91","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.99","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"49.128.186.187","dur":86400,"n":1,"iv":[[0,86400,1,1]]}]},{"date":"2026-09-13","ds":1789257600,"pct":79.49,"hosts_down":16,"events":[{"ip":"192.168.9.101","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.17","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.187","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.203","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.210","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.250","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.35","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.43","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.44","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.45","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.46","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.49","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.50","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.91","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.99","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"49.128.186.187","dur":86400,"n":1,"iv":[[0,86400,1,1]]}]},{"date":"2026-09-14","ds":1789344000,"pct":80.47,"hosts_down":16,"events":[{"ip":"192.168.9.101","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.17","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.187","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.203","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.210","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.250","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.35","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.43","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.44","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.45","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.46","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.49","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.50","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.99","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"49.128.186.187","dur":86400,"n":1,"iv":[[0,86400,1,1]]},{"ip":"192.168.9.91","dur":20490,"n":1,"iv":[[0,20490,1,0]]}]},{"date":"2026-09-15","ds":1789430400,"pct":80.77,"hosts_down":15,"events":[{"ip":"192.168.9.101","dur":18000,"n":1,"iv":[[0,18000,1,1]]},{"ip":"192.168.9.17","dur":18000,"n":1,"iv":[[0,18000,1,1]]},{"ip":"192.168.9.187","dur":18000,"n":1,"iv":[[0,18000,1,1]]},{"ip":"192.168.9.203","dur":18000,"n":1,"iv":[[0,18000,1,1]]},{"ip":"192.168.9.210","dur":18000,"n":1,"iv":[[0,18000,1,1]]},{"ip":"192.168.9.250","dur":18000,"n":1,"iv":[[0,18000,1,1]]},{"ip":"192.168.9.35","dur":18000,"n":1,"iv":[[0,18000,1,1]]},{"ip":"192.168.9.43","dur":18000,"n":1,"iv":[[0,18000,1,1]]},{"ip":"192.168.9.44","dur":18000,"n":1,"iv":[[0,18000,1,1]]},{"ip":"192.168.9.45","dur":18000,"n":1,"iv":[[0,18000,1,1]]},{"ip":"192.168.9.46","dur":18000,"n":1,"iv":[[0,18000,1,1]]},{"ip":"192.168.9.49","dur":18000,"n":1,"iv":[[0,18000,1,1]]},{"ip":"192.168.9.50","dur":18000,"n":1,"iv":[[0,18000,1,1]]},{"ip":"192.168.9.99","dur":18000,"n":1,"iv":[[0,18000,1,1]]},{"ip":"49.128.186.187","dur":18000,"n":1,"iv":[[0,18000,1,1]]}]}]};
+
+const HOUR = 3600, DAYSEC = 86400;
+let dayIdx = DATA.days.findIndex(d => d.date === '2026-09-10');  // busiest day, so nothing looks broken on load
+let concept = 'A';
+let sel = null;            // selected hour (rail/delta/matrix) or incident id (ledger)
+let tol = 300;             // concept C clustering tolerance, seconds
+let showChronic = false;
+
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, '0');
+const hhmm = s => pad(Math.floor(s / HOUR) % 24) + ':' + pad(Math.floor((s % HOUR) / 60));
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const dur = s => s >= HOUR ? `${Math.floor(s / HOUR)}h ${pad(Math.floor((s % HOUR) / 60))}m`
+                           : `${Math.floor(s / 60)}m ${pad(s % 60)}s`;
+
+function dayLabel(d) {
+  const dt = new Date(d.date + 'T00:00:00Z');
+  return dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+/* ── the one shared derivation every concept reads from ───────────────────
+   Mirrors alarm/static/js/availability.js _calendarEventHours exactly, so a
+   concept that looks better here will look the same wired up. carried_in /
+   still_down say whether an interval edge is a real state change or just
+   where the day (or the data) stops. */
+function derive(day) {
+  const down = new Array(24).fill(0), drops = new Array(24).fill(0), recov = new Array(24).fill(0);
+  const secs = new Array(24).fill(0).map(() => new Map());   // hour -> ip -> seconds down
+  const hosts = [];
+
+  day.events.forEach(e => {
+    const hrs = new Set(), dr = new Set(), rc = new Set();
+    let carriedIn = false, stillDown = false;
+    e.iv.forEach(([s, en, ci, sd]) => {
+      const hs = Math.max(0, Math.min(23, Math.floor(s / HOUR)));
+      const he = Math.max(0, Math.min(23, Math.floor(Math.max(en - 1, s) / HOUR)));
+      for (let h = hs; h <= he; h++) {
+        hrs.add(h);
+        const ov = Math.min(en, (h + 1) * HOUR) - Math.max(s, h * HOUR);
+        secs[h].set(e.ip, (secs[h].get(e.ip) || 0) + Math.max(0, ov));
+      }
+      if (ci) carriedIn = true; else dr.add(hs);
+      if (sd) stillDown = true;
+      else rc.add(Math.max(0, Math.min(23, Math.floor(en / HOUR))));
+    });
+    hrs.forEach(h => down[h]++);
+    dr.forEach(h => drops[h]++);
+    rc.forEach(h => recov[h]++);
+
+    const allDay = hrs.size === 24 && carriedIn && stillDown;
+    hosts.push({
+      ip: e.ip, dur: e.dur, n: e.n, hours: hrs, drops: dr, recov: rc,
+      carriedIn, stillDown, allDay,
+      firstChange: dr.size || rc.size ? Math.min(...[...dr, ...rc]) : 99,
+    });
+  });
+  return { down, drops, recov, secs, hosts };
+}
+
+/* ── verdict: how much can an operator actually read off this view? ────── */
+function verdict(kind, D) {
+  if (kind === 'rail') {
+    const lv = new Set(D.down).size;
+    return lv <= 1 ? ['v-flat', 'FLAT — one bar height all day, zero signal']
+         : lv <= 3 ? ['v-weak', `WEAK — only ${lv} distinct bar heights`]
+                   : ['v-clear', `${lv} distinct bar heights`];
+  }
+  const changed = D.drops.reduce((a, v, i) => a + (v || D.recov[i] ? 1 : 0), 0);
+  if (kind === 'delta') {
+    return changed === 0 ? ['v-flat', 'FLAT LINE — and that is the correct answer: nothing changed']
+                         : ['v-clear', `${changed} hour${changed === 1 ? '' : 's'} carry a state change`];
+  }
+  if (kind === 'matrix') {
+    const movers = D.hosts.filter(h => !h.allDay).length;
+    return movers === 0 ? ['v-flat', 'no movers — every affected host was down all day']
+         : movers > 30 ? ['v-weak', `${movers} movers — a big day, expect to scroll`]
+                       : ['v-clear', `${movers} mover${movers === 1 ? '' : 's'} above the chronic block`];
+  }
+  // Honest about C's failure mode: on a fleet of uncorrelated flaps the
+  // clustering produces MORE rows than the 24 bars it replaced.
+  const n = cluster(D).length;
+  return n === 0 ? ['v-flat', 'no incidents — only the chronic band']
+       : n > 12   ? ['v-weak', `${n} incidents — clustering degraded, worse than 24 bars`]
+                  : ['v-clear', `${n} incident${n === 1 ? '' : 's'} instead of 24 bars`];
+}
+
+/* ── C: group real drops that start close together ────────────────────── */
+function cluster(D) {
+  const starts = [];
+  D.hosts.forEach(h => {
+    if (h.allDay) return;
+    const ev = DATA.days[dayIdx].events.find(e => e.ip === h.ip);
+    ev.iv.forEach(([s, en, ci, sd]) => { if (!ci) starts.push({ ip: h.ip, s, en, sd }); });
+  });
+  starts.sort((a, b) => a.s - b.s);
+  const out = [];
+  starts.forEach(x => {
+    const last = out[out.length - 1];
+    if (last && x.s - last.s <= tol) {
+      last.hosts.add(x.ip);
+      last.end = Math.max(last.end, x.en);
+      last.open = last.open || !!x.sd;
+    } else {
+      out.push({ id: out.length, s: x.s, end: x.en, hosts: new Set([x.ip]), open: !!x.sd });
+    }
+  });
+  return out;
+}
+
+/* ── renderers ────────────────────────────────────────────────────────── */
+function axisHtml() {
+  return `<div class="axis">${Array.from({ length: 24 }, (_, h) =>
+    `<span>${h % 3 === 0 ? pad(h) + 'h' : '·'}</span>`).join('')}</div>`;
+}
+
+function renderRail(D) {
+  const max = Math.max(1, ...D.down);
+  return `
+    <div class="legend" style="margin-bottom:9px"><span><i style="background:var(--crit)"></i>Hosts down in that hour</span></div>
+    <div class="rail" id="railEl">${D.down.map((v, h) => `
+      <button data-h="${h}" class="${sel === h ? 'on' : ''}"
+        title="${pad(h)}:00–${pad(h + 1)}:00 · ${v} down · ${D.drops[h]} dropped · ${D.recov[h]} recovered">
+        <span class="bar" style="height:${Math.max(4, (v / max) * 100)}%"></span>
+      </button>`).join('')}</div>
+    ${axisHtml()}`;
+}
+
+function renderDelta(D) {
+  const max = Math.max(1, ...D.drops, ...D.recov);
+  const dmax = Math.max(1, ...D.down);
+  return `
+    <div class="legend" style="margin-bottom:9px">
+      <span><i style="background:var(--crit)"></i>Hosts dropped (up)</span>
+      <span><i style="background:var(--ok)"></i>Hosts recovered (down)</span>
+      <span><i style="background:var(--text-2);opacity:.4"></i>Hosts down — context only, behind</span>
+    </div>
+    <div class="delta">
+      <div class="deltagrid" id="deltaEl">
+        <div class="ctx">${D.down.map(v => `<span style="height:${(v / dmax) * 100}%"></span>`).join('')}</div>
+        ${D.drops.map((v, h) => `
+          <button data-h="${h}" class="${sel === h ? 'on' : ''}"
+            title="${pad(h)}:00–${pad(h + 1)}:00 · ${v} dropped · ${D.recov[h]} recovered · ${D.down[h]} down">
+            <span class="dcell-up"><b style="height:${(v / max) * 100}%"></b></span>
+            <span class="dcell-down"><b style="height:${(D.recov[h] / max) * 100}%"></b></span>
+          </button>`).join('')}
+        <div class="zero"></div><span class="zerolbl">0</span>
+      </div>
+    </div>
+    ${axisHtml()}`;
+}
+
+function renderMatrix(D) {
+  const movers = D.hosts.filter(h => !h.allDay).sort((a, b) => a.firstChange - b.firstChange || b.dur - a.dur);
+  const chronic = D.hosts.filter(h => h.allDay);
+  const rowHtml = h => `
+    <div class="mtx-row" data-ip="${esc(h.ip)}">
+      <span class="mtx-label" title="${esc(h.ip)}">${esc(h.ip)}</span>
+      <span class="mtx-cells">${Array.from({ length: 24 }, (_, c) => {
+        const s = D.secs[c].get(h.ip) || 0;
+        const f = Math.min(1, s / HOUR);
+        const bg = f === 0 ? 'var(--surface-2)' : `color-mix(in srgb, var(--crit) ${Math.round(18 + f * 82)}%, transparent)`;
+        return `<span style="background:${bg}" title="${esc(h.ip)} · ${pad(c)}:00 · ${Math.round(f * 100)}% of the hour down"></span>`;
+      }).join('')}</span>
+    </div>`;
+  return `
+    <div class="legend" style="margin-bottom:9px">
+      <span><i style="background:color-mix(in srgb,var(--crit) 30%,transparent)"></i>part of the hour down</span>
+      <span><i style="background:var(--crit)"></i>whole hour down</span>
+      <span>rows sorted by first state change — movers on top</span>
+    </div>
+    <div class="mtx">
+      <div class="mtx-row mtx-head">
+        <span class="mtx-label" style="color:var(--text-3)">HOST</span>
+        <span class="mtx-cells" id="mtxCols">${Array.from({ length: 24 }, (_, c) =>
+          `<button data-h="${c}" style="all:unset;cursor:pointer;height:13px;border-radius:2px;background:${sel === c ? 'var(--accent)' : 'var(--border-2)'}" title="scope to ${pad(c)}:00"></button>`).join('')}</span>
+      </div>
+      <div class="mtx-body">
+        ${movers.length ? movers.map(rowHtml).join('')
+                        : '<div class="empty">No host changed state on this day.</div>'}
+        ${showChronic ? chronic.map(rowHtml).join('') : ''}
+      </div>
+      ${axisHtml()}
+    </div>
+    ${chronic.length ? `
+      <div class="chronic-bar">
+        <button class="ghost" id="chronToggle">${showChronic ? 'Collapse' : 'Expand'}</button>
+        <span><b>${chronic.length} host${chronic.length === 1 ? '' : 's'} down all day</b> — no state change, folded out of the way</span>
+      </div>` : ''}`;
+}
+
+function renderLedger(D) {
+  const incs = cluster(D);
+  const chronic = D.hosts.filter(h => h.allDay);
+  const pc = s => (s / DAYSEC) * 100;
+  return `
+    <div class="legend" style="margin-bottom:9px">
+      <span><i style="background:var(--crit)"></i>Incident (clustered drops)</span>
+      <span><i style="background:var(--text-3);opacity:.5"></i>Chronic band — down all day</span>
+      <span>continuous axis: no hour buckets, no bucket-edge artifacts</span>
+    </div>
+    <div class="track" id="trackEl">
+      ${incs.map(i => `<button class="inc ${sel === 'i' + i.id ? 'on' : ''}" data-i="${i.id}"
+          style="left:${pc(i.s)}%;width:${Math.max(0.4, pc(i.end - i.s))}%"
+          title="${hhmm(i.s)} · ${i.hosts.size} host(s)"></button>`).join('')}
+      ${chronic.length ? '<div class="chron" title="chronic band"></div>' : ''}
+    </div>
+    ${axisHtml()}
+    <div class="cards">
+      ${incs.length ? incs.map(i => `
+        <button class="card ${sel === 'i' + i.id ? 'on' : ''}" data-i="${i.id}">
+          <span><span class="c-t">${hhmm(i.s)}</span><br><span class="c-s">UTC start</span></span>
+          <span class="c-m"><b>${i.hosts.size} host${i.hosts.size === 1 ? '' : 's'}</b>
+            ${i.hosts.size > 1 ? 'dropped together' : 'dropped'}
+            ${i.open ? '· <span style="color:var(--warn)">still down</span>' : ''}
+            <br><span class="c-s">${[...i.hosts].slice(0, 4).map(esc).join(', ')}${i.hosts.size > 4 ? ` +${i.hosts.size - 4} more` : ''}</span></span>
+          <span class="c-r">${i.open ? 'ongoing' : dur(i.end - i.s)}<br><span class="c-s">${i.open ? '' : 'to last recovery'}</span></span>
+        </button>`).join('')
+        : '<div class="empty">No incidents on this day — only the chronic band.</div>'}
+    </div>
+    ${chronic.length ? `<div class="chronic-bar"><span><b>${chronic.length} host${chronic.length === 1 ? '' : 's'} down all day</b> — one band, never a card</span></div>` : ''}
+    <div class="knob">
+      <label for="tolIn">Cluster tolerance</label>
+      <input id="tolIn" type="range" min="30" max="1800" step="30" value="${tol}">
+      <code>${tol}s</code>
+      <span style="color:var(--text-3)">— the knob this concept costs you: too tight splits one switch flap into many, too loose merges unrelated nodes.</span>
+    </div>`;
+}
+
+/* ── shared table, scoped by the current selection ────────────────────── */
+function tableHtml(D) {
+  const day = DATA.days[dayIdx];
+  let list = D.hosts, scope = 'all affected hosts';
+
+  if (concept === 'C' && typeof sel === 'string') {
+    const inc = cluster(D).find(i => 'i' + i.id === sel);
+    if (inc) { list = D.hosts.filter(h => inc.hosts.has(h.ip)); scope = `incident at ${hhmm(inc.s)} UTC`; }
+  } else if (typeof sel === 'number') {
+    list = concept === 'A' ? D.hosts.filter(h => h.drops.has(sel) || h.recov.has(sel))
+                           : D.hosts.filter(h => h.hours.has(sel));
+    scope = concept === 'A' ? `changed state in ${pad(sel)}:00–${pad(sel + 1)}:00 UTC`
+                            : `down during ${pad(sel)}:00–${pad(sel + 1)}:00 UTC`;
+  }
+
+  const rows = list.slice().sort((a, b) => b.dur - a.dur).map(h => {
+    const ev = day.events.find(e => e.ip === h.ip);
+    const ivs = ev.iv.slice(0, 3).map(([s, e]) => `${hhmm(s)}–${e >= DAYSEC ? '24:00' : hhmm(e)}`).join(', ')
+      + (ev.iv.length > 3 ? ` +${ev.iv.length - 3}` : '');
+    const tag = h.allDay ? ['t-all', 'Down all day']
+              : h.stillDown ? ['t-open', 'Still down']
+              : h.carriedIn ? ['t-rec', 'Carried in, recovered']
+              : ['t-rec', `Recovered${h.n > 1 ? ` (${h.n}×)` : ''}`];
+    return `<div class="row">
+      <span class="ip">${esc(h.ip)}</span>
+      <span class="iv">${ivs}</span>
+      <span class="du">${dur(h.dur)}</span>
+      <span><span class="tag ${tag[0]}">${tag[1]}</span></span>
+    </div>`;
+  }).join('');
+
+  return `<div class="tbl">
+    <div class="tbl-head">
+      <span class="t">Hosts</span>
+      <span class="n">${list.length} of ${D.hosts.length} · ${scope}</span>
+      ${sel !== null ? '<button class="ghost" id="clearSel">Clear selection</button>' : ''}
+    </div>
+    <div class="rows">
+      <div class="row h"><span>Host</span><span>Intervals (UTC)</span><span>Downtime</span><span>State</span></div>
+      ${rows || '<div class="empty">Nothing in this selection.</div>'}
+    </div>
+  </div>`;
+}
+
+const CONCEPTS = {
+  base: { key: '1', name: 'Current rail', tag: 'baseline',
+    note: 'What ships today: bar height = hosts down that hour. The chronic floor sets the height, so a real incident is a few pixels on top of a wall.',
+    kind: 'rail', render: renderRail },
+  A: { key: '2', name: 'A · Delta Strip', tag: 'change, not level',
+    note: 'Zero axis. Up = hosts dropped, down = hosts recovered. A permanently-down host contributes exactly zero, so the chronic floor disappears structurally — no toggle, no "chronic" label, nothing to classify.',
+    kind: 'delta', render: renderDelta },
+  B: { key: '3', name: 'B · Host × Hour Matrix', tag: 'which, and together?',
+    note: 'Rows are hosts, columns hours, shade = how much of that hour was down. Sorted by first state change, so movers rise and the dead block folds away. A vertical stripe is a common cause — the question the rail cannot answer at all.',
+    kind: 'matrix', render: renderMatrix },
+  C: { key: '4', name: 'C · Incident Ledger', tag: 'no hour grid at all',
+    note: 'Drops that start close together become one incident on a continuous axis. Answers "what happened today" in a handful of rows, and being unbucketed it has no bucket-edge artifacts.',
+    kind: 'ledger', render: renderLedger },
+};
+
+function render() {
+  const day = DATA.days[dayIdx];
+  const D = derive(day);
+
+  $('days').innerHTML = DATA.days.map((d, i) => {
+    const dd = derive(d);
+    const changed = dd.drops.reduce((a, v, j) => a + (v || dd.recov[j] ? 1 : 0), 0);
+    return `<button class="day ${i === dayIdx ? 'on' : ''}" data-i="${i}">
+      <div class="d1">${dayLabel(d)}</div>
+      <div class="d2">${d.pct.toFixed(2)}% · ${d.hosts_down} down</div>
+      <div class="d3 ${changed ? 'busy' : 'flat'}">${changed ? changed + ' hrs w/ change' : 'nothing changed'}</div>
+    </button>`;
+  }).join('');
+
+  $('tabs').innerHTML = Object.entries(CONCEPTS).map(([k, c]) =>
+    `<button class="tab ${k === concept ? 'on' : ''} ${k === 'base' ? 'base' : ''}" data-c="${k}">
+      <div class="t1"><span class="k">${c.key}</span>${c.name}</div>
+      <div class="t2">${c.tag}</div>
+    </button>`).join('');
+
+  const c = CONCEPTS[concept];
+  const [vc, vt] = verdict(c.kind, D);
+  $('panel').innerHTML = `
+    <div class="phead">
+      <h2>${c.name}</h2>
+      <span class="pill">${dayLabel(day)}</span>
+      <span class="verdict ${vc}">${vt}</span>
+    </div>
+    <p class="pnote">${c.note}</p>
+    ${c.render(D)}
+    ${tableHtml(D)}`;
+
+  wire(D);
+}
+
+function wire(D) {
+  $('days').onclick = e => {
+    const b = e.target.closest('.day'); if (!b) return;
+    dayIdx = +b.dataset.i; sel = null; render();
+  };
+  $('tabs').onclick = e => {
+    const b = e.target.closest('.tab'); if (!b) return;
+    concept = b.dataset.c; sel = null; render();
+  };
+  const pick = el => el && (el.onclick = e => {
+    const b = e.target.closest('[data-h]'); if (!b) return;
+    const h = +b.dataset.h; sel = (sel === h) ? null : h; render();
+  });
+  pick($('railEl')); pick($('deltaEl')); pick($('mtxCols'));
+
+  const inc = e => {
+    const b = e.target.closest('[data-i]'); if (!b) return;
+    const id = 'i' + b.dataset.i; sel = (sel === id) ? null : id; render();
+  };
+  if ($('trackEl')) $('trackEl').onclick = inc;
+  document.querySelectorAll('.card').forEach(el => el.onclick = inc);
+
+  if ($('chronToggle')) $('chronToggle').onclick = () => { showChronic = !showChronic; render(); };
+  if ($('clearSel')) $('clearSel').onclick = () => { sel = null; render(); };
+  if ($('tolIn')) $('tolIn').oninput = e => { tol = +e.target.value; sel = null; render(); };
+}
+
+$('theme').onclick = () => {
+  const r = document.documentElement;
+  r.setAttribute('data-theme', r.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+};
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  const byKey = Object.entries(CONCEPTS).find(([, c]) => c.key === e.key);
+  if (byKey) { concept = byKey[0]; sel = null; render(); }
+  else if (e.key === 'ArrowRight' && dayIdx < DATA.days.length - 1) { dayIdx++; sel = null; render(); }
+  else if (e.key === 'ArrowLeft' && dayIdx > 0) { dayIdx--; sel = null; render(); }
+  else if (e.key.toLowerCase() === 't') $('theme').click();
+});
+
+render();
+</script>

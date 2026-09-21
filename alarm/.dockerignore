@@ -1,0 +1,31 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.env
+.env.*
+
+# Isolated runtime data & secrets
+data/*
+!data/.gitkeep
+!data/*.example
+
+# Legacy per-deployment secrets and stores
+.api_key
+.webhook_secret
+.session_secret
+
+*.db
+*.db-*
+telegram_config.json
+history.json
+history_archive.json
+logs.json
+status.json
+endpoints.json
+deleted_targets.json
+dependencies.json
+maintenance.json
+

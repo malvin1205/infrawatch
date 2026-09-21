@@ -1,0 +1,2065 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InfraWatch — Status Legend in Logo · Design Simulation & Variants</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    /* ══════════════════════════════════════════════════════════════════════════
+       InfraWatch Real Design Tokens (mirrored from alarm/static/css/parts/tokens.css)
+       ══════════════════════════════════════════════════════════════════════════ */
+    :root {
+      color-scheme: dark;
+      --bg: #020408;
+      --bg-elevated: #050810;
+      --bg-card: #080D17;
+      --surface: #060A12;
+      --surface-raised: #0B101E;
+      --surface-hover: #11182B;
+
+      --border: rgba(255, 255, 255, 0.08);
+      --border-subtle: rgba(255, 255, 255, 0.04);
+      --border-strong: rgba(255, 255, 255, 0.14);
+
+      --text-primary: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --text-muted: #7E8B9B;
+      --text-inverse: #020408;
+
+      --success: #22C55E;
+      --success-bg: rgba(34, 197, 94, 0.10);
+      --success-border: rgba(34, 197, 94, 0.20);
+
+      --warning: #ffd500;
+      --warning-bg: rgba(255, 213, 0, 0.10);
+      --warning-border: rgba(255, 213, 0, 0.22);
+
+      --critical: #EF4444;
+      --critical-bg: rgba(239, 68, 68, 0.08);
+      --critical-border: rgba(239, 68, 68, 0.18);
+
+      --orange: #F97316;
+      --orange-bg: rgba(249, 115, 22, 0.10);
+      --orange-border: rgba(249, 115, 22, 0.20);
+
+      --accent: #38BDF8;
+      --accent-bg: rgba(56, 189, 248, 0.08);
+
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+      --r-sm: 8px;
+      --r-md: 12px;
+      --r-lg: 16px;
+      --r-pill: 9999px;
+
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
+      --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.6), 0 4px 16px rgba(0, 0, 0, 0.4);
+      --shadow-hud: 0 16px 48px -8px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.12), 0 0 24px -4px rgba(56, 189, 248, 0.15);
+
+      --t-fast: 150ms ease;
+      --t-base: 200ms ease;
+      --t-slow: 300ms ease;
+      --anim-speed: 1;
+
+      --topnav-h: 56px;
+    }
+
+    [data-theme="light"] {
+      color-scheme: light;
+      --bg: #F8FAFC;
+      --bg-elevated: #F1F5F9;
+      --bg-card: #FFFFFF;
+      --surface: #FFFFFF;
+      --surface-raised: #F8FAFC;
+      --surface-hover: #F1F5F9;
+
+      --border: rgba(0, 0, 0, 0.07);
+      --border-subtle: rgba(0, 0, 0, 0.04);
+      --border-strong: rgba(0, 0, 0, 0.12);
+
+      --text-primary: #0F172A;
+      --text-secondary: #475569;
+      --text-muted: #64748B;
+      --text-inverse: #F8FAFC;
+
+      --success: #15803D;
+      --warning: #B45309;
+      --critical: #B91C1C;
+      --orange: #C2410C;
+      --accent: #0284C7;
+
+      --success-bg: rgba(21, 128, 61, 0.08);
+      --success-border: rgba(21, 128, 61, 0.20);
+      --warning-bg: rgba(180, 83, 9, 0.09);
+      --warning-border: rgba(180, 83, 9, 0.22);
+      --critical-bg: rgba(185, 28, 28, 0.07);
+      --critical-border: rgba(185, 28, 28, 0.18);
+      --accent-bg: rgba(2, 132, 199, 0.08);
+
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.10);
+      --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.15);
+      --shadow-hud: 0 16px 40px -8px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.08), 0 0 20px -4px rgba(2, 132, 199, 0.12);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text-primary);
+      font-family: var(--font);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      line-height: 1.5;
+      padding-bottom: 80px;
+    }
+
+    /* ── Simulation Control Header ───────────────────────────────────────── */
+    .sim-header {
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      background: var(--surface-raised);
+      border-bottom: 1px solid var(--border-strong);
+      padding: 10px 24px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      box-shadow: var(--shadow-md);
+    }
+
+    .sim-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .sim-pill {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      background: var(--accent-bg);
+      color: var(--accent);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      padding: 2px 8px;
+      border-radius: var(--r-pill);
+    }
+    .sim-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .sim-controls {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .sim-btn-group {
+      display: inline-flex;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      padding: 2px;
+    }
+    .sim-toggle-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all var(--t-fast);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .sim-toggle-btn:hover {
+      color: var(--text-primary);
+    }
+    .sim-toggle-btn.active {
+      background: var(--surface-hover);
+      color: var(--accent);
+      font-weight: 600;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+
+    .sim-action-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 6px 12px;
+      border-radius: var(--r-sm);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all var(--t-fast);
+    }
+    .sim-action-btn:hover {
+      background: var(--surface-hover);
+      color: var(--text-primary);
+      border-color: var(--border-strong);
+    }
+
+    .sim-status-log {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--bg);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      padding: 4px 8px;
+      min-width: 220px;
+    }
+
+    /* ── Live Banner Explainer ───────────────────────────────────────────── */
+    .sim-intro {
+      max-width: 1400px;
+      margin: 18px auto 8px;
+      padding: 0 24px;
+    }
+    .intro-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      border-radius: var(--r-sm);
+      padding: 12px 18px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .intro-text h3 {
+      font-size: 13.5px;
+      font-weight: 600;
+      margin-bottom: 2px;
+      color: var(--text-primary);
+    }
+    .intro-text p {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.45;
+    }
+    .intro-shortcuts {
+      display: flex;
+      gap: 14px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+    .kbd {
+      background: var(--surface-raised);
+      border: 1px solid var(--border-strong);
+      padding: 1px 5px;
+      border-radius: 4px;
+      color: var(--text-secondary);
+      font-size: 10.5px;
+    }
+
+    /* ── App Shell / Topnav Simulation ────────────────────────────────────── */
+    .app-viewport {
+      max-width: 1400px;
+      margin: 12px auto;
+      padding: 0 24px;
+    }
+
+    .app-frame {
+      background: var(--bg);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--r-md);
+      overflow: visible; /* to let overlays spill cleanly */
+      box-shadow: var(--shadow-lg);
+      position: relative;
+    }
+
+    .sim-topnav {
+      height: var(--topnav-h);
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      border-top-left-radius: var(--r-md);
+      border-top-right-radius: var(--r-md);
+      position: relative;
+      z-index: 50;
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       BRAND & LOGO COMPONENT — THE MAIN STAGE
+       ══════════════════════════════════════════════════════════════════════════ */
+    .brand-interactive-wrap {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    /* Base brand button */
+    .brand-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: transparent;
+      border: 1px solid transparent;
+      padding: 6px 10px 6px 8px;
+      border-radius: var(--r-sm);
+      color: var(--text-primary);
+      cursor: pointer;
+      user-select: none;
+      text-decoration: none;
+      outline: none;
+      transition: background calc(var(--t-base) * var(--anim-speed)),
+                  border-color calc(var(--t-base) * var(--anim-speed)),
+                  box-shadow calc(var(--t-base) * var(--anim-speed));
+    }
+    .brand-btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .brand-mark {
+      width: 26px;
+      height: 26px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .brand-mark svg {
+      width: 22px;
+      height: 22px;
+      overflow: visible;
+      display: block;
+    }
+
+    .brand-mark rect {
+      transition: fill calc(220ms * var(--anim-speed)) ease,
+                  opacity calc(220ms * var(--anim-speed)) ease,
+                  transform calc(220ms * var(--anim-speed)) ease,
+                  filter calc(220ms * var(--anim-speed)) ease;
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+
+    .brand-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Micro-affordance hint */
+    .brand-indicator {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: var(--text-muted);
+      transition: all calc(var(--t-base) * var(--anim-speed));
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       LEGEND SWATCHES & STYLES (Exact rules from alarm/static/css/parts/host-grid.css)
+       ══════════════════════════════════════════════════════════════════════════ */
+    .hl-swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      flex-shrink: 0;
+      display: inline-block;
+    }
+    .hl-mark { opacity: 0.75; font-size: 11px; margin-left: 2px; }
+
+    .hl-up { background: linear-gradient(180deg, #00a854 0%, #007a3e 100%); }
+    .hl-slow { background: linear-gradient(180deg, #e65100 0%, #9e3d00 100%); }
+    .hl-down {
+      background: linear-gradient(180deg, #d32f2f 0%, #8e1513 100%);
+      border-color: rgba(255, 255, 255, 0.55);
+    }
+    .hl-acked { background: linear-gradient(180deg, #7f3336 0%, #5a2325 100%); }
+    .hl-supp { background: linear-gradient(180deg, #7e22ce 0%, #3b0764 100%); }
+    .hl-maint {
+      background: linear-gradient(180deg, #475569 0%, #334155 100%);
+      border-style: dashed;
+    }
+    .hl-nodata {
+      background: linear-gradient(180deg, #3f4652 0%, #2b303a 100%);
+      border-style: dashed;
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       VARIANT A: RADAR SWEEP & PRECISION HUD PANEL (The Tactical Speed Choice)
+       ══════════════════════════════════════════════════════════════════════════ */
+    /* Hover on Logo */
+    .variant-a .brand-btn:hover {
+      background: rgba(56, 189, 248, 0.05);
+      border-color: rgba(56, 189, 248, 0.18);
+    }
+    .variant-a .brand-btn:hover .brand-name {
+      color: #FFFFFF;
+    }
+    .variant-a .brand-btn:hover .brand-indicator {
+      color: var(--accent);
+      transform: translateY(1px);
+    }
+
+    /* Clockwise radar sweep across 4 nodes */
+    .variant-a .brand-btn:hover .node-1 {
+      animation: aRadarSweep calc(1.2s * var(--anim-speed)) infinite ease-in-out;
+      animation-delay: 0s;
+    }
+    .variant-a .brand-btn:hover .node-2 {
+      animation: aRadarSweep calc(1.2s * var(--anim-speed)) infinite ease-in-out;
+      animation-delay: calc(0.3s * var(--anim-speed));
+    }
+    .variant-a .brand-btn:hover .node-4 {
+      animation: aRadarSweep calc(1.2s * var(--anim-speed)) infinite ease-in-out;
+      animation-delay: calc(0.6s * var(--anim-speed));
+    }
+    .variant-a .brand-btn:hover .node-3 {
+      animation: aRadarSweep calc(1.2s * var(--anim-speed)) infinite ease-in-out;
+      animation-delay: calc(0.9s * var(--anim-speed));
+    }
+
+    @keyframes aRadarSweep {
+      0%, 100% {
+        filter: drop-shadow(0 0 0 transparent);
+        opacity: 0.5;
+      }
+      30% {
+        opacity: 1;
+        filter: drop-shadow(0 0 5px var(--accent));
+        fill: #7DD3FC;
+      }
+    }
+
+    /* Active Logo state when legend is open */
+    .variant-a.is-open .brand-btn {
+      background: rgba(56, 189, 248, 0.10);
+      border-color: rgba(56, 189, 248, 0.35);
+      box-shadow: 0 0 16px -2px rgba(56, 189, 248, 0.25);
+    }
+    .variant-a.is-open .brand-btn .brand-indicator svg {
+      transform: rotate(180deg);
+    }
+
+    /* Reveal HUD Panel */
+    .hud-panel-a {
+      position: absolute;
+      top: calc(100% + 10px);
+      left: 0;
+      width: 440px;
+      background: var(--surface-raised);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--r-md);
+      box-shadow: var(--shadow-hud);
+      padding: 14px 16px 12px;
+      z-index: 200;
+      opacity: 0;
+      visibility: hidden;
+      transform-origin: top left;
+      transform: translateY(-8px) scale(0.97);
+      transition: opacity calc(180ms * var(--anim-speed)) cubic-bezier(0.16, 1, 0.3, 1),
+                  transform calc(180ms * var(--anim-speed)) cubic-bezier(0.16, 1, 0.3, 1),
+                  visibility 0s calc(180ms * var(--anim-speed));
+      pointer-events: none;
+    }
+    .variant-a.is-open .hud-panel-a {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0) scale(1);
+      transition: opacity calc(200ms * var(--anim-speed)) cubic-bezier(0.16, 1, 0.3, 1),
+                  transform calc(200ms * var(--anim-speed)) cubic-bezier(0.16, 1, 0.3, 1),
+                  visibility 0s 0s;
+      pointer-events: auto;
+    }
+
+    .hud-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 10px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .hud-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .hud-live-dot {
+      width: 6px;
+      height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 6px var(--accent);
+    }
+    .hud-meta-badge {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      background: var(--surface);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .hud-grid-a {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 14px;
+    }
+
+    .hud-item-a {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: var(--surface);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all var(--t-fast);
+    }
+    .hud-item-a:hover {
+      background: var(--surface-hover);
+      border-color: var(--border);
+      transform: translateX(2px);
+    }
+    .hud-item-label {
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+      flex: 1;
+    }
+    .hud-item-sub {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    .hud-footer {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10.5px;
+      color: var(--text-muted);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       VARIANT B: STATUS MATRIX MORPH & FLOATING CAPSULE RIBBON (The Semantic Link)
+       ══════════════════════════════════════════════════════════════════════════ */
+    /* Hover on Logo: Quadrants illuminate in actual fleet health colors */
+    .variant-b .brand-btn:hover .node-1 { fill: #22C55E; opacity: 1; filter: drop-shadow(0 0 4px rgba(34, 197, 94, 0.7)); }
+    .variant-b .brand-btn:hover .node-2 { fill: #ffd500; opacity: 1; filter: drop-shadow(0 0 4px rgba(255, 213, 0, 0.7)); }
+    .variant-b .brand-btn:hover .node-3 { fill: #EF4444; opacity: 1; filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.7)); }
+    .variant-b .brand-btn:hover .node-4 { fill: #a855f7; opacity: 1; filter: drop-shadow(0 0 4px rgba(168, 85, 247, 0.7)); }
+
+    .variant-b .sonar-ring {
+      position: absolute;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 1.5px solid var(--accent);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0.6);
+      opacity: 0;
+      pointer-events: none;
+    }
+    .variant-b .brand-btn:hover .sonar-ring {
+      animation: sonarPulse calc(1.4s * var(--anim-speed)) infinite cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    @keyframes sonarPulse {
+      0% { transform: translate(-50%, -50%) scale(0.6); opacity: 0.8; }
+      100% { transform: translate(-50%, -50%) scale(2.0); opacity: 0; }
+    }
+
+    .variant-b .brand-btn:hover {
+      background: var(--surface-hover);
+      border-color: var(--border-strong);
+    }
+
+    .variant-b.is-open .brand-btn {
+      background: var(--surface-hover);
+      border-color: var(--border-strong);
+    }
+    .variant-b.is-open .brand-btn .node-1 { fill: #22C55E; opacity: 1; }
+    .variant-b.is-open .brand-btn .node-2 { fill: #ffd500; opacity: 1; }
+    .variant-b.is-open .brand-btn .node-3 { fill: #EF4444; opacity: 1; }
+    .variant-b.is-open .brand-btn .node-4 { fill: #a855f7; opacity: 1; }
+
+    /* Reveal Horizontal Capsule Ribbon */
+    .capsule-ribbon-b {
+      position: absolute;
+      top: calc(100% + 10px);
+      left: 0;
+      background: rgba(11, 16, 30, 0.95);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border-strong);
+      border-top: 1px solid rgba(56, 189, 248, 0.4);
+      border-radius: var(--r-pill);
+      padding: 6px 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: var(--shadow-hud);
+      z-index: 200;
+      opacity: 0;
+      visibility: hidden;
+      transform-origin: top left;
+      transform: translateY(-8px) scale(0.96);
+      transition: opacity calc(220ms * var(--anim-speed)) cubic-bezier(0.2, 0.8, 0.2, 1),
+                  transform calc(220ms * var(--anim-speed)) cubic-bezier(0.2, 0.8, 0.2, 1),
+                  visibility 0s calc(220ms * var(--anim-speed));
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .variant-b.is-open .capsule-ribbon-b {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0) scale(1);
+      transition: opacity calc(240ms * var(--anim-speed)) cubic-bezier(0.2, 0.8, 0.2, 1),
+                  transform calc(240ms * var(--anim-speed)) cubic-bezier(0.2, 0.8, 0.2, 1),
+                  visibility 0s 0s;
+      pointer-events: auto;
+    }
+
+    .chip-b {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      background: var(--surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-pill);
+      font-size: 11px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all var(--t-fast);
+    }
+    .chip-b:hover {
+      background: var(--surface-hover);
+      color: var(--text-primary);
+      border-color: var(--border-strong);
+      transform: translateY(-1px);
+    }
+    .chip-close-b {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      padding: 4px;
+      border-radius: 50%;
+      margin-left: 4px;
+    }
+    .chip-close-b:hover {
+      color: var(--text-primary);
+      background: rgba(255,255,255,0.08);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       VARIANT C: AEROSPACE HUD FLYOUT & TIERED MONOLITH (The Deep Observability Reference)
+       ══════════════════════════════════════════════════════════════════════════ */
+    /* Hover on Logo: Reactor Breathing Aura & Precision Glint */
+    .variant-c .brand-mark {
+      position: relative;
+    }
+    .variant-c .reactor-aura {
+      position: absolute;
+      inset: -4px;
+      border-radius: 8px;
+      background: radial-gradient(circle, rgba(56, 189, 248, 0.35) 0%, transparent 70%);
+      opacity: 0;
+      transition: opacity calc(300ms * var(--anim-speed)) ease;
+      pointer-events: none;
+    }
+    .variant-c .brand-btn:hover .reactor-aura {
+      opacity: 1;
+      animation: auraPulse calc(1.8s * var(--anim-speed)) infinite alternate ease-in-out;
+    }
+    @keyframes auraPulse {
+      0% { transform: scale(0.9); opacity: 0.4; }
+      100% { transform: scale(1.15); opacity: 0.8; }
+    }
+
+    .variant-c .brand-btn:hover {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+    .variant-c .brand-btn:hover .brand-mark svg {
+      transform: scale(1.06);
+    }
+    .variant-c .brand-badge-ref {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-bg);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 4px;
+      padding: 1px 4px;
+      opacity: 0.7;
+      transition: all var(--t-fast);
+    }
+    .variant-c .brand-btn:hover .brand-badge-ref {
+      opacity: 1;
+      border-color: var(--accent);
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
+    }
+
+    /* Active Logo state */
+    .variant-c.is-open .brand-btn {
+      background: var(--surface-raised);
+      border-color: var(--border-strong);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+
+    /* Reveal Tiered Monolith Card */
+    .monolith-c {
+      position: absolute;
+      top: calc(100% + 10px);
+      left: 0;
+      width: 380px;
+      background: var(--surface-raised);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--r-md);
+      box-shadow: var(--shadow-hud);
+      padding: 16px;
+      z-index: 200;
+      opacity: 0;
+      visibility: hidden;
+      transform-origin: top left;
+      transform: perspective(700px) rotateX(-5deg) translateY(-10px);
+      transition: opacity calc(240ms * var(--anim-speed)) cubic-bezier(0.16, 1, 0.3, 1),
+                  transform calc(240ms * var(--anim-speed)) cubic-bezier(0.16, 1, 0.3, 1),
+                  visibility 0s calc(240ms * var(--anim-speed));
+      pointer-events: none;
+    }
+    .variant-c.is-open .monolith-c {
+      opacity: 1;
+      visibility: visible;
+      transform: perspective(700px) rotateX(0deg) translateY(0);
+      transition: opacity calc(260ms * var(--anim-speed)) cubic-bezier(0.16, 1, 0.3, 1),
+                  transform calc(260ms * var(--anim-speed)) cubic-bezier(0.16, 1, 0.3, 1),
+                  visibility 0s 0s;
+      pointer-events: auto;
+    }
+
+    .monolith-tier-header {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin: 12px 0 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .monolith-tier-header:first-of-type { margin-top: 0; }
+    .monolith-tier-line {
+      flex: 1;
+      height: 1px;
+      background: var(--border-subtle);
+    }
+
+    .monolith-item-c {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 7px 8px;
+      border-radius: 6px;
+      background: var(--surface);
+      margin-bottom: 5px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all var(--t-fast);
+    }
+    .monolith-item-c:hover {
+      background: var(--surface-hover);
+      border-color: var(--border);
+      transform: translateX(3px);
+    }
+    .monolith-swatch-col {
+      padding-top: 3px;
+    }
+    .monolith-content {
+      flex: 1;
+    }
+    .monolith-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .monolith-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .monolith-desc {
+      font-size: 10.5px;
+      color: var(--text-muted);
+      line-height: 1.35;
+      margin-top: 1px;
+    }
+
+    /* ── Topnav Cluster 2: Status Pill & Action ───────────────────────────── */
+    .sim-topnav-status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: var(--r-pill);
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--success-bg);
+      color: var(--success);
+      border: 1px solid var(--success-border);
+    }
+    .pill-dot {
+      width: 7px;
+      height: 7px;
+      background: var(--success);
+      border-radius: 50%;
+      box-shadow: 0 0 6px var(--success);
+    }
+
+    /* ── Topnav Cluster 3: Controls ───────────────────────────────────────── */
+    .sim-topnav-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .meta-time {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .fake-select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      font-size: 11.5px;
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+    .fake-icon-btn {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    /* ── Dashboard Toolbar & Cards Simulation ────────────────────────────── */
+    .sim-dash-body {
+      padding: 20px;
+    }
+
+    /* Summary cards */
+    .sim-summary-row {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .sim-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .sim-card-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--surface-raised);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-secondary);
+    }
+    .sim-card-val {
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+    .sim-card-lbl {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Filter bar */
+    .sim-filter-bar {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .sim-filter-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .sim-filter-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .sim-search-box {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--text-muted);
+      width: 220px;
+    }
+    .sim-chips {
+      display: flex;
+      gap: 6px;
+    }
+    .sim-chip {
+      font-size: 11px;
+      padding: 3px 9px;
+      border-radius: var(--r-pill);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+    }
+    .sim-chip.active {
+      background: var(--surface-hover);
+      color: var(--text-primary);
+      border-color: var(--border-strong);
+      font-weight: 600;
+    }
+
+    /* Relocation callout box */
+    .sim-relocation-notice {
+      background: rgba(34, 197, 94, 0.06);
+      border: 1px dashed rgba(34, 197, 94, 0.35);
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 11.5px;
+      color: var(--success);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .sim-relocation-notice .tag {
+      background: rgba(34, 197, 94, 0.15);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+
+    /* Host Grid Simulation */
+    .sim-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 8px;
+    }
+    .sim-host-card {
+      padding: 10px 8px;
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #FFF;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      cursor: pointer;
+      transition: all var(--t-fast);
+      position: relative;
+    }
+    .sim-host-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    .sim-host-card.dimmed {
+      opacity: 0.15;
+      filter: grayscale(80%);
+    }
+    .sim-host-ip {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      opacity: 0.85;
+      font-weight: 400;
+    }
+    .sim-host-lat {
+      font-size: 9.5px;
+      opacity: 0.9;
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       SIDE-BY-SIDE COMPARISON PLAYGROUND (When toggled)
+       ══════════════════════════════════════════════════════════════════════════ */
+    .side-by-side-section {
+      max-width: 1400px;
+      margin: 28px auto 0;
+      padding: 0 24px;
+      display: none; /* toggled via JS */
+    }
+    .side-by-side-section.active {
+      display: block;
+    }
+    .sbs-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin-top: 14px;
+    }
+    .sbs-card {
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--r-md);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      position: relative;
+    }
+    .sbs-card.recommended {
+      border-color: var(--accent);
+      box-shadow: 0 0 20px -4px rgba(56, 189, 248, 0.15);
+    }
+    .sbs-badge {
+      position: absolute;
+      top: -10px;
+      right: 18px;
+      background: var(--accent);
+      color: #000;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 2px 8px;
+      border-radius: var(--r-pill);
+    }
+    .sbs-header h4 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .sbs-header p {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.4;
+    }
+    .sbs-stage {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      padding: 24px 16px;
+      min-height: 280px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: flex-start;
+      position: relative;
+    }
+    .sbs-props {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 11.5px;
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 12px;
+    }
+    .sbs-prop-row {
+      display: flex;
+      justify-content: space-between;
+      color: var(--text-secondary);
+    }
+    .sbs-prop-row b {
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    /* ── Detailed Evaluation Table ───────────────────────────────────────── */
+    .eval-section {
+      max-width: 1400px;
+      margin: 36px auto 0;
+      padding: 0 24px;
+    }
+    .eval-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      padding: 24px;
+    }
+    .eval-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .eval-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .eval-table th {
+      text-align: left;
+      padding: 10px 14px;
+      background: var(--surface-raised);
+      color: var(--text-secondary);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+    }
+    .eval-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      vertical-align: top;
+      line-height: 1.5;
+    }
+    .eval-table tr:last-child td { border-bottom: none; }
+    .eval-table td:first-child { font-weight: 600; color: var(--text-primary); }
+    .eval-table .highlight { color: var(--accent); font-weight: 600; }
+
+    @media (max-width: 900px) {
+      .sbs-grid { grid-template-columns: 1fr; }
+      .sim-summary-row { grid-template-columns: repeat(2, 1fr); }
+      .hud-panel-a { width: 320px; }
+      .hud-grid-a { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── 1. Simulation Control Header ────────────────────────────────────── -->
+  <header class="sim-header">
+    <div class="sim-brand">
+      <span class="sim-pill">Design Simulation</span>
+      <span class="sim-title">InfraWatch Logo Status Legend Reveal</span>
+    </div>
+
+    <div class="sim-controls">
+      <!-- Active Variant Switcher -->
+      <div class="sim-btn-group" id="variantSelectorGroup">
+        <button class="sim-toggle-btn active" data-variant="a">
+          <span>Variant A: Tactical HUD</span>
+        </button>
+        <button class="sim-toggle-btn" data-variant="b">
+          <span>Variant B: Matrix Ribbon</span>
+        </button>
+        <button class="sim-toggle-btn" data-variant="c">
+          <span>Variant C: Tiered Monolith</span>
+        </button>
+      </div>
+
+      <!-- Animation Speed Slow-Mo -->
+      <div class="sim-btn-group">
+        <button class="sim-toggle-btn active" id="speed1x" title="Normal 1x speed">1.0x</button>
+        <button class="sim-toggle-btn" id="speed05x" title="Slow motion 0.5x speed">0.5x</button>
+        <button class="sim-toggle-btn" id="speed025x" title="Super slow motion 0.25x speed">0.25x</button>
+      </div>
+
+      <!-- View Layout Mode -->
+      <button class="sim-action-btn" id="toggleViewModeBtn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        <span id="viewModeLabel">Compare Side-by-Side</span>
+      </button>
+
+      <!-- Theme Switcher -->
+      <button class="sim-action-btn" id="themeToggleSimBtn" title="Toggle Dark / Light Theme">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+        <span id="themeLabel">Dark</span>
+      </button>
+
+      <!-- Interaction Telemetry Log -->
+      <div class="sim-status-log" id="simStatusLog">State: Ready · Hover or Click Logo</div>
+    </div>
+  </header>
+
+  <!-- ── 2. Live Banner / Overview ───────────────────────────────────────── -->
+  <div class="sim-intro">
+    <div class="intro-box">
+      <div class="intro-text">
+        <h3 id="variantBannerTitle">Variant A: Tactical Radar Ping & Precision HUD Panel (Active in Topnav Below)</h3>
+        <p id="variantBannerDesc">Subtle clockwise ping wave on hover. Clicking unrolls a high-speed, 2-column precision reference HUD directly beneath the logo. Extremely fast (180ms) for high-frequency NOC monitoring.</p>
+      </div>
+      <div class="intro-shortcuts">
+        <span><span class="kbd">Click</span> Toggle</span>
+        <span><span class="kbd">Esc</span> Close</span>
+        <span><span class="kbd">Click Outside</span> Dismiss</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 3. Simulated Real Dashboard Topnav & Body ────────────────────────── -->
+  <div class="app-viewport" id="dashboardViewport">
+    <div class="app-frame">
+
+      <!-- Simulated Topnav -->
+      <nav class="sim-topnav" role="navigation" aria-label="Main Navigation">
+
+        <!-- CLUSTER 1: BRAND LOGO WITH INTERACTIVE STATUS LEGEND -->
+        <div class="brand-interactive-wrap variant-a" id="brandCluster">
+
+          <!-- The Clickable Brand Button -->
+          <button class="brand-btn" id="brandTriggerBtn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="legendOverlayContainer" title="Click to view Status Colour Legend (or press Escape)">
+            <div class="brand-mark" aria-hidden="true">
+              <!-- Sonar ring element for Variant B -->
+              <div class="sonar-ring" aria-hidden="true"></div>
+              <!-- Reactor aura element for Variant C -->
+              <div class="reactor-aura" aria-hidden="true"></div>
+
+              <!-- Real InfraWatch 2x2 Grid SVG -->
+              <svg aria-hidden="true" focusable="false" width="22" height="22" viewBox="0 0 22 22" fill="none">
+                <rect class="node-1" x="2" y="2" width="7" height="7" rx="2" fill="var(--accent)"/>
+                <rect class="node-2" x="13" y="2" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.5"/>
+                <rect class="node-3" x="2" y="13" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.5"/>
+                <rect class="node-4" x="13" y="13" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.7"/>
+              </svg>
+            </div>
+
+            <span class="brand-name">
+              InfraWatch
+              <span class="brand-badge-ref" id="brandBadgeRef" style="display:none;">KEY</span>
+              <span class="brand-indicator" aria-hidden="true">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+              </span>
+            </span>
+          </button>
+
+          <!-- ── OVERLAY CONTAINER (Swapped based on selected variant) ──────── -->
+          <div id="legendOverlayContainer">
+
+            <!-- VARIANT A: TACTICAL HUD PANEL -->
+            <div class="hud-panel-a" id="panelVariantA" role="dialog" aria-label="InfraWatch Status Codes">
+              <div class="hud-header">
+                <span class="hud-title">
+                  <span class="hud-live-dot"></span>
+                  Status Matrix Reference
+                </span>
+                <span class="hud-meta-badge">7 CODES</span>
+              </div>
+
+              <div class="hud-grid-a">
+                <div class="hud-item-a" data-filter="up" title="Filter online targets">
+                  <span class="hl-swatch hl-up"></span>
+                  <span class="hud-item-label">Online</span>
+                  <span class="hud-item-sub">UP · OK</span>
+                </div>
+                <div class="hud-item-a" data-filter="slow" title="Filter slow targets">
+                  <span class="hl-swatch hl-slow"></span>
+                  <span class="hud-item-label">Slow</span>
+                  <span class="hud-item-sub">&gt;500ms</span>
+                </div>
+                <div class="hud-item-a" data-filter="down" title="Filter down unacknowledged targets">
+                  <span class="hl-swatch hl-down"></span>
+                  <span class="hud-item-label">Down — needs ack</span>
+                  <span class="hud-item-sub">ALERT</span>
+                </div>
+                <div class="hud-item-a" data-filter="acked" title="Filter acknowledged targets">
+                  <span class="hl-swatch hl-acked"></span>
+                  <span class="hud-item-label">Down — acked <span class="hl-mark">✓</span></span>
+                  <span class="hud-item-sub">CLAIMED</span>
+                </div>
+                <div class="hud-item-a" data-filter="supp" title="Filter parent-suppressed targets">
+                  <span class="hl-swatch hl-supp"></span>
+                  <span class="hud-item-label">Down — parent</span>
+                  <span class="hud-item-sub">CASCADE</span>
+                </div>
+                <div class="hud-item-a" data-filter="maint" title="Filter maintenance targets">
+                  <span class="hl-swatch hl-maint"></span>
+                  <span class="hud-item-label">Maintenance</span>
+                  <span class="hud-item-sub">WINDOW</span>
+                </div>
+                <div class="hud-item-a" data-filter="nodata" style="grid-column: span 2;" title="Filter targets with no probe data">
+                  <span class="hl-swatch hl-nodata"></span>
+                  <span class="hud-item-label">No probe data</span>
+                  <span class="hud-item-sub">DISCONNECTED / STALE</span>
+                </div>
+              </div>
+
+              <div class="hud-footer">
+                <span>Click swatch to highlight in grid</span>
+                <span><span class="kbd">Esc</span> to close</span>
+              </div>
+            </div>
+
+            <!-- VARIANT B: COMPACT HORIZONTAL CAPSULE RIBBON -->
+            <div class="capsule-ribbon-b" id="panelVariantB" role="dialog" aria-label="InfraWatch Status Codes">
+              <div class="chip-b" data-filter="up"><span class="hl-swatch hl-up"></span>Online</div>
+              <div class="chip-b" data-filter="slow"><span class="hl-swatch hl-slow"></span>Slow</div>
+              <div class="chip-b" data-filter="down"><span class="hl-swatch hl-down"></span>Down — needs ack</div>
+              <div class="chip-b" data-filter="acked"><span class="hl-swatch hl-acked"></span>Down — acked <span class="hl-mark">✓</span></div>
+              <div class="chip-b" data-filter="supp"><span class="hl-swatch hl-supp"></span>Down — parent</div>
+              <div class="chip-b" data-filter="maint"><span class="hl-swatch hl-maint"></span>Maintenance</div>
+              <div class="chip-b" data-filter="nodata"><span class="hl-swatch hl-nodata"></span>No probe data</div>
+              <button class="chip-close-b" id="closeRibbonB" aria-label="Close legend">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+
+            <!-- VARIANT C: TIERED MONOLITH OVERLAY -->
+            <div class="monolith-c" id="panelVariantC" role="dialog" aria-label="InfraWatch Status Codes">
+              <div class="hud-header">
+                <span class="hud-title">
+                  <span class="hud-live-dot" style="background:var(--success); box-shadow:0 0 6px var(--success);"></span>
+                  Fleet Status Reference Key
+                </span>
+                <span class="hud-meta-badge">DOCS &bull; ESC</span>
+              </div>
+
+              <!-- Tier 1: Healthy & Warning -->
+              <div class="monolith-tier-header">
+                <span>01 &bull; Operational & Degraded</span>
+                <span class="monolith-tier-line"></span>
+              </div>
+              <div class="monolith-item-c" data-filter="up">
+                <div class="monolith-swatch-col"><span class="hl-swatch hl-up"></span></div>
+                <div class="monolith-content">
+                  <div class="monolith-title-row"><span class="monolith-label">Online</span></div>
+                  <div class="monolith-desc">Probe successful, latency within nominal threshold (&lt;500ms).</div>
+                </div>
+              </div>
+              <div class="monolith-item-c" data-filter="slow">
+                <div class="monolith-swatch-col"><span class="hl-swatch hl-slow"></span></div>
+                <div class="monolith-content">
+                  <div class="monolith-title-row"><span class="monolith-label">Slow</span></div>
+                  <div class="monolith-desc">Probe responding but latency exceeds 500ms debounce threshold.</div>
+                </div>
+              </div>
+
+              <!-- Tier 2: Active Incidents -->
+              <div class="monolith-tier-header">
+                <span>02 &bull; Active Incidents</span>
+                <span class="monolith-tier-line"></span>
+              </div>
+              <div class="monolith-item-c" data-filter="down">
+                <div class="monolith-swatch-col"><span class="hl-swatch hl-down"></span></div>
+                <div class="monolith-content">
+                  <div class="monolith-title-row"><span class="monolith-label">Down — needs acknowledging</span></div>
+                  <div class="monolith-desc">Critical outage. Audible alarm armed; awaiting operator claim.</div>
+                </div>
+              </div>
+              <div class="monolith-item-c" data-filter="acked">
+                <div class="monolith-swatch-col"><span class="hl-swatch hl-acked"></span></div>
+                <div class="monolith-content">
+                  <div class="monolith-title-row"><span class="monolith-label">Down — acknowledged <span class="hl-mark">✓</span></span></div>
+                  <div class="monolith-desc">Outage claimed by NOC engineer; sound silenced, investigating.</div>
+                </div>
+              </div>
+              <div class="monolith-item-c" data-filter="supp">
+                <div class="monolith-swatch-col"><span class="hl-swatch hl-supp"></span></div>
+                <div class="monolith-content">
+                  <div class="monolith-title-row"><span class="monolith-label">Down — caused by parent</span></div>
+                  <div class="monolith-desc">Suppressed by upstream router/switch failure. No duplicate alarm.</div>
+                </div>
+              </div>
+
+              <!-- Tier 3: Inactive & Stale -->
+              <div class="monolith-tier-header">
+                <span>03 &bull; Scheduled & Inactive</span>
+                <span class="monolith-tier-line"></span>
+              </div>
+              <div class="monolith-item-c" data-filter="maint">
+                <div class="monolith-swatch-col"><span class="hl-swatch hl-maint"></span></div>
+                <div class="monolith-content">
+                  <div class="monolith-title-row"><span class="monolith-label">Maintenance</span></div>
+                  <div class="monolith-desc">Target silenced inside scheduled maintenance window.</div>
+                </div>
+              </div>
+              <div class="monolith-item-c" data-filter="nodata">
+                <div class="monolith-swatch-col"><span class="hl-swatch hl-nodata"></span></div>
+                <div class="monolith-content">
+                  <div class="monolith-title-row"><span class="monolith-label">No probe data</span></div>
+                  <div class="monolith-desc">Prometheus scraper unreachable or target missing samples.</div>
+                </div>
+              </div>
+
+              <div class="hud-footer">
+                <span>Hover status to isolate in host grid</span>
+                <span>Click to lock</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- CLUSTER 2: STATUS PILL -->
+        <div class="sim-topnav-status">
+          <div class="status-pill">
+            <span class="pill-dot"></span>
+            <span>Healthy · All Systems Nominal</span>
+          </div>
+        </div>
+
+        <!-- CLUSTER 3: METRIC CONTROLS -->
+        <div class="sim-topnav-controls">
+          <span class="meta-time">Updated 3s ago</span>
+          <div class="fake-select">Prometheus: US-East-1</div>
+          <button class="fake-icon-btn" title="Refresh">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+          </button>
+          <div class="fake-select" style="font-family:var(--font-mono)">5s</div>
+        </div>
+      </nav>
+
+      <!-- Simulated Dashboard Content -->
+      <div class="sim-dash-body">
+
+        <!-- Summary Cards Row -->
+        <section class="sim-summary-row" aria-label="Summary Cards">
+          <div class="sim-card">
+            <div class="sim-card-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>
+            </div>
+            <div>
+              <div class="sim-card-val">124</div>
+              <div class="sim-card-lbl">Total Hosts</div>
+            </div>
+          </div>
+          <div class="sim-card">
+            <div class="sim-card-icon" style="color:var(--success);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/></svg>
+            </div>
+            <div>
+              <div class="sim-card-val" style="color:var(--success);">118</div>
+              <div class="sim-card-lbl">Online (95.1%)</div>
+            </div>
+          </div>
+          <div class="sim-card">
+            <div class="sim-card-icon" style="color:var(--warning);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+            </div>
+            <div>
+              <div class="sim-card-val" style="color:var(--warning);">2</div>
+              <div class="sim-card-lbl">Warning (>500ms)</div>
+            </div>
+          </div>
+          <div class="sim-card">
+            <div class="sim-card-icon" style="color:var(--critical);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            </div>
+            <div>
+              <div class="sim-card-val" style="color:var(--critical);">4</div>
+              <div class="sim-card-lbl">Offline Targets</div>
+            </div>
+          </div>
+          <div class="sim-card">
+            <div class="sim-card-icon" style="color:var(--accent);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            </div>
+            <div>
+              <div class="sim-card-val" style="color:var(--accent);">99.94%</div>
+              <div class="sim-card-lbl">Availability (24h)</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Hosts Toolbar -->
+        <div class="sim-filter-bar">
+          <div class="sim-filter-left">
+            <span class="sim-filter-title">Internal Hosts</span>
+            <div class="sim-search-box">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+              <span>Search IP / Host / Job…</span>
+            </div>
+            <div class="sim-chips">
+              <span class="sim-chip active">All (124)</span>
+              <span class="sim-chip">Online (118)</span>
+              <span class="sim-chip">Offline (4)</span>
+              <span class="sim-chip">Slow (2)</span>
+            </div>
+          </div>
+          <div>
+            <span class="meta-time" style="font-size:11px;">Displaying 124 of 124 targets</span>
+          </div>
+        </div>
+
+        <!-- Visual Proof: The Space Saved by Relocating the Legend -->
+        <div class="sim-relocation-notice">
+          <span>
+            <strong>✓ Permanent legend bar removed from here:</strong> Saved ~32px vertical height. More host cards now fit above the fold without scrolling.
+          </span>
+          <span class="tag">Zero Clutter</span>
+        </div>
+
+        <!-- Simulated Grid of Host Cards demonstrating all 7 statuses -->
+        <div class="sim-grid" id="simHostGrid">
+          <!-- 1. Online -->
+          <div class="sim-host-card hl-up" data-status="up">
+            <span>gw-core-01</span>
+            <span class="sim-host-ip">10.0.1.1</span>
+            <span class="sim-host-lat">1.4ms</span>
+          </div>
+          <div class="sim-host-card hl-up" data-status="up">
+            <span>k8s-master-01</span>
+            <span class="sim-host-ip">10.0.2.10</span>
+            <span class="sim-host-lat">2.1ms</span>
+          </div>
+          <div class="sim-host-card hl-up" data-status="up">
+            <span>k8s-worker-04</span>
+            <span class="sim-host-ip">10.0.2.14</span>
+            <span class="sim-host-lat">3.8ms</span>
+          </div>
+          <!-- 2. Slow -->
+          <div class="sim-host-card hl-slow" data-status="slow">
+            <span>storage-backup-02</span>
+            <span class="sim-host-ip">10.0.4.12</span>
+            <span class="sim-host-lat">642ms</span>
+          </div>
+          <!-- 3. Down (unacknowledged) -->
+          <div class="sim-host-card hl-down" data-status="down">
+            <span>db-primary-01</span>
+            <span class="sim-host-ip">10.0.3.5</span>
+            <span class="sim-host-lat">TIMEOUT</span>
+          </div>
+          <!-- 4. Down (acknowledged) -->
+          <div class="sim-host-card hl-acked" data-status="acked">
+            <span>redis-cache-03 ✓</span>
+            <span class="sim-host-ip">10.0.3.18</span>
+            <span class="sim-host-lat">ACKED</span>
+          </div>
+          <!-- 5. Down (caused by parent) -->
+          <div class="sim-host-card hl-supp" data-status="supp">
+            <span>edge-cdn-proxy-09</span>
+            <span class="sim-host-ip">10.0.5.99</span>
+            <span class="sim-host-lat">PARENT</span>
+          </div>
+          <!-- 6. Maintenance -->
+          <div class="sim-host-card hl-maint" data-status="maint">
+            <span>patch-node-07</span>
+            <span class="sim-host-ip">10.0.9.7</span>
+            <span class="sim-host-lat">MAINT</span>
+          </div>
+          <!-- 7. No probe data -->
+          <div class="sim-host-card hl-nodata" data-status="nodata">
+            <span>legacy-vpn-gw</span>
+            <span class="sim-host-ip">10.0.99.1</span>
+            <span class="sim-host-lat">NODATA</span>
+          </div>
+          <!-- Repeat healthy to fill grid -->
+          <div class="sim-host-card hl-up" data-status="up">
+            <span>ingress-nginx-01</span>
+            <span class="sim-host-ip">10.0.1.20</span>
+            <span class="sim-host-lat">1.9ms</span>
+          </div>
+          <div class="sim-host-card hl-up" data-status="up">
+            <span>auth-service-01</span>
+            <span class="sim-host-ip">10.0.2.50</span>
+            <span class="sim-host-lat">2.4ms</span>
+          </div>
+          <div class="sim-host-card hl-up" data-status="up">
+            <span>billing-api-02</span>
+            <span class="sim-host-ip">10.0.2.62</span>
+            <span class="sim-host-lat">3.1ms</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 4. Side-by-Side Comparison Section (Toggled) ────────────────────── -->
+  <section class="side-by-side-section" id="sideBySideSection">
+    <div style="margin-bottom: 8px;">
+      <h3 style="font-size: 16px; font-weight: 600;">Side-by-Side Concept Comparison</h3>
+      <p style="font-size: 12.5px; color: var(--text-secondary);">Interact with all three variants independently below to test animations, hover rhythms, and layout ergonomics.</p>
+    </div>
+
+    <div class="sbs-grid">
+
+      <!-- SBS Card A -->
+      <div class="sbs-card recommended">
+        <span class="sbs-badge">Recommended for NOC</span>
+        <div class="sbs-header">
+          <h4>Variant A: Tactical HUD Panel</h4>
+          <p>Clockwise telemetry radar ping on hover. Clicking drops a precision 2-column tactical HUD. Snappy 180ms ease.</p>
+        </div>
+        <div class="sbs-stage" id="sbsStageA">
+          <!-- Standalone trigger A -->
+          <div class="brand-interactive-wrap variant-a" id="sbsWrapA">
+            <button class="brand-btn" id="sbsBtnA" type="button">
+              <div class="brand-mark">
+                <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+                  <rect class="node-1" x="2" y="2" width="7" height="7" rx="2" fill="var(--accent)"/>
+                  <rect class="node-2" x="13" y="2" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.5"/>
+                  <rect class="node-3" x="2" y="13" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.5"/>
+                  <rect class="node-4" x="13" y="13" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.7"/>
+                </svg>
+              </div>
+              <span class="brand-name">
+                InfraWatch
+                <span class="brand-indicator">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </span>
+              </span>
+            </button>
+            <div class="hud-panel-a" id="sbsPanelA" style="position:absolute; top:42px; left:0; width:340px;">
+              <div class="hud-header">
+                <span class="hud-title"><span class="hud-live-dot"></span>Tactical Key</span>
+                <span class="hud-meta-badge">7 CODES</span>
+              </div>
+              <div class="hud-grid-a" style="grid-template-columns:1fr 1fr;">
+                <div class="hud-item-a"><span class="hl-swatch hl-up"></span><span class="hud-item-label">Online</span></div>
+                <div class="hud-item-a"><span class="hl-swatch hl-slow"></span><span class="hud-item-label">Slow</span></div>
+                <div class="hud-item-a"><span class="hl-swatch hl-down"></span><span class="hud-item-label">Down — ack</span></div>
+                <div class="hud-item-a"><span class="hl-swatch hl-acked"></span><span class="hud-item-label">Acked ✓</span></div>
+                <div class="hud-item-a"><span class="hl-swatch hl-supp"></span><span class="hud-item-label">Parent</span></div>
+                <div class="hud-item-a"><span class="hl-swatch hl-maint"></span><span class="hud-item-label">Maint</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="sbs-props">
+          <div class="sbs-prop-row"><span>Hover effect:</span> <b>Clockwise Radar Sweep</b></div>
+          <div class="sbs-prop-row"><span>Reveal motion:</span> <b>Spring drop (180ms)</b></div>
+          <div class="sbs-prop-row"><span>Layout:</span> <b>2-column structured grid</b></div>
+          <div class="sbs-prop-row"><span>Best for:</span> <b>Maximum speed & zero fatigue</b></div>
+        </div>
+      </div>
+
+      <!-- SBS Card B -->
+      <div class="sbs-card">
+        <div class="sbs-header">
+          <h4>Variant B: Matrix Morph Ribbon</h4>
+          <p>Logo nodes turn Green, Amber, Red, Purple on hover with a sonar ping. Unfolds an aerodynamic horizontal capsule ribbon.</p>
+        </div>
+        <div class="sbs-stage" id="sbsStageB">
+          <!-- Standalone trigger B -->
+          <div class="brand-interactive-wrap variant-b" id="sbsWrapB">
+            <button class="brand-btn" id="sbsBtnB" type="button">
+              <div class="brand-mark">
+                <div class="sonar-ring"></div>
+                <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+                  <rect class="node-1" x="2" y="2" width="7" height="7" rx="2" fill="var(--accent)"/>
+                  <rect class="node-2" x="13" y="2" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.5"/>
+                  <rect class="node-3" x="2" y="13" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.5"/>
+                  <rect class="node-4" x="13" y="13" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.7"/>
+                </svg>
+              </div>
+              <span class="brand-name">InfraWatch</span>
+            </button>
+            <div class="capsule-ribbon-b" id="sbsPanelB" style="position:absolute; top:42px; left:0; flex-wrap:wrap; width:330px; border-radius:12px;">
+              <div class="chip-b"><span class="hl-swatch hl-up"></span>Online</div>
+              <div class="chip-b"><span class="hl-swatch hl-slow"></span>Slow</div>
+              <div class="chip-b"><span class="hl-swatch hl-down"></span>Down</div>
+              <div class="chip-b"><span class="hl-swatch hl-acked"></span>Acked ✓</div>
+              <div class="chip-b"><span class="hl-swatch hl-supp"></span>Parent</div>
+              <div class="chip-b"><span class="hl-swatch hl-maint"></span>Maint</div>
+            </div>
+          </div>
+        </div>
+        <div class="sbs-props">
+          <div class="sbs-prop-row"><span>Hover effect:</span> <b>Node Spectrum + Sonar Ring</b></div>
+          <div class="sbs-prop-row"><span>Reveal motion:</span> <b>Horizontal Pill Unfold (240ms)</b></div>
+          <div class="sbs-prop-row"><span>Layout:</span> <b>Compact status chip stream</b></div>
+          <div class="sbs-prop-row"><span>Best for:</span> <b>High delight & semantic branding</b></div>
+        </div>
+      </div>
+
+      <!-- SBS Card C -->
+      <div class="sbs-card">
+        <div class="sbs-header">
+          <h4>Variant C: Tiered Monolith</h4>
+          <p>Reactor core glow & scale on hover. Unfolds a deep 3-tier reference monolith card with full operator glossary.</p>
+        </div>
+        <div class="sbs-stage" id="sbsStageC">
+          <!-- Standalone trigger C -->
+          <div class="brand-interactive-wrap variant-c" id="sbsWrapC">
+            <button class="brand-btn" id="sbsBtnC" type="button">
+              <div class="brand-mark">
+                <div class="reactor-aura"></div>
+                <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+                  <rect class="node-1" x="2" y="2" width="7" height="7" rx="2" fill="var(--accent)"/>
+                  <rect class="node-2" x="13" y="2" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.5"/>
+                  <rect class="node-3" x="2" y="13" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.5"/>
+                  <rect class="node-4" x="13" y="13" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.7"/>
+                </svg>
+              </div>
+              <span class="brand-name">
+                InfraWatch
+                <span class="brand-badge-ref" style="display:inline-block;">KEY</span>
+              </span>
+            </button>
+            <div class="monolith-c" id="sbsPanelC" style="position:absolute; top:42px; left:0; width:320px; padding:12px;">
+              <div class="hud-header">
+                <span class="hud-title"><span class="hud-live-dot" style="background:var(--success)"></span>Tiered Glossary</span>
+              </div>
+              <div class="monolith-tier-header"><span>01 · Operational</span><span class="monolith-tier-line"></span></div>
+              <div class="monolith-item-c" style="padding:4px 6px;"><span class="hl-swatch hl-up"></span><span class="monolith-label">Online</span></div>
+              <div class="monolith-item-c" style="padding:4px 6px;"><span class="hl-swatch hl-slow"></span><span class="monolith-label">Slow</span></div>
+              <div class="monolith-tier-header"><span>02 · Incidents</span><span class="monolith-tier-line"></span></div>
+              <div class="monolith-item-c" style="padding:4px 6px;"><span class="hl-swatch hl-down"></span><span class="monolith-label">Down — needs ack</span></div>
+              <div class="monolith-item-c" style="padding:4px 6px;"><span class="hl-swatch hl-acked"></span><span class="monolith-label">Down — acked ✓</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="sbs-props">
+          <div class="sbs-prop-row"><span>Hover effect:</span> <b>Reactor Core Aura + Micro Badge</b></div>
+          <div class="sbs-prop-row"><span>Reveal motion:</span> <b>3D Tilt Drop (260ms)</b></div>
+          <div class="sbs-prop-row"><span>Layout:</span> <b>Grouped 3-tier glossary</b></div>
+          <div class="sbs-prop-row"><span>Best for:</span> <b>Deep training & complex alerts</b></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── 5. Detailed Creative & Tradeoff Evaluation Table ─────────────────── -->
+  <section class="eval-section">
+    <div class="eval-card">
+      <h3 class="eval-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        Creative Direction & Tradeoff Analysis
+      </h3>
+
+      <table class="eval-table">
+        <thead>
+          <tr>
+            <th style="width: 18%;">Dimension</th>
+            <th style="width: 27%;">Variant A: Tactical HUD (Recommended)</th>
+            <th style="width: 27%;">Variant B: Matrix Morph Ribbon</th>
+            <th style="width: 28%;">Variant C: Tiered Monolith</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Visual Character</td>
+            <td><strong>High-precision telemetry instrument.</strong> Clean, restrained, utilitarian. Matches Datadog / Linear command center aesthetics.</td>
+            <td><strong>Playful yet functional hardware motif.</strong> Directly associates the 4-node logo squares with system health statuses.</td>
+            <td><strong>Aerospace cockpit diagnostic console.</strong> Rich, authoritative, educational. Built for complex NOC tier-1 runbooks.</td>
+          </tr>
+          <tr>
+            <td>Logo Hover Animation</td>
+            <td>Clockwise radar ping pulse across the 4 nodes. Subtle cyan glow cycle (1.2s). Zero distraction for peripheral vision.</td>
+            <td>Nodes transition into actual status colors (Green, Yellow, Red, Purple) + faint expanding sonar wave. Highly eye-catching.</td>
+            <td>Radial reactor aura breathing effect + subtle 1.06x scale + illuminated <code>KEY</code> badge. Feels high-tech and tactile.</td>
+          </tr>
+          <tr>
+            <td>Reveal Transition Style</td>
+            <td>Snappy spring drop (180ms ease). Anchored directly under logo. Smooth reverse collapse in 140ms.</td>
+            <td>Horizontal pill ribbon expansion (240ms). Slides smoothly into an auxiliary status dock.</td>
+            <td>3D perspective tilt drop with subtle stagger (260ms). Drops like a flight HUD overlay.</td>
+          </tr>
+          <tr>
+            <td>Information Ergonomics</td>
+            <td><span class="highlight">Optimal for quick lookup:</span> 2 structured columns grouping active health vs incidents vs maintenance.</td>
+            <td>Linear horizontal scan. Extremely compact height, but wider footprint across the navigation bar.</td>
+            <td>Categorized into 3 logical tiers with full status descriptions and state definitions.</td>
+          </tr>
+          <tr>
+            <td>Operational Trade-off</td>
+            <td><em>Slightly less "novel" than a full morph</em>, but operator fatigue is zero; feels instantaneous even during high-pressure incidents.</td>
+            <td><em>Multi-color hover</em> might draw undue attention during normal mouse travel over the topnav.</td>
+            <td><em>Larger surface area</em> (380px wide) takes an extra fraction of a second to read completely.</td>
+          </tr>
+          <tr>
+            <td>Implementation Footprint</td>
+            <td>Zero new dependencies. Uses native CSS tokens and ~40 lines of scoped CSS in <code>nav.css</code>. Removes <code>#hostLegend</code> row.</td>
+            <td>Requires scoped CSS ribbon rules and horizontal flex wrap breakpoints.</td>
+            <td>Requires 3-tier HTML template structure and perspective transform styles.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════
+       INTERACTION & SIMULATION SCRIPT
+       ══════════════════════════════════════════════════════════════════════════ -->
+  <script>
+    (function() {
+      // Elements
+      const brandCluster = document.getElementById('brandCluster');
+      const brandTriggerBtn = document.getElementById('brandTriggerBtn');
+      const brandBadgeRef = document.getElementById('brandBadgeRef');
+      const variantSelectorGroup = document.getElementById('variantSelectorGroup');
+      const variantBannerTitle = document.getElementById('variantBannerTitle');
+      const variantBannerDesc = document.getElementById('variantBannerDesc');
+      const toggleViewModeBtn = document.getElementById('toggleViewModeBtn');
+      const viewModeLabel = document.getElementById('viewModeLabel');
+      const sideBySideSection = document.getElementById('sideBySideSection');
+      const themeToggleSimBtn = document.getElementById('themeToggleSimBtn');
+      const themeLabel = document.getElementById('themeLabel');
+      const simStatusLog = document.getElementById('simStatusLog');
+      const hostGrid = document.getElementById('simHostGrid');
+      const closeRibbonB = document.getElementById('closeRibbonB');
+
+      // Panels
+      const panelA = document.getElementById('panelVariantA');
+      const panelB = document.getElementById('panelVariantB');
+      const panelC = document.getElementById('panelVariantC');
+
+      // Speed buttons
+      const speed1x = document.getElementById('speed1x');
+      const speed05x = document.getElementById('speed05x');
+      const speed025x = document.getElementById('speed025x');
+
+      let currentVariant = 'a';
+      let isOpen = false;
+
+      const variantMetadata = {
+        a: {
+          title: 'Variant A: Tactical Radar Ping & Precision HUD Panel (Active in Topnav Below)',
+          desc: 'Subtle clockwise ping wave on hover. Clicking unrolls a high-speed, 2-column precision reference HUD directly beneath the logo. Extremely fast (180ms) for high-frequency NOC monitoring.',
+          showBadge: false
+        },
+        b: {
+          title: 'Variant B: Status Matrix Morph & Floating Capsule Ribbon (Active in Topnav Below)',
+          desc: 'Logo quadrants shift to Green/Amber/Red/Purple with an expanding sonar wave. Clicking unfolds a horizontal status ribbon with capsule chips. High semantic delight.',
+          showBadge: false
+        },
+        c: {
+          title: 'Variant C: Aerospace HUD Flyout & Tiered Monolith (Active in Topnav Below)',
+          desc: 'Breathing reactor aura and tactile scale on hover. Clicking reveals a rich 3-tiered diagnostic reference monolith card with full incident definitions.',
+          showBadge: true
+        }
+      };
+
+      function updateStatusLog(msg) {
+        simStatusLog.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      }
+
+      function setVariant(variant) {
+        currentVariant = variant;
+        closeLegend();
+
+        // Update brand container class
+        brandCluster.className = `brand-interactive-wrap variant-${variant}`;
+
+        // Update UI badge if needed
+        brandBadgeRef.style.display = variantMetadata[variant].showBadge ? 'inline-block' : 'none';
+
+        // Update banner text
+        variantBannerTitle.textContent = variantMetadata[variant].title;
+        variantBannerDesc.textContent = variantMetadata[variant].desc;
+
+        // Update buttons
+        variantSelectorGroup.querySelectorAll('.sim-toggle-btn').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.variant === variant);
+        });
+
+        // Hide non-active panels
+        panelA.style.display = (variant === 'a') ? 'block' : 'none';
+        panelB.style.display = (variant === 'b') ? 'flex' : 'none';
+        panelC.style.display = (variant === 'c') ? 'block' : 'none';
+
+        updateStatusLog(`Switched to Variant ${variant.toUpperCase()}`);
+      }
+
+      function openLegend() {
+        if (isOpen) return;
+        isOpen = true;
+        brandCluster.classList.add('is-open');
+        brandTriggerBtn.setAttribute('aria-expanded', 'true');
+        updateStatusLog(`Legend opened (Variant ${currentVariant.toUpperCase()})`);
+      }
+
+      function closeLegend() {
+        if (!isOpen) return;
+        isOpen = false;
+        brandCluster.classList.remove('is-open');
+        brandTriggerBtn.setAttribute('aria-expanded', 'false');
+        resetGridDimming();
+        updateStatusLog(`Legend closed`);
+      }
+
+      function toggleLegend() {
+        if (isOpen) closeLegend();
+        else openLegend();
+      }
+
+      // Trigger Click
+      brandTriggerBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleLegend();
+      });
+
+      if (closeRibbonB) {
+        closeRibbonB.addEventListener('click', (e) => {
+          e.stopPropagation();
+          closeLegend();
+        });
+      }
+
+      // Click outside listener
+      document.addEventListener('click', (e) => {
+        if (isOpen && !brandCluster.contains(e.target)) {
+          closeLegend();
+          updateStatusLog('Closed via click outside');
+        }
+      });
+
+      // Escape key listener
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isOpen) {
+          closeLegend();
+          updateStatusLog('Closed via [Escape]');
+        }
+      });
+
+      // Variant Buttons
+      variantSelectorGroup.querySelectorAll('.sim-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          setVariant(btn.dataset.variant);
+        });
+      });
+
+      // Speed Multipliers
+      function setSpeed(multiplier, activeBtn) {
+        document.documentElement.style.setProperty('--anim-speed', multiplier);
+        [speed1x, speed05x, speed025x].forEach(b => b.classList.remove('active'));
+        activeBtn.classList.add('active');
+        updateStatusLog(`Animation speed set to ${1/multiplier}x (${multiplier} factor)`);
+      }
+      speed1x.addEventListener('click', () => setSpeed(1, speed1x));
+      speed05x.addEventListener('click', () => setSpeed(2, speed05x));
+      speed025x.addEventListener('click', () => setSpeed(4, speed025x));
+
+      // Theme toggle
+      themeToggleSimBtn.addEventListener('click', () => {
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const nextTheme = isDark ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', nextTheme);
+        themeLabel.textContent = isDark ? 'Light' : 'Dark';
+        updateStatusLog(`Theme switched to ${nextTheme.toUpperCase()}`);
+      });
+
+      // Toggle side-by-side mode
+      toggleViewModeBtn.addEventListener('click', () => {
+        const isSbs = sideBySideSection.classList.toggle('active');
+        viewModeLabel.textContent = isSbs ? 'Hide Comparison' : 'Compare Side-by-Side';
+        if (isSbs) {
+          sideBySideSection.scrollIntoView({ behavior: 'smooth' });
+          updateStatusLog('Opened Side-by-Side playground');
+        } else {
+          updateStatusLog('Closed Side-by-Side playground');
+        }
+      });
+
+      // Standalone side-by-side card interactions
+      function wireSbs(btnId, wrapId, panelId) {
+        const btn = document.getElementById(btnId);
+        const wrap = document.getElementById(wrapId);
+        const panel = document.getElementById(panelId);
+        let open = false;
+
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          open = !open;
+          wrap.classList.toggle('is-open', open);
+        });
+
+        document.addEventListener('click', (e) => {
+          if (open && !wrap.contains(e.target)) {
+            open = false;
+            wrap.classList.remove('is-open');
+          }
+        });
+      }
+      wireSbs('sbsBtnA', 'sbsWrapA', 'sbsPanelA');
+      wireSbs('sbsBtnB', 'sbsWrapB', 'sbsPanelB');
+      wireSbs('sbsBtnC', 'sbsWrapC', 'sbsPanelC');
+
+      // Grid Dimming & Highlighting on status hover
+      function filterGridByStatus(status) {
+        if (!hostGrid) return;
+        const cards = hostGrid.querySelectorAll('.sim-host-card');
+        cards.forEach(card => {
+          if (!status || status === 'all') {
+            card.classList.remove('dimmed');
+          } else if (card.dataset.status === status) {
+            card.classList.remove('dimmed');
+          } else {
+            card.classList.add('dimmed');
+          }
+        });
+      }
+
+      function resetGridDimming() {
+        if (!hostGrid) return;
+        hostGrid.querySelectorAll('.sim-host-card').forEach(c => c.classList.remove('dimmed'));
+      }
+
+      // Wire items inside all panels to trigger grid dimming
+      document.querySelectorAll('[data-filter]').forEach(item => {
+        item.addEventListener('mouseenter', () => {
+          filterGridByStatus(item.dataset.filter);
+        });
+        item.addEventListener('mouseleave', () => {
+          resetGridDimming();
+        });
+      });
+
+      // Init
+      setVariant('a');
+    })();
+  </script>
+</body>
+</html>

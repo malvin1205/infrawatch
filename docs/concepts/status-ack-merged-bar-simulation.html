@@ -1,0 +1,2333 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InfraWatch — Status & Acknowledge Bar · 5 Unique Concepts</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;1,14..32,400&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    /* ══════════════════════════════════════════════════════════════════════════
+       InfraWatch Real Design System Tokens
+       ══════════════════════════════════════════════════════════════════════════ */
+    :root {
+      color-scheme: dark;
+      --bg: #030712;
+      --bg-elevated: #080D1A;
+      --bg-card: #0D1322;
+      --surface: #0A0F1D;
+      --surface-raised: #111827;
+      --surface-hover: #1E293B;
+
+      --border: rgba(255, 255, 255, 0.08);
+      --border-subtle: rgba(255, 255, 255, 0.04);
+      --border-strong: rgba(255, 255, 255, 0.14);
+
+      --text-primary: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --text-muted: #64748B;
+      --text-inverse: #020408;
+
+      --success: #10B981;
+      --success-glow: rgba(16, 185, 129, 0.35);
+      --success-bg: rgba(16, 185, 129, 0.12);
+      --success-border: rgba(16, 185, 129, 0.28);
+
+      --warning: #F59E0B;
+      --warning-glow: rgba(245, 158, 11, 0.35);
+      --warning-bg: rgba(245, 158, 11, 0.12);
+      --warning-border: rgba(245, 158, 11, 0.28);
+
+      --critical: #EF4444;
+      --critical-glow: rgba(239, 68, 68, 0.4);
+      --critical-bg: rgba(239, 68, 68, 0.12);
+      --critical-border: rgba(239, 68, 68, 0.3);
+
+      --accent: #38BDF8;
+      --accent-glow: rgba(56, 189, 248, 0.35);
+      --accent-bg: rgba(56, 189, 248, 0.10);
+
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+
+      --r-pill: 9999px;
+      --r-lg: 16px;
+      --r-md: 12px;
+      --r-sm: 8px;
+
+      --t-fast: 150ms ease;
+      --t-base: 240ms ease;
+      --t-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    [data-theme="light"] {
+      color-scheme: light;
+      --bg: #F8FAFC;
+      --bg-elevated: #F1F5F9;
+      --bg-card: #FFFFFF;
+      --surface: #FFFFFF;
+      --surface-raised: #F8FAFC;
+      --surface-hover: #E2E8F0;
+
+      --border: rgba(0, 0, 0, 0.08);
+      --border-subtle: rgba(0, 0, 0, 0.04);
+      --border-strong: rgba(0, 0, 0, 0.15);
+
+      --text-primary: #0F172A;
+      --text-secondary: #475569;
+      --text-muted: #64748B;
+      --text-inverse: #FFFFFF;
+
+      --success: #059669;
+      --success-glow: rgba(5, 150, 105, 0.2);
+      --success-bg: rgba(5, 150, 105, 0.08);
+      --success-border: rgba(5, 150, 105, 0.22);
+
+      --warning: #D97706;
+      --warning-glow: rgba(217, 119, 6, 0.2);
+      --warning-bg: rgba(217, 119, 6, 0.08);
+      --warning-border: rgba(217, 119, 6, 0.22);
+
+      --critical: #DC2626;
+      --critical-glow: rgba(220, 38, 38, 0.25);
+      --critical-bg: rgba(220, 38, 38, 0.08);
+      --critical-border: rgba(220, 38, 38, 0.22);
+
+      --accent: #0284C7;
+      --accent-glow: rgba(2, 132, 199, 0.2);
+      --accent-bg: rgba(2, 132, 199, 0.08);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text-primary);
+      font-family: var(--font);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      padding-bottom: 120px;
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       GLOBAL CONTROLLER HUD (Sticky Header)
+       ══════════════════════════════════════════════════════════════════════════ */
+    .sim-hud {
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      background: rgba(10, 15, 29, 0.9);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border-strong);
+      padding: 10px 24px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    }
+
+    [data-theme="light"] .sim-hud {
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    }
+
+    .hud-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .hud-brand-pill {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(16, 185, 129, 0.2));
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      color: var(--accent);
+      padding: 4px 10px;
+      border-radius: var(--r-pill);
+    }
+
+    .hud-title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .hud-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .hud-group {
+      display: flex;
+      align-items: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      padding: 3px;
+      gap: 2px;
+    }
+
+    .hud-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: calc(var(--r-md) - 3px);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all var(--t-fast);
+      font-family: var(--font);
+    }
+
+    .hud-btn:hover {
+      color: var(--text-primary);
+      background: var(--surface-hover);
+    }
+
+    .hud-btn.active {
+      background: var(--surface-raised);
+      color: var(--text-primary);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border-strong);
+    }
+
+    .hud-btn.state-crit.active {
+      background: var(--critical-bg);
+      color: var(--critical);
+      border-color: var(--critical-border);
+    }
+
+    .hud-btn.state-warn.active {
+      background: var(--warning-bg);
+      color: var(--warning);
+      border-color: var(--warning-border);
+    }
+
+    .hud-btn.state-acked.active {
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--accent);
+      border-color: rgba(56, 189, 248, 0.3);
+    }
+
+    .hud-btn.state-ok.active {
+      background: var(--success-bg);
+      color: var(--success);
+      border-color: var(--success-border);
+    }
+
+    .hud-btn-action {
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      color: var(--text-primary);
+    }
+
+    .hud-btn-action:hover {
+      background: var(--accent-bg);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       HERO INTRODUCTION
+       ══════════════════════════════════════════════════════════════════════════ */
+    .hero {
+      max-width: 1280px;
+      margin: 32px auto 20px;
+      padding: 0 24px;
+    }
+
+    .hero-pre {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 6px;
+    }
+
+    .hero-h1 {
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.2;
+      margin-bottom: 10px;
+      background: linear-gradient(135deg, #FFFFFF 40%, #94A3B8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    [data-theme="light"] .hero-h1 {
+      background: linear-gradient(135deg, #0F172A 40%, #475569 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero-desc {
+      font-size: 14.5px;
+      color: var(--text-secondary);
+      max-width: 860px;
+      line-height: 1.6;
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       TOPNAV LIVE PREVIEW ARENA
+       ══════════════════════════════════════════════════════════════════════════ */
+    .preview-arena-card {
+      max-width: 1280px;
+      margin: 0 auto 48px;
+      padding: 0 24px;
+    }
+
+    .arena-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--r-lg);
+      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45);
+      overflow: hidden;
+    }
+
+    .arena-header {
+      padding: 14px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .arena-tab-list {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--bg);
+      padding: 3px;
+      border-radius: var(--r-md);
+      border: 1px solid var(--border);
+    }
+
+    .arena-tab {
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 13px;
+      border-radius: calc(var(--r-md) - 3px);
+      cursor: pointer;
+      transition: all var(--t-fast);
+      font-family: var(--font);
+    }
+
+    .arena-tab:hover {
+      color: var(--text-primary);
+    }
+
+    .arena-tab.active {
+      background: var(--surface-raised);
+      color: var(--accent);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+
+    .arena-meta-badge {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .arena-stage {
+      padding: 40px 24px;
+      background: radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.05) 0%, transparent 70%), var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Topnav Frame Mockup - exact replica of InfraWatch nav */
+    .topnav-mockup {
+      width: 100%;
+      max-width: 1180px;
+      height: 56px;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--r-md);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      position: relative;
+    }
+
+    .mockup-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: -0.01em;
+      flex-shrink: 0;
+    }
+
+    .mockup-brand-logo {
+      width: 22px;
+      height: 22px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2.5px;
+    }
+
+    .mockup-brand-logo span {
+      background: var(--accent);
+      border-radius: 2px;
+    }
+
+    .mockup-legend {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      color: var(--text-muted);
+      border-left: 1px solid var(--border);
+      padding-left: 12px;
+      margin-left: 4px;
+    }
+
+    .mockup-legend span {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .legend-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+
+    .mockup-status-slot {
+      margin-left: 18px;
+      margin-right: auto;
+      display: flex;
+      align-items: center;
+      height: 32px;
+    }
+
+    .mockup-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      flex-shrink: 0;
+    }
+
+    .mockup-icon-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--r-sm);
+      border: 1px solid var(--border);
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-secondary);
+    }
+
+    .mockup-pill-meta {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       COMMON STYLES ACROSS ALL CONCEPTS (32px Standard Height)
+       ══════════════════════════════════════════════════════════════════════════ */
+    .concept-widget {
+      height: 32px;
+      box-sizing: border-box;
+      display: inline-flex;
+      align-items: center;
+      user-select: none;
+      vertical-align: middle;
+      transition: all var(--t-base);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       OPTION 1: AERO-BLADE DUAL CHAMBER (-18° Angled Laser Seam & Shimmer)
+       ══════════════════════════════════════════════════════════════════════════ */
+    .c1-bar {
+      border-radius: var(--r-pill);
+      background: rgba(10, 15, 29, 0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .c1-bar.crit {
+      border-color: rgba(239, 68, 68, 0.4);
+      box-shadow: 0 0 20px rgba(239, 68, 68, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    }
+    .c1-bar.warn {
+      border-color: rgba(245, 158, 11, 0.4);
+      box-shadow: 0 0 20px rgba(245, 158, 11, 0.25);
+    }
+    .c1-bar.acked {
+      border-color: rgba(56, 189, 248, 0.35);
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.15);
+    }
+    .c1-bar.ok {
+      border-color: rgba(16, 185, 129, 0.4);
+      box-shadow: 0 0 16px rgba(16, 185, 129, 0.2);
+    }
+
+    .c1-left {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 12px 0 13px;
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+    }
+
+    .c1-pinger {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .crit .c1-pinger { background: #EF4444; }
+    .warn .c1-pinger { background: #F59E0B; }
+    .acked .c1-pinger { background: #38BDF8; }
+    .ok .c1-pinger { background: #10B981; }
+
+    .c1-pinger::before {
+      content: '';
+      position: absolute;
+      inset: -3px;
+      border-radius: 50%;
+      border: 1.5px solid currentColor;
+      opacity: 0;
+      animation: c1-ping 2s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+    }
+    .crit .c1-pinger::before { color: #EF4444; }
+    .warn .c1-pinger::before { color: #F59E0B; }
+
+    @keyframes c1-ping {
+      0% { transform: scale(0.6); opacity: 0.9; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+
+    .c1-count-chip {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: var(--r-pill);
+      background: rgba(255, 255, 255, 0.07);
+    }
+    .crit .c1-count-chip {
+      background: rgba(239, 68, 68, 0.25);
+      color: #FCA5A5;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+    .warn .c1-count-chip {
+      background: rgba(245, 158, 11, 0.25);
+      color: #FCD34D;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+
+    /* Clean Skewed Seam */
+    .c1-seam {
+      width: 12px;
+      height: 100%;
+      position: relative;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .c1-seam-line {
+      position: absolute;
+      top: -20%;
+      bottom: -20%;
+      left: 50%;
+      width: 1.5px;
+      background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+      transform: skewX(-18deg);
+    }
+    .c1-seam-bead {
+      position: absolute;
+      width: 3px;
+      height: 8px;
+      border-radius: 2px;
+      background: #FFFFFF;
+      box-shadow: 0 0 6px #FFFFFF;
+      transform: skewX(-18deg) translateX(-1px);
+      animation: c1-bead 2.5s ease-in-out infinite alternate;
+    }
+    @keyframes c1-bead {
+      0% { top: 10%; opacity: 0.3; }
+      100% { top: 75%; opacity: 1; }
+    }
+
+    /* Action button */
+    .c1-btn {
+      border: none;
+      background: transparent;
+      padding: 0 14px 0 8px;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #FFFFFF;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: all var(--t-fast);
+      font-family: var(--font);
+    }
+    .c1-btn::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.9) 0%, rgba(185, 28, 28, 0.95) 100%);
+      z-index: 1;
+      transition: filter var(--t-fast);
+    }
+    .warn .c1-btn::before {
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.9) 0%, rgba(180, 83, 9, 0.95) 100%);
+    }
+    .c1-btn:hover::before {
+      filter: brightness(1.15);
+    }
+    .c1-btn:active {
+      transform: scale(0.98);
+    }
+    .c1-btn-content {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    /* Shimmer sweep */
+    .c1-btn::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 60%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+      transform: skewX(-20deg);
+      z-index: 2;
+      animation: c1-shimmer 4s infinite;
+    }
+    @keyframes c1-shimmer {
+      0%, 65% { left: -100%; }
+      100% { left: 200%; }
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       OPTION 2: DYNAMIC MAGNETIC ISLAND (Nested Floating Cradle)
+       ══════════════════════════════════════════════════════════════════════════ */
+    .c2-island {
+      border-radius: var(--r-pill);
+      background: #090E17;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+      padding: 2px 3px 2px 12px;
+      gap: 10px;
+      position: relative;
+    }
+    .c2-island.crit {
+      border-color: rgba(239, 68, 68, 0.35);
+      box-shadow: 0 0 18px rgba(239, 68, 68, 0.2);
+    }
+    .c2-island.warn {
+      border-color: rgba(245, 158, 11, 0.35);
+      box-shadow: 0 0 18px rgba(245, 158, 11, 0.2);
+    }
+    .c2-island.acked {
+      border-color: rgba(56, 189, 248, 0.3);
+    }
+    .c2-island.ok {
+      border-color: rgba(16, 185, 129, 0.35);
+    }
+
+    .c2-left {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11.5px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .c2-heartbeat {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #EF4444;
+      box-shadow: 0 0 8px #EF4444;
+      animation: c2-hb 1.5s ease-in-out infinite;
+    }
+    .warn .c2-heartbeat { background: #F59E0B; box-shadow: 0 0 8px #F59E0B; }
+    .acked .c2-heartbeat { background: #38BDF8; box-shadow: 0 0 8px #38BDF8; }
+    .ok .c2-heartbeat { background: #10B981; box-shadow: 0 0 8px #10B981; }
+
+    @keyframes c2-hb {
+      0%, 100% { transform: scale(1); opacity: 0.8; }
+      50% { transform: scale(1.3); opacity: 1; }
+    }
+
+    .c2-tag {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      background: rgba(255, 255, 255, 0.05);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+
+    /* Floating nested button */
+    .c2-btn {
+      height: 26px;
+      padding: 0 11px;
+      border-radius: var(--r-pill);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: linear-gradient(180deg, #DC2626 0%, #B91C1C 100%);
+      color: #FFFFFF;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      box-shadow: 0 2px 6px rgba(220, 38, 38, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+      transition: all var(--t-fast) var(--t-spring);
+      font-family: var(--font);
+    }
+    .warn .c2-btn {
+      background: linear-gradient(180deg, #D97706 0%, #B45309 100%);
+      box-shadow: 0 2px 6px rgba(217, 119, 6, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    }
+    .c2-btn:hover {
+      transform: translateY(-1px) scale(1.03);
+      filter: brightness(1.12);
+      box-shadow: 0 4px 12px rgba(220, 38, 38, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    }
+    .c2-btn:active {
+      transform: translateY(1px) scale(0.97);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       OPTION 3: TACTICAL SLIDE-TO-DISARM (Real Draggable Slider)
+       ══════════════════════════════════════════════════════════════════════════ */
+    .c3-guarded {
+      border-radius: var(--r-pill);
+      background: #070B14;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5);
+      padding: 2px 3px 2px 12px;
+      gap: 10px;
+    }
+    .c3-guarded.crit {
+      border-color: rgba(239, 68, 68, 0.35);
+      background: linear-gradient(90deg, rgba(239, 68, 68, 0.08) 0%, #070B14 70%);
+    }
+    .c3-guarded.warn {
+      border-color: rgba(245, 158, 11, 0.35);
+    }
+    .c3-guarded.acked {
+      border-color: rgba(56, 189, 248, 0.3);
+    }
+
+    .c3-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11.5px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    /* Slider track */
+    .c3-slider-track {
+      position: relative;
+      width: 132px;
+      height: 26px;
+      background: rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--r-pill);
+      display: flex;
+      align-items: center;
+      padding: 0 2px;
+      cursor: grab;
+      user-select: none;
+      overflow: hidden;
+    }
+    .c3-slider-track:active {
+      cursor: grabbing;
+    }
+
+    .c3-progress-fill {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, rgba(239, 68, 68, 0.3), rgba(16, 185, 129, 0.6));
+      border-radius: var(--r-pill);
+      pointer-events: none;
+      transition: width 50ms linear;
+    }
+
+    .c3-slider-label {
+      position: absolute;
+      left: 28px;
+      right: 6px;
+      text-align: center;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.6);
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+    }
+    .c3-flow-arrow {
+      animation: c3-flow 1.4s ease-in-out infinite;
+      letter-spacing: -2px;
+    }
+    @keyframes c3-flow {
+      0%, 100% { opacity: 0.3; transform: translateX(0); }
+      50% { opacity: 1; transform: translateX(3px); }
+    }
+
+    .c3-slider-thumb {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #EF4444;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #FFFFFF;
+      box-shadow: 0 0 8px rgba(239, 68, 68, 0.7);
+      position: relative;
+      z-index: 2;
+      transform: translateX(0px);
+      transition: transform 120ms ease, background var(--t-fast);
+      flex-shrink: 0;
+    }
+    .warn .c3-slider-thumb {
+      background: #F59E0B;
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.7);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       OPTION 4: NOC RADAR & TELEMETRY (FIXED: Perimeter Laser, NOT Spinning Box!)
+       ══════════════════════════════════════════════════════════════════════════ */
+    .c4-wrapper {
+      position: relative;
+      border-radius: var(--r-pill);
+      padding: 1px;
+      overflow: hidden;
+      display: inline-flex;
+      height: 32px;
+    }
+
+    /* The rotating laser beam sits behind the content, spinning freely */
+    .c4-wrapper.crit::before {
+      content: '';
+      position: absolute;
+      top: -100%;
+      left: -100%;
+      width: 300%;
+      height: 300%;
+      background: conic-gradient(from 0deg, transparent 0%, #EF4444 20%, transparent 40%, #EF4444 70%, transparent 90%);
+      animation: c4-perimeter-laser 3.5s linear infinite;
+    }
+    .c4-wrapper.warn::before {
+      content: '';
+      position: absolute;
+      top: -100%;
+      left: -100%;
+      width: 300%;
+      height: 300%;
+      background: conic-gradient(from 0deg, transparent 0%, #F59E0B 25%, transparent 50%, #F59E0B 75%, transparent 100%);
+      animation: c4-perimeter-laser 5s linear infinite;
+    }
+    .c4-wrapper.acked::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(56, 189, 248, 0.3);
+    }
+    .c4-wrapper.ok::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(16, 185, 129, 0.3);
+    }
+
+    @keyframes c4-perimeter-laser {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .c4-inner {
+      position: relative;
+      z-index: 1;
+      height: 100%;
+      background: #080D18;
+      border-radius: var(--r-pill);
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    /* 3-bar live equalizer */
+    .c4-eq {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 11px;
+      margin-left: 11px;
+      margin-right: 3px;
+    }
+    .c4-eq-bar {
+      width: 2px;
+      background: #EF4444;
+      border-radius: 1px;
+    }
+    .crit .c4-eq-bar:nth-child(1) { height: 8px; animation: c4-b 0.6s infinite alternate ease-in-out; }
+    .crit .c4-eq-bar:nth-child(2) { height: 11px; animation: c4-b 0.45s infinite alternate-reverse ease-in-out; }
+    .crit .c4-eq-bar:nth-child(3) { height: 6px; animation: c4-b 0.75s infinite alternate ease-in-out; }
+    .warn .c4-eq-bar { background: #F59E0B; height: 5px; }
+    .acked .c4-eq-bar { background: #38BDF8; height: 7px; animation: none; }
+    .ok .c4-eq-bar { background: #10B981; height: 4px; animation: none; }
+
+    @keyframes c4-b {
+      0% { transform: scaleY(0.3); opacity: 0.5; }
+      100% { transform: scaleY(1); opacity: 1; }
+    }
+
+    .c4-label {
+      padding: 0 9px 0 5px;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    .c4-btn {
+      height: 100%;
+      border: none;
+      background: #111A2E;
+      color: #F8FAFC;
+      border-left: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all var(--t-fast);
+    }
+    .crit .c4-btn {
+      background: linear-gradient(180deg, #991B1B 0%, #7F1D1D 100%);
+      color: #FFFFFF;
+      border-left: 1px solid rgba(239, 68, 68, 0.5);
+    }
+    .c4-btn:hover {
+      filter: brightness(1.2);
+    }
+    .c4-btn:active {
+      transform: scale(0.97);
+    }
+
+    .c4-hotkey {
+      font-size: 8.5px;
+      font-weight: 800;
+      padding: 1px 4px;
+      border-radius: 3px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       OPTION 5: PRISM GLOW & LIQUID GLASS (Iridescent Soft Seam)
+       ══════════════════════════════════════════════════════════════════════════ */
+    .c5-crystal {
+      border-radius: var(--r-pill);
+      background: rgba(13, 19, 34, 0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.15);
+      position: relative;
+      overflow: hidden;
+    }
+    .c5-crystal.crit {
+      box-shadow: 0 0 22px rgba(239, 68, 68, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+      border-color: rgba(239, 68, 68, 0.35);
+    }
+    .c5-crystal.warn {
+      box-shadow: 0 0 20px rgba(245, 158, 11, 0.22);
+      border-color: rgba(245, 158, 11, 0.35);
+    }
+    .c5-crystal.acked {
+      border-color: rgba(56, 189, 248, 0.3);
+    }
+
+    .c5-left {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 11px 0 12px;
+      font-size: 11.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* 3D breathing sphere orb */
+    .c5-orb {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #FCA5A5 0%, #EF4444 60%, #991B1B 100%);
+      box-shadow: 0 0 10px #EF4444;
+      animation: c5-orb-b 2.2s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    .warn .c5-orb {
+      background: radial-gradient(circle at 30% 30%, #FDE68A 0%, #F59E0B 60%, #B45309 100%);
+      box-shadow: 0 0 10px #F59E0B;
+    }
+    .acked .c5-orb {
+      background: radial-gradient(circle at 30% 30%, #BAE6FD 0%, #38BDF8 60%, #0284C7 100%);
+      box-shadow: 0 0 10px #38BDF8;
+    }
+    .ok .c5-orb {
+      background: radial-gradient(circle at 30% 30%, #A7F3D0 0%, #10B981 60%, #047857 100%);
+      box-shadow: 0 0 10px #10B981;
+    }
+
+    @keyframes c5-orb-b {
+      0%, 100% { transform: scale(1); filter: brightness(1); }
+      50% { transform: scale(1.25); filter: brightness(1.3); }
+    }
+
+    /* Vertical prism light seam */
+    .c5-prism-line {
+      width: 1px;
+      height: 16px;
+      background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+      flex-shrink: 0;
+    }
+
+    .c5-btn {
+      border: none;
+      background: transparent;
+      padding: 0 13px 0 10px;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #FFFFFF;
+      cursor: pointer;
+      position: relative;
+      font-family: var(--font);
+    }
+    .c5-btn::before {
+      content: '';
+      position: absolute;
+      inset: 3px 4px;
+      border-radius: var(--r-pill);
+      background: linear-gradient(180deg, rgba(239, 68, 68, 0.82) 0%, rgba(220, 38, 38, 0.95) 100%);
+      box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.35);
+      z-index: -1;
+      transition: all var(--t-fast);
+    }
+    .warn .c5-btn::before {
+      background: linear-gradient(180deg, rgba(245, 158, 11, 0.82) 0%, rgba(217, 119, 6, 0.95) 100%);
+    }
+    .c5-btn:hover::before {
+      filter: brightness(1.15);
+      box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.5), 0 0 14px rgba(239, 68, 68, 0.5);
+    }
+    .c5-btn:active::before {
+      transform: scale(0.96);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       DEEP-DIVE CARDS GRID
+       ══════════════════════════════════════════════════════════════════════════ */
+    .concepts-grid {
+      max-width: 1280px;
+      margin: 0 auto 64px;
+      padding: 0 24px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(580px, 1fr));
+      gap: 28px;
+    }
+
+    @media (max-width: 640px) {
+      .concepts-grid { grid-template-columns: 1fr; }
+    }
+
+    .concept-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 22px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      transition: border-color var(--t-fast);
+    }
+    .concept-card:hover {
+      border-color: var(--border-strong);
+    }
+
+    .card-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .card-num-pill {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent);
+      background: var(--accent-bg);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      padding: 3px 8px;
+      border-radius: 6px;
+      display: inline-block;
+      margin-bottom: 4px;
+    }
+
+    .card-title {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin-bottom: 3px;
+    }
+
+    .card-tagline {
+      font-size: 12.5px;
+      color: var(--text-secondary);
+    }
+
+    .card-stage {
+      background: radial-gradient(circle at center, rgba(255, 255, 255, 0.03) 0%, transparent 70%), var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      padding: 28px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 90px;
+    }
+
+    .card-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .micro-pill {
+      font-size: 10.5px;
+      font-weight: 600;
+      background: var(--surface-hover);
+      color: var(--text-secondary);
+      padding: 3px 9px;
+      border-radius: var(--r-pill);
+      border: 1px solid var(--border);
+    }
+
+    .card-points {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+    }
+
+    .card-points li {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      line-height: 1.45;
+    }
+
+    .card-points svg {
+      color: var(--accent);
+      flex-shrink: 0;
+      margin-top: 3px;
+    }
+
+    .card-action-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid var(--border);
+      padding-top: 14px;
+      margin-top: auto;
+      gap: 10px;
+    }
+
+    .vote-btn {
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      color: var(--text-primary);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 7px 14px;
+      border-radius: var(--r-md);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all var(--t-fast);
+      font-family: var(--font);
+    }
+    .vote-btn:hover {
+      background: var(--accent);
+      color: #FFFFFF;
+      border-color: var(--accent);
+    }
+
+    .card-test-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .test-ack-btn {
+      background: var(--surface-hover);
+      border: 1px solid var(--border-strong);
+      color: var(--text-primary);
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: var(--r-sm);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-family: var(--font);
+      transition: all var(--t-fast);
+    }
+    .test-ack-btn:hover {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: rgba(16, 185, 129, 0.3);
+      color: #10B981;
+    }
+
+    .test-reset-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 11px;
+      padding: 6px 10px;
+      border-radius: var(--r-sm);
+      cursor: pointer;
+      transition: all var(--t-fast);
+    }
+    .test-reset-btn:hover {
+      color: var(--text-primary);
+      border-color: var(--border-strong);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       DECISION & COMPARISON MATRIX
+       ══════════════════════════════════════════════════════════════════════════ */
+    .matrix-section {
+      max-width: 1280px;
+      margin: 0 auto 64px;
+      padding: 0 24px;
+    }
+
+    .matrix-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--r-lg);
+      overflow-x: auto;
+    }
+
+    .matrix-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+      text-align: left;
+    }
+
+    .matrix-table th {
+      background: var(--surface);
+      padding: 13px 16px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      border-bottom: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .matrix-table td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-secondary);
+    }
+
+    .matrix-table tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+      color: var(--text-primary);
+    }
+
+    .matrix-opt-name {
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .rating-stars {
+      color: #F59E0B;
+      font-size: 11.5px;
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       TOAST NOTIFICATION
+       ══════════════════════════════════════════════════════════════════════════ */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--surface-raised);
+      border: 1px solid var(--accent);
+      color: var(--text-primary);
+      padding: 11px 18px;
+      border-radius: var(--r-md);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      font-size: 12.5px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transform: translateY(80px);
+      opacity: 0;
+      pointer-events: none;
+      transition: all var(--t-base) var(--t-spring);
+      z-index: 2000;
+    }
+
+    .toast.show {
+      transform: translateY(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════
+       GLOBAL SIMULATION CONTROLLER HUD
+       ══════════════════════════════════════════════════════════════════════════ -->
+  <header class="sim-hud">
+    <div class="hud-title-wrap">
+      <div class="hud-brand-pill">Concept Lab</div>
+      <div class="hud-title">Status &amp; Acknowledge Merged Bar · 5 Variants</div>
+    </div>
+
+    <div class="hud-controls">
+      <!-- State Selector -->
+      <div class="hud-group" role="group" aria-label="Simulated Alert State">
+        <button class="hud-btn state-crit active" id="btnCrit" onclick="setGlobalSeverity('crit')">
+          <span class="legend-dot" style="background:#EF4444;"></span> Critical (2)
+        </button>
+        <button class="hud-btn state-warn" id="btnWarn" onclick="setGlobalSeverity('warn')">
+          <span class="legend-dot" style="background:#F59E0B;"></span> Warning (1)
+        </button>
+        <button class="hud-btn state-acked" id="btnAcked" onclick="setGlobalSeverity('acked')">
+          <span class="legend-dot" style="background:#38BDF8;"></span> Acknowledged
+        </button>
+        <button class="hud-btn state-ok" id="btnOk" onclick="setGlobalSeverity('ok')">
+          <span class="legend-dot" style="background:#10B981;"></span> Healthy
+        </button>
+      </div>
+
+      <!-- Action: Reset / Incident -->
+      <button class="hud-btn hud-btn-action" onclick="simulateNewIncident()" title="Add a new live incident to test animations">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        +1 Incident
+      </button>
+
+      <!-- Audio Toggle -->
+      <button class="hud-btn hud-btn-action" id="audioToggleBtn" onclick="toggleAudio()" title="Toggle Web Audio tactical sound effects">
+        <span id="audioIcon">🔇</span> Audio Off
+      </button>
+
+      <!-- Theme Switcher -->
+      <button class="hud-btn hud-btn-action" id="themeBtn" onclick="toggleTheme()" title="Toggle Light/Dark theme">
+        <span id="themeIcon">☀️</span> Light
+      </button>
+    </div>
+  </header>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════
+       HERO INTRODUCTION
+       ══════════════════════════════════════════════════════════════════════════ -->
+  <section class="hero">
+    <div class="hero-pre">Refined Concept Showcase · Bug-Free &amp; Standardized 32px</div>
+    <h1 class="hero-h1">Replacing the Flat Seam with Fluid Tactical Motion</h1>
+    <p class="hero-desc">
+      All 5 options below are strictly standardized to the exact <strong>32px topnav height</strong>, free of layout shifts or spinning bugs, with clean diagonal seams, real draggable sliders, and independent test controls on every card.
+    </p>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════
+       TOPNAV LIVE PREVIEW ARENA
+       ══════════════════════════════════════════════════════════════════════════ -->
+  <section class="preview-arena-card">
+    <div class="arena-box">
+      <div class="arena-header">
+        <div class="arena-tab-list" role="tablist">
+          <button class="arena-tab active" onclick="switchNavOption(1, this)">1. Aero-Blade</button>
+          <button class="arena-tab" onclick="switchNavOption(2, this)">2. Dynamic Island</button>
+          <button class="arena-tab" onclick="switchNavOption(3, this)">3. Slide Guard</button>
+          <button class="arena-tab" onclick="switchNavOption(4, this)">4. NOC Radar</button>
+          <button class="arena-tab" onclick="switchNavOption(5, this)">5. Prism Glow</button>
+        </div>
+        <div class="arena-meta-badge">
+          <span>Active in Topnav: <strong id="activeNavLabel" style="color:var(--accent);">Option 1 (Aero-Blade)</strong></span>
+          <span>•</span>
+          <span>Click the action button to test real acknowledge transition</span>
+        </div>
+      </div>
+
+      <div class="arena-stage">
+        <!-- Mockup of InfraWatch Top Navigation -->
+        <div class="topnav-mockup">
+          <!-- Brand cluster -->
+          <div class="mockup-brand">
+            <div class="mockup-brand-logo">
+              <span></span><span style="opacity:0.6;"></span>
+              <span style="opacity:0.6;"></span><span style="opacity:0.9;"></span>
+            </div>
+            <span>InfraWatch</span>
+
+            <div class="mockup-legend">
+              <span><span class="legend-dot" style="background:#10B981;"></span> Online</span>
+              <span><span class="legend-dot" style="background:#EF4444;"></span> Down</span>
+              <span><span class="legend-dot" style="background:#38BDF8;"></span> Acked</span>
+            </div>
+          </div>
+
+          <!-- The Merged Status & Acknowledge Slot -->
+          <div class="mockup-status-slot" id="topnavSlot">
+            <!-- Rendered dynamically -->
+          </div>
+
+          <!-- Controls cluster -->
+          <div class="mockup-controls">
+            <button class="mockup-icon-btn" title="Alert logs">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22V6a2 2 0 012-2h12a2 2 0 012 2v16"/><path d="M2 22h20M8 10h8M8 14h5"/></svg>
+            </button>
+            <span class="mockup-pill-meta">Live · 2s ago</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════
+       DEEP-DIVE CARDS GRID
+       ══════════════════════════════════════════════════════════════════════════ -->
+  <section class="concepts-grid">
+
+    <!-- OPTION 1: Aero-Blade Dual Chamber -->
+    <article class="concept-card">
+      <div class="card-top">
+        <div>
+          <div class="card-num-pill">Option 01</div>
+          <h2 class="card-title">Aero-Blade Dual Chamber</h2>
+          <div class="card-tagline">Cyber-glass HUD with -18° slanted laser partition &amp; specular shimmer</div>
+        </div>
+      </div>
+
+      <div class="card-stage">
+        <div id="cardStage1"></div>
+      </div>
+
+      <div class="card-badges">
+        <span class="micro-pill">-18° Angled Laser Seam</span>
+        <span class="micro-pill">Sonar Ripple Pinger</span>
+        <span class="micro-pill">Specular Light Shimmer</span>
+        <span class="micro-pill">32px Exact Topnav Height</span>
+      </div>
+
+      <ul class="card-points">
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Replaces the boxy 90° seam with an aerodynamic <strong>-18° slanted laser boundary</strong> with a traveling neon energy bead.
+        </li>
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Multi-layer sonar pinger emits gentle expanding radar waves that draw immediate operator focus to active outages.
+        </li>
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Action chamber features an ambient specular shimmer sweep that keeps the UI feeling active and responsive.
+        </li>
+      </ul>
+
+      <div class="card-action-row">
+        <div class="card-test-controls">
+          <button class="test-ack-btn" onclick="triggerCardAck(1)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+            Test Ack
+          </button>
+          <button class="test-reset-btn" onclick="resetCard(1)">Reset</button>
+        </div>
+        <button class="vote-btn" onclick="voteConcept('Option 1 (Aero-Blade Dual Chamber)')">⭐ Select Option 1</button>
+      </div>
+    </article>
+
+    <!-- OPTION 2: Dynamic Magnetic Island -->
+    <article class="concept-card">
+      <div class="card-top">
+        <div>
+          <div class="card-num-pill">Option 02</div>
+          <h2 class="card-title">Dynamic Magnetic Island</h2>
+          <div class="card-tagline">Linear / Vercel high-craft nested floating cradle with spring physics</div>
+        </div>
+      </div>
+
+      <div class="card-stage">
+        <div id="cardStage2"></div>
+      </div>
+
+      <div class="card-badges">
+        <span class="micro-pill">Nested Floating Cradle</span>
+        <span class="micro-pill">Spring Elevation Lift</span>
+        <span class="micro-pill">Heartbeat Pulse Dot</span>
+        <span class="micro-pill">Clean Minimalist</span>
+      </div>
+
+      <ul class="card-points">
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Completely solves the "glued together" problem by <strong>nesting the action button inside a recessed dark titanium cradle</strong>.
+        </li>
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Hovering elevates the button with smooth spring physics (`translateY(-1px) scale(1.03)`) and luminous edge definition.
+        </li>
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          When acknowledged, the button smoothly seals into the capsule without any jarring layout jump.
+        </li>
+      </ul>
+
+      <div class="card-action-row">
+        <div class="card-test-controls">
+          <button class="test-ack-btn" onclick="triggerCardAck(2)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+            Test Ack
+          </button>
+          <button class="test-reset-btn" onclick="resetCard(2)">Reset</button>
+        </div>
+        <button class="vote-btn" onclick="voteConcept('Option 2 (Dynamic Magnetic Island)')">⭐ Select Option 2</button>
+      </div>
+    </article>
+
+    <!-- OPTION 3: Tactical Slide-to-Disarm -->
+    <article class="concept-card">
+      <div class="card-top">
+        <div>
+          <div class="card-num-pill">Option 03</div>
+          <h2 class="card-title">Tactical Slide-to-Disarm</h2>
+          <div class="card-tagline">Real interactive draggable slider to eliminate accidental operator clicks</div>
+        </div>
+      </div>
+
+      <div class="card-stage">
+        <div id="cardStage3"></div>
+      </div>
+
+      <div class="card-badges">
+        <span class="micro-pill">Real Mouse Drag &amp; Click</span>
+        <span class="micro-pill">Dynamic Progress Fill</span>
+        <span class="micro-pill">Flow Chevrons (&gt;&gt;)</span>
+        <span class="micro-pill">Zero Accidental Clicks</span>
+      </div>
+
+      <ul class="card-points">
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <strong>Fully functional drag interaction</strong>: Click and drag the red thumb across the track, or simply click to trigger an auto-slide lock.
+        </li>
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          The track fills in real-time with an emerald verification gradient as you drag toward the threshold.
+        </li>
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Completely prevents costly accidental acks when operators are navigating between logs and host filters.
+        </li>
+      </ul>
+
+      <div class="card-action-row">
+        <div class="card-test-controls">
+          <button class="test-ack-btn" onclick="triggerCardAck(3)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+            Test Slide
+          </button>
+          <button class="test-reset-btn" onclick="resetCard(3)">Reset</button>
+        </div>
+        <button class="vote-btn" onclick="voteConcept('Option 3 (Tactical Slide-to-Disarm)')">⭐ Select Option 3</button>
+      </div>
+    </article>
+
+    <!-- OPTION 4: NOC Radar & Telemetry Bar -->
+    <article class="concept-card">
+      <div class="card-top">
+        <div>
+          <div class="card-num-pill">Option 04</div>
+          <h2 class="card-title">NOC Radar &amp; Telemetry Bar</h2>
+          <div class="card-tagline">Perimeter laser trace, live equalizer pulses &amp; hotkey [A]</div>
+        </div>
+      </div>
+
+      <div class="card-stage">
+        <div id="cardStage4"></div>
+      </div>
+
+      <div class="card-badges">
+        <span class="micro-pill">Perimeter Laser Border</span>
+        <span class="micro-pill">3-Bar Live Equalizer</span>
+        <span class="micro-pill">Avionics Keycap</span>
+        <span class="micro-pill">Hotkey Badge [A]</span>
+      </div>
+
+      <ul class="card-points">
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <strong>Fixed perimeter laser</strong>: The rotating beam circulates strictly around the hairline border without spinning the text or button.
+        </li>
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          3-bar audio/telemetry equalizer animates at different tempos reflecting incident urgency.
+        </li>
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Power-user keyboard shortcut: press <kbd style="background:rgba(255,255,255,0.1);padding:1px 4px;border-radius:3px;font-family:var(--font-mono);font-size:11px;">A</kbd> on your keyboard to acknowledge immediately!
+        </li>
+      </ul>
+
+      <div class="card-action-row">
+        <div class="card-test-controls">
+          <button class="test-ack-btn" onclick="triggerCardAck(4)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+            Test Ack
+          </button>
+          <button class="test-reset-btn" onclick="resetCard(4)">Reset</button>
+        </div>
+        <button class="vote-btn" onclick="voteConcept('Option 4 (NOC Radar & Telemetry Bar)')">⭐ Select Option 4</button>
+      </div>
+    </article>
+
+    <!-- OPTION 5: Prism Glow & Liquid Glass -->
+    <article class="concept-card">
+      <div class="card-top">
+        <div>
+          <div class="card-num-pill">Option 05</div>
+          <h2 class="card-title">Prism Glow &amp; Liquid Glass</h2>
+          <div class="card-tagline">Mouse-reactive specular reflection, 3D breathing orb &amp; soft prism seam</div>
+        </div>
+      </div>
+
+      <div class="card-stage">
+        <div id="cardStage5"></div>
+      </div>
+
+      <div class="card-badges">
+        <span class="micro-pill">Prism Light Seam</span>
+        <span class="micro-pill">3D Spherical Orb</span>
+        <span class="micro-pill">Liquid Glass Pill</span>
+        <span class="micro-pill">Stripe-Grade Polish</span>
+      </div>
+
+      <ul class="card-points">
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Replaces the harsh divider with a vertical crystal prism line with soft alpha falloff.
+        </li>
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Features a multi-stop spherical 3D status orb that pulses smoothly with radial depth.
+        </li>
+        <li>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Action button uses a liquid glass highlight overlay with glossy rim reflexes.
+        </li>
+      </ul>
+
+      <div class="card-action-row">
+        <div class="card-test-controls">
+          <button class="test-ack-btn" onclick="triggerCardAck(5)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+            Test Ack
+          </button>
+          <button class="test-reset-btn" onclick="resetCard(5)">Reset</button>
+        </div>
+        <button class="vote-btn" onclick="voteConcept('Option 5 (Prism Glow & Liquid Glass)')">⭐ Select Option 5</button>
+      </div>
+    </article>
+
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════
+       DECISION & COMPARISON MATRIX
+       ══════════════════════════════════════════════════════════════════════════ -->
+  <section class="matrix-section">
+    <div class="matrix-card">
+      <table class="matrix-table">
+        <thead>
+          <tr>
+            <th>Concept</th>
+            <th>Aesthetic Vibe</th>
+            <th>Seam / Divider Solution</th>
+            <th>Animation &amp; Micro-interaction</th>
+            <th>Accidental Click Risk</th>
+            <th>Topnav Integration</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <div class="matrix-opt-name">
+                <span class="card-num-pill" style="margin:0;padding:1px 5px;">01</span> Aero-Blade
+              </div>
+            </td>
+            <td>Tactical Cyber-Glass HUD</td>
+            <td>-18° Angled laser seam with traveling energy bead</td>
+            <td>Sonar ring pulse + continuous specular shimmer sweep</td>
+            <td>Low (Distinct action chamber)</td>
+            <td><span class="rating-stars">★★★★★</span> 32px Native Fit</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="matrix-opt-name">
+                <span class="card-num-pill" style="margin:0;padding:1px 5px;">02</span> Dynamic Island
+              </div>
+            </td>
+            <td>Linear / Vercel Ultra-Clean</td>
+            <td>Floating inner button nested inside recessed cradle</td>
+            <td>Spring elevation lift on hover (`translateY(-1px)`)</td>
+            <td>Low (Requires distinct target hit)</td>
+            <td><span class="rating-stars">★★★★★</span> Extremely Clean</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="matrix-opt-name">
+                <span class="card-num-pill" style="margin:0;padding:1px 5px;">03</span> Slide-to-Disarm
+              </div>
+            </td>
+            <td>SpaceX Avionics Guarded Switch</td>
+            <td>Integrated sliding track with animated flow chevrons</td>
+            <td>Real mouse drag or click with lock-in snap animation</td>
+            <td><strong>Zero Risk</strong> (Guarded slide prevents misclicks)</td>
+            <td><span class="rating-stars">★★★★☆</span> High Safety</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="matrix-opt-name">
+                <span class="card-num-pill" style="margin:0;padding:1px 5px;">04</span> NOC Radar
+              </div>
+            </td>
+            <td>Datadog / Terminal Precision</td>
+            <td>Hairline border + tactile avionics key split</td>
+            <td>Fixed perimeter laser trace + 3-bar live equalizer</td>
+            <td>Low (Tactile key + hotkey [A])</td>
+            <td><span class="rating-stars">★★★★★</span> Highly Technical</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="matrix-opt-name">
+                <span class="card-num-pill" style="margin:0;padding:1px 5px;">05</span> Prism Glow
+              </div>
+            </td>
+            <td>Stripe-grade Iridescent Glass</td>
+            <td>Vertical prism light line with soft alpha falloff</td>
+            <td>3D spherical orb breathing + liquid glass overlay</td>
+            <td>Low</td>
+            <td><span class="rating-stars">★★★★★</span> Visually Stunning</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Toast Notification -->
+  <div class="toast" id="simToast">
+    <span id="toastIcon">✨</span>
+    <span id="toastMsg">State updated!</span>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════
+       JAVASCRIPT ENGINE: CLEAN, ROBUST, NO DUPLICATES
+       ══════════════════════════════════════════════════════════════════════════ -->
+  <script>
+    // State store
+    const appState = {
+      globalSeverity: 'crit', // crit | warn | acked | ok
+      globalCount: 2,
+      activeNavOption: 1,
+      audioEnabled: false,
+      cardOverrides: {
+        1: null,
+        2: null,
+        3: null,
+        4: null,
+        5: null
+      }
+    };
+
+    // Web Audio Synthesizer
+    let audioCtx = null;
+    function playBeep(freq = 600, type = 'sine', duration = 0.08) {
+      if (!appState.audioEnabled) return;
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+      } catch (e) {}
+    }
+
+    function playAckChime() {
+      if (!appState.audioEnabled) return;
+      playBeep(440, 'triangle', 0.06);
+      setTimeout(() => playBeep(660, 'sine', 0.1), 50);
+      setTimeout(() => playBeep(880, 'sine', 0.16), 110);
+    }
+
+    // Set Global Severity
+    function setGlobalSeverity(sev) {
+      appState.globalSeverity = sev;
+      if (sev === 'crit') appState.globalCount = 2;
+      else if (sev === 'warn') appState.globalCount = 1;
+      else if (sev === 'acked') appState.globalCount = 2;
+      else if (sev === 'ok') appState.globalCount = 0;
+
+      // Clear card overrides
+      for (let i = 1; i <= 5; i++) appState.cardOverrides[i] = null;
+
+      // Update HUD active button
+      document.querySelectorAll('.hud-group .hud-btn').forEach(b => b.classList.remove('active'));
+      const activeBtn = document.getElementById(
+        sev === 'crit' ? 'btnCrit' :
+        sev === 'warn' ? 'btnWarn' :
+        sev === 'acked' ? 'btnAcked' : 'btnOk'
+      );
+      if (activeBtn) activeBtn.classList.add('active');
+
+      playBeep(sev === 'crit' ? 750 : sev === 'warn' ? 520 : 440, 'sine');
+      renderAll();
+      showToast(`Global State: ${sev.toUpperCase()}`);
+    }
+
+    function simulateNewIncident() {
+      appState.globalCount++;
+      appState.globalSeverity = 'crit';
+      setGlobalSeverity('crit');
+      playBeep(920, 'sawtooth', 0.12);
+      showToast(`🚨 New Outage Triggered! (${appState.globalCount} unacknowledged)`);
+    }
+
+    // Individual card actions
+    function triggerCardAck(opt) {
+      appState.cardOverrides[opt] = 'acked';
+      playAckChime();
+      renderCard(opt);
+      if (appState.activeNavOption === opt) renderTopnav();
+      showToast(`Option ${opt}: Outages Acknowledged!`);
+    }
+
+    function resetCard(opt) {
+      appState.cardOverrides[opt] = null;
+      playBeep(500, 'sine', 0.06);
+      renderCard(opt);
+      if (appState.activeNavOption === opt) renderTopnav();
+      showToast(`Option ${opt} reset to global state`);
+    }
+
+    // HTML Generators for each concept (parameterized to prevent duplicate IDs)
+    function generateOption1HTML(sev, count, prefix, isInteractive) {
+      const isAcked = sev === 'acked';
+      const isOk = sev === 'ok';
+      if (isOk) {
+        return `
+          <div class="concept-widget c1-bar ok">
+            <div class="c1-left">
+              <div class="c1-pinger"></div>
+              <span style="color:var(--success);">All Systems Nominal</span>
+            </div>
+          </div>
+        `;
+      }
+      if (isAcked) {
+        return `
+          <div class="concept-widget c1-bar acked">
+            <div class="c1-left">
+              <div class="c1-pinger"></div>
+              <span>Critical · Acknowledged</span>
+              <span class="c1-count-chip">Claimed ✓</span>
+            </div>
+          </div>
+        `;
+      }
+      return `
+        <div class="concept-widget c1-bar ${sev}">
+          <div class="c1-left">
+            <div class="c1-pinger"></div>
+            <span>${sev === 'crit' ? 'Critical' : 'Warning'}</span>
+            <span class="c1-count-chip">${count} unacked</span>
+          </div>
+          <div class="c1-seam">
+            <div class="c1-seam-line"></div>
+            <div class="c1-seam-bead"></div>
+          </div>
+          <button class="c1-btn" onclick="${isInteractive ? `handleAckClick(1)` : ''}">
+            <span class="c1-btn-content">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              <span>Acknowledge all ${count}</span>
+            </span>
+          </button>
+        </div>
+      `;
+    }
+
+    function generateOption2HTML(sev, count, prefix, isInteractive) {
+      const isAcked = sev === 'acked';
+      const isOk = sev === 'ok';
+      if (isOk) {
+        return `
+          <div class="concept-widget c2-island ok">
+            <div class="c2-left">
+              <div class="c2-heartbeat"></div>
+              <span style="color:var(--success);">Healthy</span>
+            </div>
+          </div>
+        `;
+      }
+      if (isAcked) {
+        return `
+          <div class="concept-widget c2-island acked">
+            <div class="c2-left">
+              <div class="c2-heartbeat"></div>
+              <span>Claimed</span>
+              <span class="c2-tag">${count} acked ✓</span>
+            </div>
+          </div>
+        `;
+      }
+      return `
+        <div class="concept-widget c2-island ${sev}">
+          <div class="c2-left">
+            <div class="c2-heartbeat"></div>
+            <span>${sev === 'crit' ? 'Critical' : 'Warning'}</span>
+            <span class="c2-tag">${count}</span>
+          </div>
+          <button class="c2-btn" onclick="${isInteractive ? `handleAckClick(2)` : ''}">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <span>Ack All ${count}</span>
+          </button>
+        </div>
+      `;
+    }
+
+    function generateOption3HTML(sev, count, prefix, isInteractive) {
+      const isAcked = sev === 'acked';
+      const isOk = sev === 'ok';
+      if (isOk) {
+        return `
+          <div class="concept-widget c3-guarded ok">
+            <div class="c3-left">
+              <span class="legend-dot" style="background:#10B981;"></span>
+              <span style="color:var(--success);">Systems Nominal</span>
+            </div>
+          </div>
+        `;
+      }
+      if (isAcked) {
+        return `
+          <div class="concept-widget c3-guarded acked">
+            <div class="c3-left">
+              <span class="legend-dot" style="background:#38BDF8;"></span>
+              <span>${count} Outages Claimed</span>
+            </div>
+            <div class="c3-slider-track" style="width:auto;padding:0 10px;cursor:default;">
+              <span style="font-size:10px;font-weight:700;color:#38BDF8;">✓ VERIFIED LOCK</span>
+            </div>
+          </div>
+        `;
+      }
+      return `
+        <div class="concept-widget c3-guarded ${sev}">
+          <div class="c3-left">
+            <span class="legend-dot" style="background:${sev==='crit'?'#EF4444':'#F59E0B'};"></span>
+            <span>${count} ${sev === 'crit' ? 'Critical' : 'Warning'}</span>
+          </div>
+          <div class="c3-slider-track" id="${prefix}_track" 
+               onmousedown="${isInteractive ? `startSlideDrag(event, '${prefix}', ${prefix === 'top' ? 'null' : 3})` : ''}"
+               onclick="${isInteractive ? `handleTrackClick(event, '${prefix}', ${prefix === 'top' ? 'null' : 3})` : ''}">
+            <div class="c3-progress-fill" id="${prefix}_fill"></div>
+            <div class="c3-slider-thumb" id="${prefix}_thumb">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <span class="c3-slider-label">Slide to Ack <span class="c3-flow-arrow">&gt;&gt;</span></span>
+          </div>
+        </div>
+      `;
+    }
+
+    function generateOption4HTML(sev, count, prefix, isInteractive) {
+      const isAcked = sev === 'acked';
+      const isOk = sev === 'ok';
+      if (isOk) {
+        return `
+          <div class="concept-widget c4-wrapper ok">
+            <div class="c4-inner">
+              <div class="c4-eq">
+                <span class="c4-eq-bar"></span>
+              </div>
+              <span class="c4-label" style="color:var(--success);padding-right:12px;">SYS_NOMINAL</span>
+            </div>
+          </div>
+        `;
+      }
+      if (isAcked) {
+        return `
+          <div class="concept-widget c4-wrapper acked">
+            <div class="c4-inner">
+              <div class="c4-eq">
+                <span class="c4-eq-bar"></span>
+              </div>
+              <span class="c4-label" style="color:#7DD3FC;padding-right:12px;">ACKED·${count}_CLAIMED</span>
+            </div>
+          </div>
+        `;
+      }
+      return `
+        <div class="concept-widget c4-wrapper ${sev}">
+          <div class="c4-inner">
+            <div class="c4-eq">
+              <span class="c4-eq-bar"></span>
+              <span class="c4-eq-bar"></span>
+              <span class="c4-eq-bar"></span>
+            </div>
+            <span class="c4-label">${sev==='crit'?'CRIT':'WARN'}·${count}_UNACK</span>
+            <button class="c4-btn" onclick="${isInteractive ? `handleAckClick(4)` : ''}">
+              <span>ACK_ALL</span>
+              <span class="c4-hotkey">A</span>
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function generateOption5HTML(sev, count, prefix, isInteractive) {
+      const isAcked = sev === 'acked';
+      const isOk = sev === 'ok';
+      if (isOk) {
+        return `
+          <div class="concept-widget c5-crystal ok">
+            <div class="c5-left" style="padding-right:12px;">
+              <div class="c5-orb"></div>
+              <span style="color:var(--success);">All Systems Healthy</span>
+            </div>
+          </div>
+        `;
+      }
+      if (isAcked) {
+        return `
+          <div class="concept-widget c5-crystal acked">
+            <div class="c5-left" style="padding-right:12px;">
+              <div class="c5-orb"></div>
+              <span>${count} Outages Claimed ✓</span>
+            </div>
+          </div>
+        `;
+      }
+      return `
+        <div class="concept-widget c5-crystal ${sev}">
+          <div class="c5-left">
+            <div class="c5-orb"></div>
+            <span>${sev==='crit'?'Critical':'Warning'} · ${count} Unacked</span>
+          </div>
+          <div class="c5-prism-line"></div>
+          <button class="c5-btn" onclick="${isInteractive ? `handleAckClick(5)` : ''}">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <span>Claim Outages</span>
+          </button>
+        </div>
+      `;
+    }
+
+    // Interactive Handlers
+    function handleAckClick(opt) {
+      triggerCardAck(opt);
+    }
+
+    // Real Draggable Slider Logic for Option 3
+    function startSlideDrag(e, prefix, cardOpt) {
+      e.preventDefault();
+      const track = document.getElementById(`${prefix}_track`);
+      const thumb = document.getElementById(`${prefix}_thumb`);
+      const fill = document.getElementById(`${prefix}_fill`);
+      if (!track || !thumb || !fill) return;
+
+      const rect = track.getBoundingClientRect();
+      const maxDist = rect.width - 24; // width minus thumb width
+
+      function onMouseMove(moveEvent) {
+        let delta = moveEvent.clientX - rect.left - 10;
+        if (delta < 0) delta = 0;
+        if (delta > maxDist) delta = maxDist;
+        const pct = (delta / maxDist) * 100;
+        thumb.style.transform = `translateX(${delta}px)`;
+        fill.style.width = `${pct}%`;
+      }
+
+      function onMouseUp(upEvent) {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+
+        let finalDelta = upEvent.clientX - rect.left - 10;
+        if (finalDelta >= maxDist * 0.65) {
+          // Locked in!
+          thumb.style.transform = `translateX(${maxDist}px)`;
+          fill.style.width = `100%`;
+          setTimeout(() => {
+            if (cardOpt) triggerCardAck(cardOpt);
+            else {
+              appState.cardOverrides[3] = 'acked';
+              playAckChime();
+              renderAll();
+              showToast('✓ Outages Disarmed via Guarded Slider!');
+            }
+          }, 120);
+        } else {
+          // Snap back
+          thumb.style.transform = `translateX(0px)`;
+          fill.style.width = `0%`;
+          playBeep(300, 'sine', 0.05);
+        }
+      }
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    }
+
+    function handleTrackClick(e, prefix, cardOpt) {
+      if (e.target.closest('.c3-slider-thumb')) return; // handled by drag
+      const track = document.getElementById(`${prefix}_track`);
+      const thumb = document.getElementById(`${prefix}_thumb`);
+      const fill = document.getElementById(`${prefix}_fill`);
+      if (!track || !thumb || !fill) return;
+
+      const maxDist = track.getBoundingClientRect().width - 24;
+      thumb.style.transform = `translateX(${maxDist}px)`;
+      fill.style.width = `100%`;
+      setTimeout(() => {
+        if (cardOpt) triggerCardAck(cardOpt);
+        else {
+          appState.cardOverrides[3] = 'acked';
+          playAckChime();
+          renderAll();
+          showToast('✓ Outages Disarmed via Guarded Slider!');
+        }
+      }, 180);
+    }
+
+    // Render Cards
+    function renderCard(opt) {
+      const stage = document.getElementById(`cardStage${opt}`);
+      if (!stage) return;
+      const sev = appState.cardOverrides[opt] || appState.globalSeverity;
+      const count = appState.globalCount;
+
+      let html = '';
+      if (opt === 1) html = generateOption1HTML(sev, count, `c1`, true);
+      else if (opt === 2) html = generateOption2HTML(sev, count, `c2`, true);
+      else if (opt === 3) html = generateOption3HTML(sev, count, `c3`, true);
+      else if (opt === 4) html = generateOption4HTML(sev, count, `c4`, true);
+      else if (opt === 5) html = generateOption5HTML(sev, count, `c5`, true);
+
+      stage.innerHTML = html;
+    }
+
+    // Render Topnav Slot
+    function renderTopnav() {
+      const slot = document.getElementById('topnavSlot');
+      if (!slot) return;
+      const opt = appState.activeNavOption;
+      const sev = appState.cardOverrides[opt] || appState.globalSeverity;
+      const count = appState.globalCount;
+
+      let html = '';
+      if (opt === 1) html = generateOption1HTML(sev, count, `top`, true);
+      else if (opt === 2) html = generateOption2HTML(sev, count, `top`, true);
+      else if (opt === 3) html = generateOption3HTML(sev, count, `top`, true);
+      else if (opt === 4) html = generateOption4HTML(sev, count, `top`, true);
+      else if (opt === 5) html = generateOption5HTML(sev, count, `top`, true);
+
+      slot.innerHTML = html;
+    }
+
+    function renderAll() {
+      for (let i = 1; i <= 5; i++) renderCard(i);
+      renderTopnav();
+    }
+
+    function switchNavOption(optIndex, tabEl) {
+      appState.activeNavOption = optIndex;
+      if (tabEl) {
+        document.querySelectorAll('.arena-tab').forEach(t => t.classList.remove('active'));
+        tabEl.classList.add('active');
+      }
+      const names = [
+        'Option 1 (Aero-Blade Dual Chamber)',
+        'Option 2 (Dynamic Magnetic Island)',
+        'Option 3 (Tactical Slide-to-Disarm)',
+        'Option 4 (NOC Radar & Telemetry Bar)',
+        'Option 5 (Prism Glow & Liquid Glass)'
+      ];
+      document.getElementById('activeNavLabel').textContent = names[optIndex - 1];
+      renderTopnav();
+      playBeep(580, 'sine', 0.05);
+    }
+
+    // Toast helper
+    let toastTimeout = null;
+    function showToast(msg) {
+      const t = document.getElementById('simToast');
+      document.getElementById('toastMsg').textContent = msg;
+      t.classList.add('show');
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => t.classList.remove('show'), 2200);
+    }
+
+    function voteConcept(name) {
+      playAckChime();
+      showToast(`Selected "${name}"!`);
+    }
+
+    function toggleAudio() {
+      appState.audioEnabled = !appState.audioEnabled;
+      const btn = document.getElementById('audioToggleBtn');
+      if (appState.audioEnabled) {
+        btn.innerHTML = '<span>🔊</span> Audio On';
+        btn.classList.add('active');
+        playBeep(600, 'sine');
+        showToast('Tactical Web Audio FX Enabled');
+      } else {
+        btn.innerHTML = '<span>🔇</span> Audio Off';
+        btn.classList.remove('active');
+        showToast('Audio FX Muted');
+      }
+    }
+
+    function toggleTheme() {
+      const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+      const next = cur === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      const btn = document.getElementById('themeBtn');
+      if (next === 'light') {
+        btn.innerHTML = '<span>🌙</span> Dark';
+      } else {
+        btn.innerHTML = '<span>☀️</span> Light';
+      }
+      showToast(`Theme switched to ${next.toUpperCase()}`);
+    }
+
+    // Hotkey listener for Option 4
+    window.addEventListener('keydown', (e) => {
+      if ((e.key === 'a' || e.key === 'A') && !e.target.matches('input, textarea, select')) {
+        triggerCardAck(4);
+      }
+    });
+
+    // Initialize on load
+    document.addEventListener('DOMContentLoaded', () => {
+      renderAll();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+/* Entry stylesheet. Rules live in parts/*.css, imported here in cascade
+ * order. Split from a single 6191-line file; each part is one concern.
+ * (@import targets are same-origin, so CSP 'self' allows them, and
+ * Phase-0 no-cache on .css means each part still revalidates per load.)
+ * [Updated: Clean status legend ribbon without border-top]
+ */
+@import url("parts/tokens.css");
+@import url("parts/base.css");
+@import url("parts/nav.css");
+@import url("parts/layout.css");
+@import url("parts/host-grid.css");
+@import url("parts/availability.css");
+@import url("parts/feedback.css");
+@import url("parts/drawer.css");
+@import url("parts/chrome.css");
+@import url("parts/logs.css");
+@import url("parts/auth.css");
+@import url("parts/audit.css");
+@import url("parts/breakdown-v2.css");

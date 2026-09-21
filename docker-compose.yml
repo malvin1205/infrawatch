@@ -1,0 +1,64 @@
+services:
+  alarm:
+    build: ./alarm
+    container_name: alarm
+    restart: unless-stopped
+    ports:
+      # LAN-wide on purpose — the TV wallboard reaches this over the NOC LAN
+      # (see README). State-changing /api/* routes and /webhook require
+      # INFRAWATCH_API_KEY / WEBHOOK_SECRET (alarm/auth.py), so LAN visitors
+      # can view the dashboard but can't mutate config or forge alerts.
+      - "5000:5000"
+    environment:
+      # Blank/unset => InfraWatch starts with no Prometheus endpoint; add one
+      # in the UI (Manage Prometheus Endpoints). Set it here to pre-seed.
+      - PROMETHEUS_URL=${PROMETHEUS_URL-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - TELEGRAM_ENABLED=${TELEGRAM_ENABLED:-true}
+      - INFRAWATCH_API_KEY=${INFRAWATCH_API_KEY:-}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+      # This compose serves plain HTTP on the LAN (no TLS). A Secure session
+      # cookie would never round-trip over http:// — the browser drops it and
+      # every /api/* call comes back unauthenticated ("login again" loop). Set
+      # to 1 only when InfraWatch sits behind an HTTPS reverse proxy.
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-0}
+    volumes:
+      # Named volume, not a host bind mount: Docker seeds an empty named volume
+      # from the image path, preserving its appuser:appgroup (uid/gid 10001)
+      # ownership. A bind mount of ./alarm/data would be owned by the host user
+      # who cloned the repo, and the container (USER appuser, non-root) cannot
+      # chown it — SQLite would fail with "unable to open database file" on boot.
+      # Inspect/back up the data at /var/lib/docker/volumes/*_infrawatch-data/.
+      - infrawatch-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.50'
+          memory: 1024M
+    # Hardening: no Linux capabilities beyond the default-dropped set are
+    # needed (the app binds an unprivileged port and does no raw sockets/
+    # network admin), and no-new-privileges blocks setuid/setgid escalation.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # read_only pins the image's root filesystem read-only to protect application
+    # code (/app) against runtime tampering. Mutable state (SQLite infrawatch.db +
+    # WAL, .api_key, .webhook_secret, .session_secret, caches) is isolated to
+    # /app/data, mounted as a persistent volume above. /tmp is mounted as a small
+    # tmpfs for scratch operations.
+    read_only: true
+    tmpfs:
+      - /tmp
+
+volumes:
+  infrawatch-data:
+
+
+

@@ -1,0 +1,1869 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InfraWatch — Topbar Logo & Symmetrical Icon Suite Concepts</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ── RESET & TOKENS ─────────────────────────────────── */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      
+      /* Dark Theme (Default) */
+      --bg: #030712;
+      --bg-alt: #080E1E;
+      --bg-card: #0B132B;
+      --surface: #0F172A;
+      --surface-hover: #1E293B;
+      --surface-active: #334155;
+      
+      --border: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --border-accent: rgba(56, 189, 248, 0.35);
+
+      --text-primary: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --text-muted: #64748B;
+
+      --accent: #38BDF8;
+      --accent-glow: rgba(56, 189, 248, 0.35);
+      --success: #22C55E;
+      --success-glow: rgba(34, 197, 94, 0.35);
+      --warning: #F59E0B;
+      --warning-glow: rgba(245, 158, 11, 0.35);
+      --critical: #EF4444;
+      --critical-glow: rgba(239, 68, 68, 0.35);
+      --purple: #A855F7;
+
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --radius-pill: 9999px;
+
+      --speed: 1;
+      --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+      --shadow-glow: 0 0 20px rgba(56, 189, 248, 0.2);
+    }
+
+    [data-theme="light"] {
+      --bg: #F8FAFC;
+      --bg-alt: #F1F5F9;
+      --bg-card: #FFFFFF;
+      --surface: #FFFFFF;
+      --surface-hover: #F1F5F9;
+      --surface-active: #E2E8F0;
+
+      --border: rgba(0, 0, 0, 0.08);
+      --border-strong: rgba(0, 0, 0, 0.16);
+      --border-accent: rgba(2, 132, 199, 0.35);
+
+      --text-primary: #0F172A;
+      --text-secondary: #475569;
+      --text-muted: #94A3B8;
+
+      --accent: #0284C7;
+      --accent-glow: rgba(2, 132, 199, 0.25);
+
+      --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.06);
+      --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.08);
+      --shadow-glow: 0 0 20px rgba(2, 132, 199, 0.15);
+    }
+
+    body {
+      font-family: var(--font);
+      background-color: var(--bg);
+      color: var(--text-primary);
+      min-height: 100vh;
+      line-height: 1.5;
+      padding-bottom: 80px;
+      overflow-x: hidden;
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+
+    /* ── HEADER & NAVIGATION ───────────────────────────── */
+    .showcase-header {
+      padding: 40px 32px 28px;
+      max-width: 1360px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .badge-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .concept-tag {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 4px 10px;
+      border-radius: var(--radius-pill);
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .author-note {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      line-height: 1.15;
+    }
+
+    h1 span {
+      background: linear-gradient(135deg, #38BDF8 0%, #818CF8 50%, #C084FC 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .lead-desc {
+      font-size: 15px;
+      color: var(--text-secondary);
+      max-width: 720px;
+      margin-top: 6px;
+    }
+
+    /* ── MASTER TOOLBAR CONTROLS ───────────────────────── */
+    .master-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-strong);
+      padding: 6px 10px;
+      border-radius: var(--radius-pill);
+      box-shadow: var(--shadow-sm);
+      flex-wrap: wrap;
+    }
+
+    .control-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    .control-divider {
+      width: 1px;
+      height: 18px;
+      background: var(--border);
+    }
+
+    .btn-toggle {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-pill);
+      padding: 5px 12px;
+      color: var(--text-primary);
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .btn-toggle:hover {
+      background: var(--surface-hover);
+      border-color: var(--border-strong);
+    }
+
+    .btn-toggle.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #000;
+      font-weight: 600;
+      box-shadow: 0 0 12px var(--accent-glow);
+    }
+
+    /* ── CONCEPT SELECTOR TABS ─────────────────────────── */
+    .tabs-bar {
+      max-width: 1360px;
+      margin: 0 auto 28px;
+      padding: 0 32px;
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .tabs-bar::-webkit-scrollbar { display: none; }
+
+    .tab-pill {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 10px 18px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      white-space: nowrap;
+      transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+    }
+
+    .tab-pill:hover {
+      border-color: var(--border-strong);
+      transform: translateY(-1px);
+    }
+
+    .tab-pill.active {
+      background: var(--surface);
+      border-color: var(--accent);
+      box-shadow: 0 4px 18px var(--accent-glow);
+    }
+
+    .tab-pill .tab-num {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+    }
+
+    .tab-pill.active .tab-num {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .tab-pill .tab-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .tab-pill .tab-sub {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    /* ── STICKY INTERACTIVE PREVIEW STAGE ──────────────── */
+    .preview-stage-container {
+      max-width: 1360px;
+      margin: 0 auto 40px;
+      padding: 0 32px;
+    }
+
+    .stage-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-lg);
+      padding: 24px 28px 28px;
+      box-shadow: var(--shadow-md);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stage-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, #38BDF8, #818CF8, #C084FC);
+    }
+
+    .stage-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .stage-title-wrap h2 {
+      font-size: 18px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .stage-title-wrap p {
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      margin-top: 3px;
+    }
+
+    .hud-chip {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      background: rgba(34, 197, 94, 0.1);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      color: var(--success);
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .hud-chip::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+      animation: pulseDot 1.6s infinite;
+    }
+
+    @keyframes pulseDot {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.4); opacity: 0.6; }
+    }
+
+    /* ── LIVE TOPNAV SIMULATOR BAR ─────────────────────── */
+    .topnav-simulator-frame {
+      background: #020408;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      padding: 0 20px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 30px rgba(0,0,0,0.5);
+      position: relative;
+      user-select: none;
+    }
+
+    [data-theme="light"] .topnav-simulator-frame {
+      background: #FFFFFF;
+      border-color: rgba(0, 0, 0, 0.12);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+    }
+
+    /* Grid overlay for symmetry debugging */
+    .grid-guides-overlay {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      background: repeating-linear-gradient(90deg, rgba(239, 68, 68, 0.08) 0px, rgba(239, 68, 68, 0.08) 1px, transparent 1px, transparent 34px);
+      z-index: 50;
+    }
+    .grid-guides-overlay.active {
+      opacity: 1;
+    }
+
+    /* ── CLUSTER 1: BRAND ──────────────────────────────── */
+    .sim-brand-cluster {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: relative;
+    }
+
+    .sim-brand-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      color: inherit;
+      padding: 6px 8px;
+      border-radius: var(--radius-sm);
+      outline: none;
+      transition: all 0.2s ease;
+    }
+
+    .sim-brand-mark {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .sim-brand-mark svg {
+      display: block;
+      width: 22px;
+      height: 22px;
+      overflow: visible;
+    }
+
+    .sim-brand-name {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+      color: var(--text-primary);
+    }
+
+    /* ── CLUSTER 2: DYNAMIC STATUS CAPSULE ─────────────── */
+    .sim-status-cluster {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 32px;
+      padding: 0 12px;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(34, 197, 94, 0.25);
+      border-radius: var(--radius-pill);
+      box-shadow: 0 0 14px rgba(34, 197, 94, 0.12);
+      transition: all 0.25s ease;
+    }
+
+    .sim-status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+
+    .sim-status-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    /* ── CLUSTER 3: SYMMETRICAL ACTION SUITE ───────────── */
+    .sim-controls-cluster {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Telemetry text */
+    .sim-meta-text {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 0 8px;
+      white-space: nowrap;
+    }
+
+    /* Symmetrical Pill Selectors */
+    .sim-pill-select {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-pill);
+      height: 32px;
+      padding: 0 12px;
+      font-size: 11.5px;
+      font-family: var(--font);
+      font-weight: 500;
+      color: var(--text-primary);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .sim-pill-select:hover {
+      background: var(--surface-hover);
+      border-color: var(--border-strong);
+    }
+
+    /* Uniform Symmetrical Icon Rail */
+    .symmetrical-icon-rail {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 2px;
+    }
+
+    /* Exact 34x34 Uniform Bounding Box */
+    .sim-icon-btn {
+      width: 34px;
+      height: 34px;
+      min-width: 34px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-secondary);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      position: relative;
+      outline: none;
+      user-select: none;
+      transition: all calc(0.2s * var(--speed)) cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .sim-icon-btn svg {
+      width: 16px;
+      height: 16px;
+      display: block;
+      pointer-events: none;
+      transition: transform calc(0.2s * var(--speed)) cubic-bezier(0.34, 1.56, 0.64, 1), stroke calc(0.2s * var(--speed)) ease, fill calc(0.2s * var(--speed)) ease;
+    }
+
+    /* Symmetrical Divider */
+    .sim-rail-divider {
+      width: 1px;
+      height: 18px;
+      background: var(--border);
+      margin: 0 3px;
+    }
+
+    /* User Profile Badge */
+    .sim-user-pill {
+      height: 32px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px 0 4px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-pill);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-primary);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .sim-user-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #38BDF8, #818CF8);
+      color: #000;
+      font-weight: 700;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
+      transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .sim-user-pill:hover .sim-user-avatar {
+      transform: scale(1.12) rotate(6deg);
+    }
+
+    .sim-role-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: #F59E0B;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    /* Tooltip Banner for Actions */
+    .action-feedback-toast {
+      position: absolute;
+      bottom: 12px;
+      right: 28px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid var(--border-accent);
+      color: var(--accent);
+      padding: 5px 12px;
+      border-radius: var(--radius-pill);
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.15s ease, transform 0.15s ease;
+      z-index: 100;
+    }
+    .action-feedback-toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+
+    /* =====================================================
+       CONCEPT SPECIFIC THEMES & ANIMATIONS
+       ===================================================== */
+
+    /* ─────────────────────────────────────────────────────
+       CONCEPT 1: TACTICAL AEROSPACE HUD (Linear & Datadog)
+       ───────────────────────────────────────────────────── */
+    .concept-hud .sim-icon-btn {
+      border: 1px solid transparent;
+      border-radius: 4px;
+    }
+
+    .concept-hud .sim-icon-btn:hover {
+      background: rgba(56, 189, 248, 0.08);
+      border-color: rgba(56, 189, 248, 0.35);
+      color: var(--accent);
+      box-shadow: inset 0 0 8px rgba(56, 189, 248, 0.2), 0 0 12px rgba(56, 189, 248, 0.15);
+    }
+
+    .concept-hud .sim-icon-btn:active {
+      transform: scale(0.88);
+      box-shadow: inset 0 0 14px rgba(56, 189, 248, 0.4);
+    }
+
+    /* HUD Reticle Corners on Hover */
+    .concept-hud .sim-icon-btn::before,
+    .concept-hud .sim-icon-btn::after {
+      content: '';
+      position: absolute;
+      width: 4px;
+      height: 4px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease;
+    }
+    .concept-hud .sim-icon-btn::before {
+      top: 1px; left: 1px;
+      border-top: 1.5px solid var(--accent);
+      border-left: 1.5px solid var(--accent);
+    }
+    .concept-hud .sim-icon-btn::after {
+      bottom: 1px; right: 1px;
+      border-bottom: 1.5px solid var(--accent);
+      border-right: 1.5px solid var(--accent);
+    }
+    .concept-hud .sim-icon-btn:hover::before,
+    .concept-hud .sim-icon-btn:hover::after {
+      opacity: 1;
+    }
+
+    /* Gear: Mechanical 60-degree indexed ratchet */
+    .concept-hud .gear-btn:hover svg {
+      transform: rotate(60deg);
+    }
+    .concept-hud .gear-btn:active svg {
+      transform: rotate(180deg) scale(0.9);
+    }
+
+    /* Refresh: Phased radar sweep spin */
+    .concept-hud .refresh-btn:hover svg {
+      animation: hudRadarSpin 1s infinite linear;
+    }
+    @keyframes hudRadarSpin {
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Logs: Terminal laser draw */
+    .concept-hud .logs-btn:hover svg path:last-child {
+      stroke-dasharray: 10;
+      animation: hudScanLine 0.8s infinite linear;
+    }
+    @keyframes hudScanLine {
+      0% { stroke-dashoffset: 20; }
+      100% { stroke-dashoffset: 0; }
+    }
+
+    /* Sound: Waveform oscillation */
+    .concept-hud .sound-btn:hover svg path {
+      animation: hudSoundWave 0.6s infinite ease-in-out alternate;
+    }
+    @keyframes hudSoundWave {
+      0% { transform: scaleX(0.85); }
+      100% { transform: scaleX(1.18); }
+    }
+
+    /* Brand: Phased Clockwise Radar Ping */
+    .concept-hud .sim-brand-mark .node-1 { animation: hudNodePing 1.2s infinite ease-in-out 0s; }
+    .concept-hud .sim-brand-mark .node-2 { animation: hudNodePing 1.2s infinite ease-in-out 0.3s; }
+    .concept-hud .sim-brand-mark .node-4 { animation: hudNodePing 1.2s infinite ease-in-out 0.6s; }
+    .concept-hud .sim-brand-mark .node-3 { animation: hudNodePing 1.2s infinite ease-in-out 0.9s; }
+
+    @keyframes hudNodePing {
+      0%, 100% { fill: var(--accent); opacity: 0.3; filter: none; }
+      50% { fill: #38BDF8; opacity: 1; filter: drop-shadow(0 0 6px #38BDF8); }
+    }
+
+    /* ─────────────────────────────────────────────────────
+       CONCEPT 2: FLUID GLASS & LIQUID MERCURY (VisionOS)
+       ───────────────────────────────────────────────────── */
+    .concept-glass .sim-icon-btn {
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    .concept-glass .sim-icon-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.25);
+      color: #FFF;
+      transform: translateY(-2px) scale(1.06);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35), 0 0 16px rgba(255, 255, 255, 0.15);
+    }
+
+    .concept-glass .sim-icon-btn:active {
+      transform: translateY(1px) scale(0.92);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    /* Gear: Hydrodynamic smooth glide */
+    .concept-glass .gear-btn:hover svg {
+      transform: rotate(90deg);
+      transition: transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    /* Refresh: Liquid vortex swirl */
+    .concept-glass .refresh-btn:hover svg {
+      transform: rotate(360deg);
+      transition: transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    /* Sound: Liquid droplet bounce */
+    .concept-glass .sound-btn:hover svg {
+      transform: scale(1.18);
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    /* Brand: Organic breathing liquid bubbles */
+    .concept-glass .sim-brand-mark rect {
+      rx: 5px;
+      transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .concept-glass .sim-brand-btn:hover .sim-brand-mark rect {
+      rx: 8px;
+      transform: scale(1.1);
+      fill: #818CF8;
+      filter: drop-shadow(0 0 8px rgba(129, 140, 248, 0.8));
+    }
+
+    /* ─────────────────────────────────────────────────────
+       CONCEPT 3: KINETIC TACTILE SWITCHBOARD (Teenage Engineering)
+       ───────────────────────────────────────────────────── */
+    .concept-tactile .sim-icon-btn {
+      border-radius: 6px;
+      background: #11151F;
+      border: 1px solid #1E2536;
+      box-shadow: 0 3px 0 #07090F, inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    }
+
+    .concept-tactile .sim-icon-btn:hover {
+      background: #1A2132;
+      border-color: #F59E0B;
+      color: #F59E0B;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 0 #07090F, 0 0 10px rgba(245, 158, 11, 0.25);
+    }
+
+    .concept-tactile .sim-icon-btn:active {
+      transform: translateY(3px);
+      box-shadow: 0 0 0 #07090F, inset 0 2px 4px rgba(0, 0, 0, 0.6);
+      border-color: #F59E0B;
+    }
+
+    /* Gear: Heavy Mechanical Clockwork Escapement */
+    .concept-tactile .gear-btn:hover svg {
+      animation: tactileTick 0.5s steps(4) infinite;
+    }
+    @keyframes tactileTick {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(90deg); }
+    }
+
+    /* Refresh: Mechanical wind-up spring */
+    .concept-tactile .refresh-btn:hover svg {
+      animation: tactileWind 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+    }
+    @keyframes tactileWind {
+      0% { transform: rotate(0deg); }
+      50% { transform: rotate(200deg); }
+      100% { transform: rotate(180deg); }
+    }
+
+    /* Brand: Physical micro-switches */
+    .concept-tactile .sim-brand-mark rect {
+      transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .concept-tactile .sim-brand-btn:hover .node-1 { transform: translateY(-2px); fill: #F59E0B; }
+    .concept-tactile .sim-brand-btn:hover .node-2 { transform: translateY(-1px); fill: #22C55E; }
+    .concept-tactile .sim-brand-btn:hover .node-3 { transform: translateY(1px); fill: #EF4444; }
+    .concept-tactile .sim-brand-btn:hover .node-4 { transform: translateY(2px); fill: #38BDF8; }
+
+    /* ─────────────────────────────────────────────────────
+       CONCEPT 4: QUANTUM PLASMA RESONATOR (Sci-Fi Cyberpunk)
+       ───────────────────────────────────────────────────── */
+    .concept-quantum .sim-icon-btn {
+      border-radius: 4px;
+      background: rgba(168, 85, 247, 0.05);
+      border: 1px solid rgba(168, 85, 247, 0.2);
+    }
+
+    .concept-quantum .sim-icon-btn:hover {
+      background: rgba(168, 85, 247, 0.18);
+      border-color: #A855F7;
+      color: #D8B4FE;
+      transform: scale(1.12);
+      box-shadow: 0 0 16px rgba(168, 85, 247, 0.5), inset 0 0 10px rgba(168, 85, 247, 0.3);
+    }
+
+    .concept-quantum .sim-icon-btn:active {
+      transform: scale(0.85);
+      box-shadow: 0 0 24px #A855F7;
+    }
+
+    /* Quantum Plasma Shockwave on Click */
+    .concept-quantum .sim-icon-btn::after {
+      content: '';
+      position: absolute;
+      inset: -4px;
+      border-radius: 8px;
+      border: 2px solid #A855F7;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .concept-quantum .sim-icon-btn:active::after {
+      animation: quantumShockwave 0.4s ease-out;
+    }
+    @keyframes quantumShockwave {
+      0% { transform: scale(1); opacity: 1; }
+      100% { transform: scale(1.6); opacity: 0; }
+    }
+
+    /* Gear: Tachyon Spin */
+    .concept-quantum .gear-btn:hover svg {
+      animation: quantumSpin 0.5s infinite linear;
+      filter: drop-shadow(0 0 8px #A855F7);
+    }
+    @keyframes quantumSpin {
+      100% { transform: rotate(-360deg); }
+    }
+
+    /* Brand: Quantum Core Resonance */
+    .concept-quantum .sim-brand-mark {
+      animation: coreResonate 2s infinite ease-in-out;
+    }
+    @keyframes coreResonate {
+      0%, 100% { filter: drop-shadow(0 0 4px #A855F7); }
+      50% { filter: drop-shadow(0 0 14px #38BDF8) drop-shadow(0 0 24px #A855F7); }
+    }
+
+    /* ─────────────────────────────────────────────────────
+       CONCEPT 5: MINIMALIST SWISS MODERNIST (Vercel & Braun)
+       ───────────────────────────────────────────────────── */
+    .concept-swiss .sim-icon-btn {
+      border-radius: 2px;
+      border: 1px solid transparent;
+    }
+
+    .concept-swiss .sim-icon-btn:hover {
+      background: #FFFFFF;
+      color: #000000;
+      border-color: #FFFFFF;
+      transform: none;
+    }
+
+    [data-theme="light"] .concept-swiss .sim-icon-btn:hover {
+      background: #000000;
+      color: #FFFFFF;
+      border-color: #000000;
+    }
+
+    .concept-swiss .sim-icon-btn:active {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+    }
+
+    /* SVG Stroke Redraw Effect */
+    .concept-swiss .sim-icon-btn:hover svg {
+      stroke-dasharray: 40;
+      animation: swissDraw 0.3s ease-out forwards;
+    }
+    @keyframes swissDraw {
+      0% { stroke-dashoffset: 40; }
+      100% { stroke-dashoffset: 0; }
+    }
+
+    /* Brand: Architectural Wireframe Isometric Morph */
+    .concept-swiss .sim-brand-mark rect {
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .concept-swiss .sim-brand-btn:hover .sim-brand-mark .node-1 { transform: translate(-2px, -2px); fill: #FFF; }
+    .concept-swiss .sim-brand-btn:hover .sim-brand-mark .node-2 { transform: translate(2px, -2px); fill: #FFF; }
+    .concept-swiss .sim-brand-btn:hover .sim-brand-mark .node-3 { transform: translate(-2px, 2px); fill: #FFF; }
+    .concept-swiss .sim-brand-btn:hover .sim-brand-mark .node-4 { transform: translate(2px, 2px); fill: #FFF; }
+
+
+    /* ── SECTION 2: SYMMETRY ARCHITECTURE (BEFORE VS AFTER) ── */
+    .symmetry-section {
+      max-width: 1360px;
+      margin: 0 auto 48px;
+      padding: 0 32px;
+    }
+
+    .section-head {
+      margin-bottom: 20px;
+    }
+    .section-head h2 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .section-head p {
+      font-size: 13.5px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+    }
+
+    .comparison-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 990px) {
+      .comparison-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .comparison-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .comp-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .comp-badge {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .badge-bad {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: var(--critical);
+    }
+    .badge-good {
+      background: rgba(34, 197, 94, 0.12);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      color: var(--success);
+    }
+
+    .comp-preview-box {
+      background: #020408;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px 18px;
+      min-height: 70px;
+      display: flex;
+      align-items: center;
+      position: relative;
+      overflow-x: auto;
+    }
+
+    /* Annotations list */
+    .defect-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+    }
+    .defect-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .defect-list li strong {
+      color: var(--text-primary);
+    }
+    .bullet-bad { color: var(--critical); font-weight: 700; }
+    .bullet-good { color: var(--success); font-weight: 700; }
+
+
+    /* ── SECTION 3: DEEP-DIVE ICON BENCH ───────────────── */
+    .bench-section {
+      max-width: 1360px;
+      margin: 0 auto 48px;
+      padding: 0 32px;
+    }
+
+    .bench-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    .bench-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      transition: border-color 0.2s ease, transform 0.2s ease;
+    }
+    .bench-card:hover {
+      border-color: var(--border-strong);
+      transform: translateY(-2px);
+    }
+
+    .bench-card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .bench-card-title {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .bench-card-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .bench-interactive-pad {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      height: 90px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .bench-icon-giant {
+      width: 54px;
+      height: 54px;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .bench-icon-giant svg {
+      width: 26px;
+      height: 26px;
+    }
+
+    .bench-desc {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.45;
+    }
+
+    /* ── FOOTER & CODE BLUEPRINT ───────────────────────── */
+    .blueprint-section {
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 0 32px;
+    }
+
+    .code-box {
+      background: #020408;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      padding: 16px 20px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: #94A3B8;
+      overflow-x: auto;
+      line-height: 1.6;
+    }
+    .code-box code { color: #38BDF8; }
+
+  </style>
+</head>
+<body class="concept-hud">
+
+  <!-- ── SHOWCASE HEADER ───────────────────────────────── -->
+  <header class="showcase-header">
+    <div class="badge-wrap">
+      <span class="concept-tag">Interactive Design Lab · 5 Concepts</span>
+      <span class="author-note">Tailored for InfraWatch NOC Topbar</span>
+      <span class="hud-chip" id="soundStateChip">Web Audio: Armed</span>
+    </div>
+
+    <div class="title-row">
+      <div>
+        <h1>Topbar Logo & <span>Symmetrical Icon Suite</span></h1>
+        <p class="lead-desc">
+          Replacing mediocre, asymmetrical controls with a fluid kinetic animation system, 
+          strictly calibrated 34px symmetrical hitboxes, and satisfying micro-haptics.
+        </p>
+      </div>
+
+      <!-- Master Toolbar Controls -->
+      <div class="master-controls">
+        <div class="control-item">
+          <span>Theme:</span>
+          <button class="btn-toggle active" id="themeDarkBtn" type="button">Dark</button>
+          <button class="btn-toggle" id="themeLightBtn" type="button">Light</button>
+        </div>
+        <div class="control-divider"></div>
+        <div class="control-item">
+          <span>Speed:</span>
+          <button class="btn-toggle" data-speed="0.5" id="speedSlowBtn" type="button">0.5x Slow-Mo</button>
+          <button class="btn-toggle active" data-speed="1" id="speedNormalBtn" type="button">1x Normal</button>
+        </div>
+        <div class="control-divider"></div>
+        <div class="control-item">
+          <button class="btn-toggle" id="toggleGridBtn" type="button">Symmetry Rulers</button>
+          <button class="btn-toggle active" id="toggleAudioBtn" type="button">Haptic Sound FX: ON</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── CONCEPT SELECTOR TABS ─────────────────────────── -->
+  <nav class="tabs-bar" role="tablist" aria-label="Concept variants">
+    <div class="tab-pill active" data-concept="concept-hud" role="tab" tabindex="0">
+      <span class="tab-num">Concept 01 (Recommended)</span>
+      <span class="tab-title">Tactical Aerospace HUD</span>
+      <span class="tab-sub">Linear & Datadog Telemetry · Ratchet Clicks</span>
+    </div>
+
+    <div class="tab-pill" data-concept="concept-glass" role="tab" tabindex="0">
+      <span class="tab-num">Concept 02</span>
+      <span class="tab-title">Liquid Glassmorphism</span>
+      <span class="tab-sub">Apple VisionOS · Refractive Specular Floats</span>
+    </div>
+
+    <div class="tab-pill" data-concept="concept-tactile" role="tab" tabindex="0">
+      <span class="tab-num">Concept 03</span>
+      <span class="tab-title">Tactile Switchboard</span>
+      <span class="tab-sub">Teenage Engineering · Mechanical Keycaps</span>
+    </div>
+
+    <div class="tab-pill" data-concept="concept-quantum" role="tab" tabindex="0">
+      <span class="tab-num">Concept 04</span>
+      <span class="tab-title">Quantum Resonator</span>
+      <span class="tab-sub">Cyberpunk Neon · Bioluminescent Shockwaves</span>
+    </div>
+
+    <div class="tab-pill" data-concept="concept-swiss" role="tab" tabindex="0">
+      <span class="tab-num">Concept 05</span>
+      <span class="tab-title">Swiss Modernist Wireframe</span>
+      <span class="tab-sub">Vercel & Braun · Mathematical Vector Redraw</span>
+    </div>
+  </nav>
+
+  <!-- ── SECTION 1: LIVE INTERACTIVE TOPNAV STAGE ──────── -->
+  <main class="preview-stage-container">
+    <div class="stage-card">
+      <div class="stage-meta">
+        <div class="stage-title-wrap">
+          <h2 id="activeConceptHeading">Concept 1: Tactical Aerospace HUD</h2>
+          <p id="activeConceptSummary">Precision reticle targets, 60° ratchet gear steps, and phased-array radar telemetry.</p>
+        </div>
+        <div class="hud-chip">Click any icon to test tactile feedback &amp; animations</div>
+      </div>
+
+      <!-- Live Topbar Simulator -->
+      <div class="topnav-simulator-frame" id="simFrame">
+        <!-- Symmetry Guides Overlay -->
+        <div class="grid-guides-overlay" id="gridGuides"></div>
+
+        <!-- Left: Brand -->
+        <div class="sim-brand-cluster">
+          <button class="sim-brand-btn" id="brandMarkBtn" type="button" title="InfraWatch Brand Mark (Click to test)">
+            <div class="sim-brand-mark">
+              <svg viewBox="0 0 22 22" fill="none">
+                <rect class="node-1" x="2" y="2" width="7" height="7" rx="2" fill="var(--accent)"/>
+                <rect class="node-2" x="13" y="2" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.6"/>
+                <rect class="node-3" x="2" y="13" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.6"/>
+                <rect class="node-4" x="13" y="13" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.8"/>
+              </svg>
+            </div>
+            <span class="sim-brand-name">InfraWatch</span>
+          </button>
+        </div>
+
+        <!-- Center: Status Dynamic Island -->
+        <div class="sim-status-cluster" id="statusPill" title="Fleet Telemetry Status">
+          <span class="sim-status-dot"></span>
+          <span class="sim-status-label">All Systems Operational</span>
+        </div>
+
+        <!-- Right: Perfectly Symmetrical Controls Suite -->
+        <div class="sim-controls-cluster">
+          <!-- Freshness Telemetry -->
+          <span class="sim-meta-text" id="telemetryFreshness">Updated 0s ago</span>
+
+          <!-- Endpoint Dropdown Pill -->
+          <div class="sim-pill-select" id="simEndpoint" title="Active Prometheus Cluster">
+            <span>Prometheus: 192.168.9.16:9090</span>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+
+          <!-- Symmetrical Icon Rail -->
+          <div class="symmetrical-icon-rail">
+            <!-- 1. Endpoint Settings Gear -->
+            <button class="sim-icon-btn gear-btn" id="btnGear" type="button" title="Endpoint Configuration">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            </button>
+
+            <!-- 2. Refresh Scrape Rate Pill -->
+            <div class="sim-pill-select" style="height: 32px; padding: 0 8px;" id="simInterval" title="Scrape Interval">
+              <span style="font-family: var(--font-mono); font-size: 11px;">5s</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+
+            <!-- 3. Refresh Trigger Button -->
+            <button class="sim-icon-btn refresh-btn" id="btnRefresh" type="button" title="Trigger Instant Probe Refresh">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                <polyline points="21 3 21 9 15 9"/>
+              </svg>
+            </button>
+
+            <!-- 4. Sound / Alarm Toggle Button -->
+            <button class="sim-icon-btn sound-btn" id="btnSound" type="button" title="Alarm Sound (Click to Mute)">
+              <svg id="svgSoundOn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"/>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+              </svg>
+              <svg id="svgSoundOff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <line x1="23" y1="9" x2="17" y2="15"/>
+                <line x1="17" y1="9" x2="23" y2="15"/>
+              </svg>
+            </button>
+
+            <!-- 5. Incident & Logs Drawer Button -->
+            <button class="sim-icon-btn logs-btn" id="btnLogs" type="button" title="Incident Logs &amp; Audit Trail">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 22V6a2 2 0 012-2h12a2 2 0 012 2v16"/>
+                <path d="M2 22h20M8 10h8M8 14h5"/>
+              </svg>
+            </button>
+
+            <!-- 6. Self-Health Micro Beacon Button -->
+            <button class="sim-icon-btn health-btn" id="btnHealth" type="button" title="Self-Health Telemetry Beacon">
+              <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 6px var(--success);"></span>
+            </button>
+
+            <!-- Rail Divider -->
+            <div class="sim-rail-divider"></div>
+
+            <!-- 7. User Profile Pill -->
+            <div class="sim-user-pill" id="simUserPill" title="Account &amp; Role Details">
+              <div class="sim-user-avatar">O</div>
+              <span>Owner</span>
+              <span class="sim-role-tag">OWNER</span>
+            </div>
+
+            <!-- 8. Theme Switcher Button -->
+            <button class="sim-icon-btn theme-btn" id="btnThemeToggle" type="button" title="Toggle Theme (Dark / Light)">
+              <svg id="svgMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+              </svg>
+              <svg id="svgSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+                <circle cx="12" cy="12" r="5"/>
+                <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Toast Feedback -->
+        <div class="action-feedback-toast" id="actionToast">Haptic: Click registered</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── SECTION 2: SYMMETRY ARCHITECTURE (BEFORE VS AFTER) ── -->
+  <section class="symmetry-section">
+    <div class="section-head">
+      <h2>Symmetrical Spacing &amp; Geometry Architecture</h2>
+      <p>Comparing the existing haphazard cluster (as captured in the user screenshot) against the new calibrated design system.</p>
+    </div>
+
+    <div class="comparison-grid">
+      <!-- BEFORE CARD -->
+      <div class="comparison-card">
+        <div class="comp-header">
+          <h3 style="font-size: 15px; font-weight: 700;">Before (Incumbent Topbar)</h3>
+          <span class="comp-badge badge-bad">Asymmetrical &amp; Cramped</span>
+        </div>
+
+        <!-- Visual simulation of the screenshot -->
+        <div class="comp-preview-box" style="gap: 8px;">
+          <div style="width: 26px; height: 26px; border: 1px dashed #EF4444; display:flex; align-items:center; justify-content:center; border-radius:3px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7E8B9B" stroke-width="2"><path d="M4 22V6a2 2 0 012-2h12a2 2 0 012 2v16"/><path d="M2 22h20M8 10h8M8 14h5"/></svg>
+          </div>
+          <span style="font-family: monospace; font-size: 11px; color: #38BDF8; margin-right: 4px;">Updated 0s ago</span>
+          <div style="border: 1px solid #334155; border-radius: 999px; padding: 4px 10px; font-size: 11px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            Prometheus: 192.168.9.16...
+          </div>
+          <div style="width: 26px; height: 26px; border: 1px dashed #EF4444; display:flex; align-items:center; justify-content:center; color: #7E8B9B;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </div>
+          <span style="font-size: 11px; color:#7E8B9B;">5s v</span>
+          <div style="display:flex; gap:0px; border: 1px dashed #EF4444; padding: 2px;">
+            <span style="width: 22px; height: 22px; display:inline-flex; align-items:center; justify-content:center; color:#94A3B8;">⟳</span>
+            <span style="width: 22px; height: 22px; display:inline-flex; align-items:center; justify-content:center; color:#94A3B8;">🔊</span>
+            <span style="width: 6px; height: 6px; border-radius:50%; background:#22C55E; align-self:center; margin:0 4px;"></span>
+          </div>
+          <div style="border: 1px solid #334155; border-radius: 999px; padding: 3px 8px; font-size: 11px;">(O) Owner</div>
+          <span style="color:#7E8B9B; margin-left: auto;">🌙</span>
+        </div>
+
+        <ul class="defect-list">
+          <li><span class="bullet-bad">✕</span> <strong>Asymmetrical Hitboxes:</strong> Logs icon is 26px, Gear is 26px, Refresh &amp; Sound clumped at 0px gap, Health indicator is an un-padded 14px dot.</li>
+          <li><span class="bullet-bad">✕</span> <strong>Irregular Optical Margins:</strong> Gear button sits arbitrarily between Prometheus dropdown and 5s interval, breaking logical hierarchy.</li>
+          <li><span class="bullet-bad">✕</span> <strong>Zero Kinetic Response:</strong> Hovering only produces a flat gray box; no rotational inertia, spring physics, or tactile click feedback.</li>
+        </ul>
+      </div>
+
+      <!-- AFTER CARD -->
+      <div class="comparison-card">
+        <div class="comp-header">
+          <h3 style="font-size: 15px; font-weight: 700;">After (Engineered Symmetrical Suite)</h3>
+          <span class="comp-badge badge-good">100% Calibrated Symmetry</span>
+        </div>
+
+        <!-- Visual simulation of the engineered solution -->
+        <div class="comp-preview-box" style="gap: 6px;">
+          <div style="width: 34px; height: 34px; border: 1.5px solid #22C55E; display:flex; align-items:center; justify-content:center; border-radius:6px; background: rgba(34,197,94,0.06);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="2"><path d="M4 22V6a2 2 0 012-2h12a2 2 0 012 2v16"/><path d="M2 22h20M8 10h8M8 14h5"/></svg>
+          </div>
+          <div style="width: 34px; height: 34px; border: 1.5px solid #22C55E; display:flex; align-items:center; justify-content:center; border-radius:6px; background: rgba(34,197,94,0.06);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </div>
+          <div style="width: 34px; height: 34px; border: 1.5px solid #22C55E; display:flex; align-items:center; justify-content:center; border-radius:6px; background: rgba(34,197,94,0.06);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 9 15 9"/></svg>
+          </div>
+          <div style="width: 34px; height: 34px; border: 1.5px solid #22C55E; display:flex; align-items:center; justify-content:center; border-radius:6px; background: rgba(34,197,94,0.06);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+          </div>
+          <div style="width: 34px; height: 34px; border: 1.5px solid #22C55E; display:flex; align-items:center; justify-content:center; border-radius:6px; background: rgba(34,197,94,0.06);">
+            <span style="width:8px; height:8px; border-radius:50%; background:#22C55E;"></span>
+          </div>
+          <div style="width: 1px; height: 18px; background: #334155; margin: 0 4px;"></div>
+          <div style="width: 34px; height: 34px; border: 1.5px solid #22C55E; display:flex; align-items:center; justify-content:center; border-radius:6px; background: rgba(34,197,94,0.06);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </div>
+        </div>
+
+        <ul class="defect-list">
+          <li><span class="bullet-good">✓</span> <strong>Strict 34×34px Isometric Matrix:</strong> Every interactive button occupies an identical bounding box with uniform 6px inter-gutter rhythm.</li>
+          <li><span class="bullet-good">✓</span> <strong>Concentric Optical Centering:</strong> 16×16px active SVG glyph centers mathematically inside the 34px container, ensuring zero visual wobble.</li>
+          <li><span class="bullet-good">✓</span> <strong>Spring Physics &amp; Inertia:</strong> Bezier spring curve <code>cubic-bezier(0.34, 1.56, 0.64, 1)</code> delivers instant, tactile, satisfying recoil.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SECTION 3: DEEP-DIVE ICON BENCH ───────────────── -->
+  <section class="bench-section">
+    <div class="section-head">
+      <h2>Interactive Micro-Interaction Testbench</h2>
+      <p>Hover and click each isolated component below to experience its animation curves at scale.</p>
+    </div>
+
+    <div class="bench-grid">
+      <!-- 1. Brand Mark -->
+      <div class="bench-card">
+        <div class="bench-card-top">
+          <span class="bench-card-title">Brand Mark Telemetry</span>
+          <span class="bench-card-tag">BrandMark.svg</span>
+        </div>
+        <div class="bench-interactive-pad">
+          <button class="sim-brand-btn bench-icon-giant" id="benchBrand" type="button">
+            <div class="sim-brand-mark" style="transform: scale(1.6);">
+              <svg viewBox="0 0 22 22" fill="none">
+                <rect class="node-1" x="2" y="2" width="7" height="7" rx="2" fill="var(--accent)"/>
+                <rect class="node-2" x="13" y="2" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.6"/>
+                <rect class="node-3" x="2" y="13" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.6"/>
+                <rect class="node-4" x="13" y="13" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.8"/>
+              </svg>
+            </div>
+          </button>
+        </div>
+        <p class="bench-desc">4-node matrix cycles through telemetry radar pings, liquid morphing, or mechanical micro-switch elevation depending on the active concept.</p>
+      </div>
+
+      <!-- 2. Settings Gear -->
+      <div class="bench-card">
+        <div class="bench-card-top">
+          <span class="bench-card-title">Configuration Gear</span>
+          <span class="bench-card-tag">Config.svg</span>
+        </div>
+        <div class="bench-interactive-pad">
+          <button class="sim-icon-btn gear-btn bench-icon-giant" id="benchGear" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
+        </div>
+        <p class="bench-desc">Ratchet stepped rotation with inertia deceleration. Clicks advance the gear 60° with spring rebound.</p>
+      </div>
+
+      <!-- 3. Refresh Trigger -->
+      <div class="bench-card">
+        <div class="bench-card-top">
+          <span class="bench-card-title">Instant Refresh</span>
+          <span class="bench-card-tag">Refresh.svg</span>
+        </div>
+        <div class="bench-interactive-pad">
+          <button class="sim-icon-btn refresh-btn bench-icon-giant" id="benchRefresh" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+              <polyline points="21 3 21 9 15 9"/>
+            </svg>
+          </button>
+        </div>
+        <p class="bench-desc">High-speed centrifuge spin on click with momentum decay, resetting the live telemetry age clock.</p>
+      </div>
+
+      <!-- 4. Sound Waveform -->
+      <div class="bench-card">
+        <div class="bench-card-top">
+          <span class="bench-card-title">Audio Mute &amp; Waveforms</span>
+          <span class="bench-card-tag">Speaker.svg</span>
+        </div>
+        <div class="bench-interactive-pad">
+          <button class="sim-icon-btn sound-btn bench-icon-giant" id="benchSound" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"/>
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+            </svg>
+          </button>
+        </div>
+        <p class="bench-desc">Dynamic oscillating acoustic wave arcs on hover; knife-sharp diagonal slice strike when toggling into mute mode.</p>
+      </div>
+
+      <!-- 5. Incident Logs -->
+      <div class="bench-card">
+        <div class="bench-card-top">
+          <span class="bench-card-title">Incident Audit Logs</span>
+          <span class="bench-card-tag">Logs.svg</span>
+        </div>
+        <div class="bench-interactive-pad">
+          <button class="sim-icon-btn logs-btn bench-icon-giant" id="benchLogs" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 22V6a2 2 0 012-2h12a2 2 0 012 2v16"/>
+              <path d="M2 22h20M8 10h8M8 14h5"/>
+            </svg>
+          </button>
+        </div>
+        <p class="bench-desc">Laser scan drawer slide animation. The horizontal rule strokes simulate continuous data stream logging.</p>
+      </div>
+
+      <!-- 6. Celestial Theme Toggle -->
+      <div class="bench-card">
+        <div class="bench-card-top">
+          <span class="bench-card-title">Celestial Eclipse Toggle</span>
+          <span class="bench-card-tag">Theme.svg</span>
+        </div>
+        <div class="bench-interactive-pad">
+          <button class="sim-icon-btn theme-btn bench-icon-giant" id="benchTheme" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+          </button>
+        </div>
+        <p class="bench-desc">Smooth rotational glide transitioning between moon crescent and radiant solar flare rays.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SECTION 4: CODE BLUEPRINT & IMPLEMENTATION ────── -->
+  <section class="blueprint-section">
+    <div class="section-head">
+      <h2>CSS Implementation Blueprint</h2>
+      <p>Drop-in replacement styles for <code>alarm/static/css/parts/nav.css</code> once you select your favorite concept.</p>
+    </div>
+
+    <div class="code-box">
+<pre>/* Symmetrical 34px Topbar Icon Rail System */
+.symmetrical-icon-rail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.symmetrical-icon-rail .nav-icon {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.symmetrical-icon-rail .nav-icon svg {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Ratchet gear step on hover */
+.symmetrical-icon-rail .gear-btn:hover svg {
+  transform: rotate(60deg);
+}
+
+/* Centrifuge momentum spin */
+.symmetrical-icon-rail .refresh-btn:hover svg {
+  animation: hudRadarSpin 1s infinite linear;
+}</pre>
+    </div>
+  </section>
+
+  <!-- ── JAVASCRIPT LOGIC ──────────────────────────────── -->
+  <script>
+    /* ── WEB AUDIO SYNTHESIZER FOR SATISFYING HAPTIC CLICKS ── */
+    let audioCtx = null;
+    let audioEnabled = true;
+
+    function getAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      return audioCtx;
+    }
+
+    // High-end subtle mechanical click (like Apple trackpad or mechanical keycap)
+    function playTactileClick(freq = 800, type = 'sine', duration = 0.04) {
+      if (!audioEnabled) return;
+      try {
+        const ctx = getAudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(120, ctx.currentTime + duration);
+
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start();
+        osc.stop(ctx.currentTime + duration);
+      } catch (e) {
+        // Audio policy ignore
+      }
+    }
+
+    // Soft hover pop
+    function playHoverPop() {
+      if (!audioEnabled) return;
+      try {
+        const ctx = getAudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1200, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.02);
+
+        gain.gain.setValueAtTime(0.04, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.02);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start();
+        osc.stop(ctx.currentTime + 0.02);
+      } catch (e) {}
+    }
+
+    /* ── TOAST NOTIFICATIONS ────────────────────────────── */
+    const actionToast = document.getElementById('actionToast');
+    let toastTimer = null;
+    function showToast(text) {
+      if (!actionToast) return;
+      actionToast.textContent = text;
+      actionToast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        actionToast.classList.remove('show');
+      }, 1500);
+    }
+
+    /* ── CONCEPT SWITCHER ───────────────────────────────── */
+    const tabs = document.querySelectorAll('.tab-pill');
+    const body = document.body;
+    const activeConceptHeading = document.getElementById('activeConceptHeading');
+    const activeConceptSummary = document.getElementById('activeConceptSummary');
+
+    const conceptData = {
+      'concept-hud': {
+        title: 'Concept 1: Tactical Aerospace HUD',
+        summary: 'Precision reticle targets, 60° ratchet gear steps, and phased-array radar telemetry.'
+      },
+      'concept-glass': {
+        title: 'Concept 2: Liquid Glassmorphism & Aurora',
+        summary: 'Apple VisionOS frosted glass, refractive specular highlights, and fluid elastic rebounds.'
+      },
+      'concept-tactile': {
+        title: 'Concept 3: Kinetic Tactile Switchboard',
+        summary: 'Teenage Engineering mechanical plungers, amber pilot lamps, and tactile keycap physics.'
+      },
+      'concept-quantum': {
+        title: 'Concept 4: Quantum Plasma Resonator',
+        summary: 'Cyberpunk neon plasma, high-frequency resonance, and tachyon shockwaves.'
+      },
+      'concept-swiss': {
+        title: 'Concept 5: Minimalist Swiss Modernist',
+        summary: 'Pure mathematical geometry, high-contrast monochrome, and vector stroke redraws.'
+      }
+    };
+
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+
+        const conceptClass = tab.getAttribute('data-concept');
+        body.className = conceptClass;
+
+        if (conceptData[conceptClass]) {
+          activeConceptHeading.textContent = conceptData[conceptClass].title;
+          activeConceptSummary.textContent = conceptData[conceptClass].summary;
+        }
+
+        playTactileClick(600, 'triangle', 0.06);
+        showToast(`Loaded ${conceptData[conceptClass].title}`);
+      });
+    });
+
+    /* ── MASTER TOOLBAR BUTTONS ─────────────────────────── */
+    // Theme toggle
+    const themeDarkBtn = document.getElementById('themeDarkBtn');
+    const themeLightBtn = document.getElementById('themeLightBtn');
+
+    function setTheme(mode) {
+      document.documentElement.setAttribute('data-theme', mode);
+      if (mode === 'dark') {
+        themeDarkBtn.classList.add('active');
+        themeLightBtn.classList.remove('active');
+        document.getElementById('svgMoon').style.display = 'block';
+        document.getElementById('svgSun').style.display = 'none';
+      } else {
+        themeLightBtn.classList.add('active');
+        themeDarkBtn.classList.remove('active');
+        document.getElementById('svgMoon').style.display = 'none';
+        document.getElementById('svgSun').style.display = 'block';
+      }
+    }
+
+    themeDarkBtn.addEventListener('click', () => {
+      setTheme('dark');
+      playTactileClick(500, 'sine', 0.05);
+    });
+    themeLightBtn.addEventListener('click', () => {
+      setTheme('light');
+      playTactileClick(900, 'sine', 0.05);
+    });
+
+    // Speed buttons
+    const speedSlowBtn = document.getElementById('speedSlowBtn');
+    const speedNormalBtn = document.getElementById('speedNormalBtn');
+
+    speedSlowBtn.addEventListener('click', () => {
+      document.documentElement.style.setProperty('--speed', '2.5');
+      speedSlowBtn.classList.add('active');
+      speedNormalBtn.classList.remove('active');
+      playTactileClick(400);
+      showToast('Animation Speed: 0.5x Slow-Mo');
+    });
+
+    speedNormalBtn.addEventListener('click', () => {
+      document.documentElement.style.setProperty('--speed', '1');
+      speedNormalBtn.classList.add('active');
+      speedSlowBtn.classList.remove('active');
+      playTactileClick(700);
+      showToast('Animation Speed: 1.0x Normal');
+    });
+
+    // Grid rulers toggle
+    const toggleGridBtn = document.getElementById('toggleGridBtn');
+    const gridGuides = document.getElementById('gridGuides');
+    toggleGridBtn.addEventListener('click', () => {
+      const active = gridGuides.classList.toggle('active');
+      toggleGridBtn.classList.toggle('active', active);
+      playTactileClick(650);
+      showToast(active ? 'Symmetry Rulers: Visible' : 'Symmetry Rulers: Hidden');
+    });
+
+    // Audio toggle
+    const toggleAudioBtn = document.getElementById('toggleAudioBtn');
+    const soundStateChip = document.getElementById('soundStateChip');
+    toggleAudioBtn.addEventListener('click', () => {
+      audioEnabled = !audioEnabled;
+      toggleAudioBtn.classList.toggle('active', audioEnabled);
+      toggleAudioBtn.textContent = audioEnabled ? 'Haptic Sound FX: ON' : 'Haptic Sound FX: MUTED';
+      soundStateChip.textContent = audioEnabled ? 'Web Audio: Armed' : 'Web Audio: Muted';
+      soundStateChip.style.color = audioEnabled ? 'var(--success)' : 'var(--text-muted)';
+      if (audioEnabled) playTactileClick(880);
+      showToast(audioEnabled ? 'Haptic feedback enabled' : 'Haptic feedback muted');
+    });
+
+    /* ── INTERACTIVE TOPBAR BUTTON INTERACTIONS ────────── */
+    // All clickable icon buttons play tactile sound & trigger feedback
+    const allButtons = document.querySelectorAll('.sim-icon-btn, .sim-pill-select, .sim-user-pill, .sim-brand-btn');
+    allButtons.forEach(btn => {
+      btn.addEventListener('mouseenter', () => {
+        playHoverPop();
+      });
+      btn.addEventListener('click', () => {
+        playTactileClick(650, 'triangle', 0.05);
+      });
+    });
+
+    // Specific button events
+    // 1. Refresh Button
+    let refreshAngle = 0;
+    const btnRefresh = document.getElementById('btnRefresh');
+    const telemetryFreshness = document.getElementById('telemetryFreshness');
+    btnRefresh.addEventListener('click', () => {
+      refreshAngle += 360;
+      const svg = btnRefresh.querySelector('svg');
+      svg.style.transform = `rotate(${refreshAngle}deg)`;
+      telemetryFreshness.textContent = 'Refreshing…';
+      setTimeout(() => {
+        telemetryFreshness.textContent = 'Updated 0s ago';
+        showToast('Telemetry probe refreshed successfully');
+      }, 400);
+    });
+
+    // 2. Sound Toggle Button
+    let isMuted = false;
+    const btnSound = document.getElementById('btnSound');
+    const svgSoundOn = document.getElementById('svgSoundOn');
+    const svgSoundOff = document.getElementById('svgSoundOff');
+    btnSound.addEventListener('click', () => {
+      isMuted = !isMuted;
+      svgSoundOn.style.display = isMuted ? 'none' : 'block';
+      svgSoundOff.style.display = isMuted ? 'block' : 'none';
+      btnSound.title = isMuted ? 'Alarm Sound: MUTED (Click to unmute)' : 'Alarm Sound: ON (Click to mute)';
+      showToast(isMuted ? 'Alarm sound muted' : 'Alarm sound armed');
+    });
+
+    // 3. Theme Toggle Button in topbar
+    const btnThemeToggle = document.getElementById('btnThemeToggle');
+    btnThemeToggle.addEventListener('click', () => {
+      const current = document.documentElement.getAttribute('data-theme');
+      setTheme(current === 'light' ? 'dark' : 'light');
+    });
+
+    // 4. Gear Settings
+    let gearAngle = 0;
+    const btnGear = document.getElementById('btnGear');
+    btnGear.addEventListener('click', () => {
+      gearAngle += 60;
+      btnGear.querySelector('svg').style.transform = `rotate(${gearAngle}deg)`;
+      showToast('Endpoint configuration drawer active');
+    });
+
+    // 5. Incident Logs
+    const btnLogs = document.getElementById('btnLogs');
+    btnLogs.addEventListener('click', () => {
+      showToast('Alert logs & incident history modal opened');
+    });
+
+    // 6. Health Beacon
+    const btnHealth = document.getElementById('btnHealth');
+    btnHealth.addEventListener('click', () => {
+      showToast('InfraWatch Core: Latency 1.2ms · All 14 Probes OK');
+    });
+
+    // 7. Brand Mark
+    const brandMarkBtn = document.getElementById('brandMarkBtn');
+    brandMarkBtn.addEventListener('click', () => {
+      showToast('Status matrix legend ribbon toggled');
+    });
+
+    // Connect bench buttons
+    document.getElementById('benchBrand')?.addEventListener('click', () => showToast('Brand node test clicked'));
+    document.getElementById('benchGear')?.addEventListener('click', () => {
+      gearAngle += 90;
+      document.querySelector('#benchGear svg').style.transform = `rotate(${gearAngle}deg)`;
+      playTactileClick(720);
+      showToast('Gear ratchet step clicked');
+    });
+    document.getElementById('benchRefresh')?.addEventListener('click', () => {
+      refreshAngle += 360;
+      document.querySelector('#benchRefresh svg').style.transform = `rotate(${refreshAngle}deg)`;
+      playTactileClick(850);
+      showToast('Centrifuge spin triggered');
+    });
+    document.getElementById('benchSound')?.addEventListener('click', () => {
+      playTactileClick(400);
+      showToast('Audio waveform toggle clicked');
+    });
+    document.getElementById('benchLogs')?.addEventListener('click', () => {
+      playTactileClick(550);
+      showToast('Incident ledger drawer clicked');
+    });
+    document.getElementById('benchTheme')?.addEventListener('click', () => {
+      const current = document.documentElement.getAttribute('data-theme');
+      setTheme(current === 'light' ? 'dark' : 'light');
+    });
+
+  </script>
+</body>
+</html>

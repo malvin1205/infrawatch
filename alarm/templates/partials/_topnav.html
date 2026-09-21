@@ -1,0 +1,197 @@
+  <!-- ── Top Navigation ─────────────────────────────────────
+       Three clusters, left to right: BRAND · STATUS · CONTROLS.
+       The bar used to be one flat row of eleven equal-weight controls that
+       overflowed and silently CLIPPED below ~1100px (measured: scrollWidth
+       1327 vs clientWidth 715), so the user menu and theme toggle became
+       unreachable. Status is now the loudest element; anything touched rarely
+       lives in the ⋯ overflow menu instead of holding permanent bar space. -->
+  <nav class="topnav" role="navigation" aria-label="Main navigation">
+
+    <!-- ── Cluster 1: Brand & Status Legend (Variant B) ─────── -->
+    <div class="topnav-brand" id="brandCluster">
+      <button id="brandStatusTrigger" class="brand-btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="brandStatusLegend" title="Click to toggle status colour key (or press Escape)">
+        <div class="brand-mark" aria-hidden="true">
+          <div class="sonar-ring" aria-hidden="true"></div>
+          <svg aria-hidden="true" focusable="false" width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <rect class="node-1" x="2" y="2" width="7" height="7" rx="2" fill="var(--accent)"/>
+            <rect class="node-2" x="13" y="2" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.5"/>
+            <rect class="node-3" x="2" y="13" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.5"/>
+            <rect class="node-4" x="13" y="13" width="7" height="7" rx="2" fill="var(--accent)" opacity="0.7"/>
+          </svg>
+        </div>
+        <span class="brand-name">InfraWatch</span>
+      </button>
+
+      <!-- Interactive Status Legend Ribbon (Variant B) -->
+      <div class="brand-status-ribbon" id="brandStatusLegend" role="dialog" aria-label="Host status colour key" aria-hidden="true">
+        <span class="hl-chip" title="Online: normal probe response"><span class="hl-swatch hl-up"></span>Online</span>
+        <span class="hl-chip" title="Slow: response time exceeds 500ms"><span class="hl-swatch hl-slow"></span>Slow</span>
+        <span class="hl-divider" aria-hidden="true"></span>
+        <span class="hl-chip" title="Down: outage awaiting operator acknowledgment"><span class="hl-swatch hl-down"></span>Down — needs acknowledging</span>
+        <span class="hl-chip" title="Acknowledged: outage claimed by operator"><span class="hl-swatch hl-acked"></span>Down — acknowledged <span class="hl-mark">✓</span></span>
+        <span class="hl-chip" title="Parent: suppressed due to upstream failure"><span class="hl-swatch hl-supp"></span>Down — caused by parent</span>
+        <span class="hl-divider" aria-hidden="true"></span>
+        <span class="hl-chip" title="Maintenance: scheduled maintenance window"><span class="hl-swatch hl-maint"></span>Maintenance</span>
+        <span class="hl-chip" title="No probe data: missing probe metrics"><span class="hl-swatch hl-nodata"></span>No probe data</span>
+      </div>
+    </div>
+
+    <!-- ── Cluster 2: Status — the one thing that decides whether anyone
+         has to move. Loudest element in the bar by design (audit 3.8).
+         #globalHealthBadge carries the STATE (severity + how many outages
+         are still unacknowledged). #ackAlarmBtn is the ACTION and is only
+         rendered while there is something left to acknowledge — in the
+         all-acked state it used to sit here reading "✓ Acknowledged" beside
+         a badge reading "Critical · acknowledged", which is the same fact
+         twice. -->
+    <div class="topnav-status">
+      <div id="globalHealthBadge" class="status-pill status-pill-lead pill-healthy">
+        <span class="pill-dot"></span>
+        <span class="pill-label">Healthy</span>
+      </div>
+
+      <button id="ackAlarmBtn" class="ack-alarm-btn hidden" type="button" title="Acknowledge every outage that nobody has claimed yet">
+        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        <span id="ackBtnLabel">Acknowledge Alarm</span>
+      </button>
+    </div>
+
+    <!-- ── Cluster 3: Controls & meta ─────────────────────── -->
+    <div class="topnav-controls">
+      <!-- Alert logs & incident history — leads the cluster, ahead of the
+           freshness/endpoint group (order matched to reference layout). -->
+      <button class="icon-action nav-icon" id="openLogsModalBtn" type="button" title="Alert logs &amp; incident history" aria-label="Alert logs and incident history" aria-haspopup="dialog" aria-controls="logsModal">
+        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 22V6a2 2 0 012-2h12a2 2 0 012 2v16"/>
+          <path d="M2 22h20M8 10h8M8 14h5"/>
+        </svg>
+        <span id="logsBadge" class="nav-badge hidden"></span>
+      </button>
+
+      <!-- The single freshness indicator. Was one of three competing signals
+           (LIVE pill, pulse icon, this) all saying "data is arriving"; the
+           other two are gone. Ages amber then red when data stops (audit 4.9). -->
+      <span class="last-updated-text" id="statusMeta">Checking…</span>
+      <span class="last-probe-text" id="lastProbeTime" style="display:none"></span>
+
+      <div class="filter-select-wrap nav-endpoint-wrap">
+        <select id="endpointSelect" class="filter-select" title="Select Active Prometheus Endpoint" aria-label="Prometheus Endpoint">
+          <option value="">Select Endpoint...</option>
+        </select>
+      </div>
+
+      <!-- Endpoint config sits with the endpoint switcher it configures,
+           not off in the config group at the far end of the row. -->
+      <button class="icon-action nav-icon nav-config-icon" id="openEndpointModalBtn" type="button" title="Manage Prometheus endpoints" aria-label="Manage Prometheus endpoints">
+        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+
+      <!-- ── Icon cluster ──────────────────────────────────
+           Order matched to reference layout: interval · refresh now ·
+           alarm sound · self-status. Borderless and 26px here — deliberately
+           quieter than the rest of the bar so the status pill stays the
+           loudest thing in it. -->
+      <div class="nav-icon-cluster">
+        <!-- Carries a value, so it stays a compact select. -->
+        <select id="scrapeIntervalSelect" class="interval-select nav-interval-select" title="Auto-refresh interval" aria-label="Auto-refresh interval">
+          <option value="2000">2s</option>
+          <option value="5000" selected>5s</option>
+          <option value="10000">10s</option>
+          <option value="30000">30s</option>
+        </select>
+
+        <button class="icon-action nav-icon" id="refreshInstances" type="button" title="Refresh now" aria-label="Refresh data">
+          <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 11-6.219-8.56"/>
+          </svg>
+        </button>
+
+        <!-- State visible at rest: filled speaker = armed, crossed = muted. -->
+        <button class="icon-action nav-icon" id="soundToggleBtn" type="button" title="Alarm sound: ON — click to mute" aria-label="Toggle alarm sound">
+          <svg aria-hidden="true" focusable="false" id="soundIconOn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"/>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+          </svg>
+          <svg aria-hidden="true" focusable="false" id="soundIconOff" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <line x1="23" y1="9" x2="17" y2="15"/>
+            <line x1="17" y1="9" x2="23" y2="15"/>
+          </svg>
+        </button>
+
+        <!-- Self-status: a glanceable STATE, so a dot rather than another
+             icon button. Keeps id="selfHealthBtn" so the /health poll and the
+             detail modal binding work untouched. -->
+        <button class="self-health-indicator" id="selfHealthBtn" type="button" title="Checking InfraWatch self-status…" aria-label="InfraWatch self-status">
+          <span id="selfHealthDot" class="self-health-dot is-unknown"></span>
+        </button>
+      </div>
+      <!-- User / Auth Badge & Actions -->
+      <div id="userAuthWrap" class="user-auth-wrap" style="position: relative;">
+        <button id="userMenuBtn" class="user-menu-btn" type="button" title="User account" aria-haspopup="true" aria-expanded="false">
+          <span class="user-avatar" id="userAvatar">G</span>
+          <span class="user-name" id="userNameLabel">Guest</span>
+          <span class="user-role-pill" id="userRolePill">Viewer</span>
+        </button>
+        <div id="userDropdown" class="user-dropdown hidden">
+          <div class="user-dropdown-header">
+            <div class="user-dropdown-name" id="dropdownUserName">Guest User</div>
+            <div class="user-dropdown-role" id="dropdownUserRole">Read-Only Viewer</div>
+          </div>
+          <div class="user-dropdown-divider"></div>
+          <button id="headerManageUsersBtn" class="dropdown-item hidden" type="button">
+            <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px; flex-shrink: 0;">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+            Manage Users
+          </button>
+          <button id="headerTelegramBtn" class="dropdown-item hidden" type="button">
+            <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px; flex-shrink: 0;">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+            Telegram Alerts
+          </button>
+          <button id="headerLoginBtn" class="dropdown-item" type="button">
+            <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px; flex-shrink: 0;">
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+              <polyline points="10 17 15 12 10 7"/>
+              <line x1="15" y1="12" x2="3" y2="12"/>
+            </svg>
+            Log In
+          </button>
+          <button id="headerLogoutBtn" class="dropdown-item hidden" type="button">
+            <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px; flex-shrink: 0;">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+            Log Out
+          </button>
+        </div>
+      </div>
+
+      <!-- Theme toggle sits at the very end of the bar (order matched to
+           reference layout) — config, touched rarely, trailing everything
+           else including the user menu. -->
+      <button class="icon-action nav-icon nav-config-icon" id="themeToggleBtn" type="button" title="Toggle light / dark theme" aria-label="Toggle theme">
+        <svg aria-hidden="true" focusable="false" id="themeIconDark" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+        </svg>
+        <svg aria-hidden="true" focusable="false" id="themeIconLight" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+          <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+          <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+        </svg>
+      </button>
+    </div>
+  </nav>

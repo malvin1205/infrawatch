@@ -1,0 +1,73 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest / Test cache & test files
+.pytest_cache/
+tests/
+pytest.ini
+
+# Agent / IDE / OS config
+.agent/
+.agents/
+agent/
+.claude/
+.gemini/
+.impeccable/
+.vscode/
+.idea/
+skills-lock.json
+CONTEXT.md
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+*.log
+scratch/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Virtual Environments
+venv/
+.venv/
+env/
+
+# SQLite temporary and database files
+*.db-wal
+*.db-shm
+*.db-journal
+*.db
+
+# Runtime data & isolated state directory
+alarm/data/*
+!alarm/data/.gitkeep
+!alarm/data/*.example
+
+# Legacy secrets and local configurations fallback
+alarm/telegram_config.json
+!alarm/telegram_config.json.example
+alarm/availability_settings.json
+!alarm/availability_settings.json.example
+alarm/.api_key
+alarm/.webhook_secret
+alarm/.session_secret
+.api_key
+.webhook_secret
+.session_secret
+
+# Legacy runtime data
+alarm/infrawatch.db*
+alarm/history.json
+alarm/history_archive.json
+alarm/logs.json
+alarm/status.json
+alarm/endpoints.json
+alarm/deleted_targets.json
+alarm/dependencies.json
+alarm/maintenance.json
+
+

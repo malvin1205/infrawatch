@@ -1,0 +1,86 @@
+  <!-- Telegram Notification Settings Modal -->
+  <div id="telegramModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="telegramModalTitle">
+    <div class="modal-card" style="max-width: 480px;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge" style="background: rgba(42, 171, 238, 0.1); color: #2AABEE;">
+            <svg aria-hidden="true" focusable="false" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </div>
+          <div>
+            <h3 class="modal-title" id="telegramModalTitle">Telegram Notifications</h3>
+            <div class="modal-subtitle">Real-Time Alert Dispatch Settings</div>
+          </div>
+        </div>
+        <button id="closeTelegramModalBtn" class="modal-close" type="button" aria-label="Close modal">&times;</button>
+      </div>
+
+      <form id="telegramSettingsForm" class="modal-form" style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border); border-radius: var(--r-md);">
+          <div>
+            <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">Enable Telegram Alerts</div>
+            <div style="font-size: 11px; color: var(--text-secondary);">Push outage notifications to Telegram group/channel</div>
+          </div>
+          <label style="display: inline-flex; align-items: center; cursor: pointer;">
+            <input type="checkbox" id="tgEnabledCheckbox" style="accent-color: var(--accent); width: 18px; height: 18px;">
+          </label>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="tgBotTokenInput" class="form-label">Bot Token</label>
+          <div style="position: relative;">
+            <input type="password" id="tgBotTokenInput" class="form-input" style="width: 100%; font-family: var(--font-mono); padding-right: 40px;" placeholder="Leave blank to keep existing token">
+            <button type="button" id="tgToggleTokenVisibilityBtn" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px;" title="Toggle token visibility">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          <div id="tgTokenMaskedHint" style="font-size: 11px; color: var(--text-muted); margin-top: 3px;"></div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="tgChatIdInput" class="form-label">Chat ID</label>
+          <input type="text" id="tgChatIdInput" class="form-input" style="width: 100%; font-family: var(--font-mono);" placeholder="-1001234567890">
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">Telegram group, supergroup, or channel ID (usually starts with -100).</div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="tgMinSeveritySelect" class="form-label">Minimum Severity</label>
+            <select id="tgMinSeveritySelect" class="form-input" style="width: 100%;">
+              <option value="critical">Critical Only (Outages)</option>
+              <option value="warning">Warning & Critical (+Slow Response)</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label">Dispatch Events</label>
+            <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 4px;">
+              <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; color: var(--text-primary);">
+                <input type="checkbox" id="tgSendFiringCheckbox" checked style="accent-color: var(--accent);">
+                <span>Firing Alerts</span>
+              </label>
+              <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; color: var(--text-primary);">
+                <input type="checkbox" id="tgSendResolvedCheckbox" checked style="accent-color: var(--accent);">
+                <span>Resolved Alerts</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 12px; margin-top: 4px;">
+          <button type="button" id="tgTestBtn" class="btn" style="font-size: 12px; padding: 6px 14px;">
+            Test Connection
+          </button>
+          <span id="tgTestStatus" style="font-size: 12px; color: var(--text-muted); flex: 1; margin-left: 12px; text-align: left;"></span>
+        </div>
+
+        <div id="tgError" class="form-error hidden"></div>
+        <div id="tgSuccess" style="color: var(--success); font-size: 12px; display: none;"></div>
+
+        <div style="display: flex; gap: 8px; margin-top: 4px;">
+          <button type="button" id="tgCancelBtn" class="btn" style="flex: 1;">Cancel</button>
+          <button type="submit" id="tgSaveBtn" class="btn btn-primary" style="flex: 1;">Save Settings</button>
+        </div>
+      </form>
+    </div>
+  </div>

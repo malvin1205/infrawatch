@@ -1,0 +1,709 @@
+/* ── Top Navigation ───────────────────────────────────── */
+.topnav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--topnav-h);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Brand Cluster (Variant B: Status Matrix Morph & Ribbon) ── */
+.topnav-brand {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.brand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+  text-decoration: none;
+  outline: none;
+  font-family: inherit;
+}
+
+.brand-btn:hover .brand-name {
+  color: #ffffff;
+}
+
+.brand-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.brand-mark svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+  overflow: visible;
+}
+
+.brand-mark rect {
+  transition: fill 220ms ease, opacity 220ms ease, filter 220ms ease;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Hover: 4 nodes illuminate in the 4 core monitoring status colors */
+.brand-btn:hover .node-1 {
+  fill: #22C55E;
+  opacity: 1;
+  filter: drop-shadow(0 0 4px rgba(34, 197, 94, 0.7));
+}
+.brand-btn:hover .node-2 {
+  fill: #ffd500;
+  opacity: 1;
+  filter: drop-shadow(0 0 4px rgba(255, 213, 0, 0.7));
+}
+.brand-btn:hover .node-3 {
+  fill: #EF4444;
+  opacity: 1;
+  filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.7));
+}
+.brand-btn:hover .node-4 {
+  fill: #a855f7;
+  opacity: 1;
+  filter: drop-shadow(0 0 4px rgba(168, 85, 247, 0.7));
+}
+
+/* Radar sonar ring on hover */
+.sonar-ring {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.6);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.brand-btn:hover .sonar-ring {
+  animation: sonarPulse 1.4s infinite cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes sonarPulse {
+  0% { transform: translate(-50%, -50%) scale(0.6); opacity: 0.8; }
+  100% { transform: translate(-50%, -50%) scale(2.0); opacity: 0; }
+}
+
+.brand-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.brand-divider {
+  color: var(--text-muted);
+  font-weight: 300;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.brand-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+/* Active Open State */
+.topnav-brand.is-open .brand-btn .node-1 { fill: #22C55E; opacity: 1; }
+.topnav-brand.is-open .brand-btn .node-2 { fill: #ffd500; opacity: 1; }
+.topnav-brand.is-open .brand-btn .node-3 { fill: #EF4444; opacity: 1; }
+.topnav-brand.is-open .brand-btn .node-4 { fill: #a855f7; opacity: 1; }
+
+/* Status Ribbon / Legend Dropdown */
+.brand-status-ribbon {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  padding: 5px 8px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  box-shadow: var(--shadow-lg);
+  z-index: 150;
+  opacity: 0;
+  visibility: hidden;
+  transform-origin: top left;
+  transform: translateY(-6px) scale(0.98);
+  transition: opacity 180ms cubic-bezier(0.16, 1, 0.3, 1),
+              transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+              visibility 0s 180ms;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+[data-theme="light"] .brand-status-ribbon {
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.topnav-brand.is-open .brand-status-ribbon {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1),
+              transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+              visibility 0s 0s;
+  pointer-events: auto;
+}
+
+.brand-status-ribbon .hl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  user-select: none;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+.brand-status-ribbon .hl-chip:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.brand-status-ribbon .hl-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 960px) {
+  .brand-status-ribbon {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 8px;
+    width: 380px;
+    white-space: normal;
+  }
+  .brand-status-ribbon .hl-divider {
+    display: none;
+  }
+}
+
+/* ── Cluster 2: Status (Dynamic Magnetic Island) ──────────────────────
+   A single, unified dark titanium capsule cradling the status telemetry and
+   a nested floating action button. Eliminates the flat split-box look with
+   recessed depth, spring-animated button lift, and heartbeat pulse. */
+.topnav-status {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  margin-left: 18px;
+  margin-right: auto;
+  min-width: 0;
+  flex-shrink: 0;
+  border-radius: var(--r-pill);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  padding: 0 12px;
+  gap: 8px;
+  transition: background var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast), padding var(--t-fast);
+  box-sizing: border-box;
+}
+
+/* When the nested action button is visible, trim right padding to 3px so the
+   floating button nests symmetrically with 3px margins on top, bottom, and right */
+.topnav-status:has(.ack-alarm-btn:not(.hidden)) {
+  padding-right: 3px;
+}
+
+.topnav-status:has(.pill-healthy) {
+  background: var(--surface-raised);
+  border-color: var(--success-border);
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.15);
+}
+.topnav-status:has(.pill-degraded) {
+  background: var(--surface-raised);
+  border-color: var(--warning-border);
+  box-shadow: 0 0 18px rgba(255, 213, 0, 0.18);
+}
+.topnav-status:has(.pill-critical) {
+  background: var(--surface-raised);
+  border-color: var(--critical-border);
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.22);
+}
+
+/* ── Cluster 3: Controls & meta ────────────────────────
+   Grouped tightly on the right with consistent icon sizing. Children may
+   shrink — the old rule pinned every child at flex-shrink:0, which is why
+   the bar overflowed and clipped the user menu instead of adapting. */
+.topnav-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.topnav-controls .icon-action {
+  flex-shrink: 0;
+}
+
+/* The active data source can truncate rather than push the bar wide. */
+.nav-endpoint-wrap {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.nav-endpoint-wrap .filter-select {
+  max-width: 230px;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+/* ── Symmetrical Icon Cluster ──────────────────────────
+   Every control has an identical 30×30px hitbox with 4px uniform rhythm.
+   No blue borders — clean, satisfying kinetic animations on hover and click. */
+.nav-icon-cluster {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 0 2px;
+}
+
+/* Strict 30×30px symmetrical hitboxes for all action icon buttons */
+.topnav-controls .nav-icon {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  border: 1px solid transparent;
+  background: none;
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+  box-sizing: border-box;
+  transition: background var(--t-fast), color var(--t-fast), transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.topnav-controls .nav-icon svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+  pointer-events: none;
+  overflow: visible;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), stroke var(--t-fast), fill var(--t-fast);
+}
+
+/* Clean hover without blue borders */
+.topnav-controls .nav-icon:hover,
+.topnav-controls .nav-icon:focus-visible {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+  border-color: transparent;
+}
+
+/* Tactile click depression */
+.topnav-controls .nav-icon:active {
+  transform: scale(0.90);
+}
+
+/* Config controls stay readable at rest */
+.topnav-controls .nav-config-icon {
+  color: var(--text-secondary);
+}
+
+.topnav-controls .nav-config-icon:hover,
+.topnav-controls .nav-config-icon:focus-visible {
+  color: var(--text-primary);
+  border-color: transparent;
+}
+
+/* Divider: actions/status on the left, config on the right */
+.nav-icon-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--border-strong, var(--border));
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+/* Compact interval picker: symmetrically aligned to 30px height */
+.nav-icon-cluster .job-dd-trigger {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 6px 0 8px;
+  font-size: 11px;
+  font-family: var(--font, 'Inter', sans-serif);
+  font-weight: 500;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-secondary);
+  opacity: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  outline: none;
+  box-sizing: border-box;
+  transition: background var(--t-fast), color var(--t-fast), transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.nav-icon-cluster .job-dd-trigger:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+  border-color: transparent;
+}
+
+.nav-icon-cluster .job-dd-trigger:active {
+  transform: scale(0.93);
+}
+
+/* ── Self-status indicator ─────────────────────────────
+   Standardized to 30×30px symmetrical hitbox with optically centered dot */
+.self-health-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  outline: none;
+  box-sizing: border-box;
+  transition: background var(--t-fast), transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.self-health-indicator:hover,
+.self-health-indicator:focus-visible {
+  background: var(--surface-hover);
+  border-color: transparent;
+}
+
+.self-health-indicator:active {
+  transform: scale(0.90);
+}
+
+.self-health-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  transition: background 0.2s ease, transform 0.2s ease;
+  position: relative;
+}
+
+.self-health-dot.is-unknown {
+  background: var(--text-muted, #64748b);
+}
+
+/* ── Tactical Aerospace HUD Animations ────────────────── */
+
+/* 1. Endpoint Configuration Gear: 60° precision ratchet step */
+#openEndpointModalBtn:hover svg {
+  transform: rotate(60deg);
+}
+#openEndpointModalBtn:active svg {
+  transform: rotate(180deg) scale(0.9);
+}
+
+/* 2. Refresh Button: High-speed radar centrifuge sweep */
+#refreshInstances:hover:not(.spinning) svg {
+  animation: hudRadarSpin 1s infinite linear;
+}
+#refreshInstances:active svg {
+  transform: scale(0.85);
+}
+@keyframes hudRadarSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* 3. Alert Logs: Terminal laser scan line sweep */
+#openLogsModalBtn:hover svg path:last-child {
+  stroke-dasharray: 10;
+  animation: hudScanLine 0.8s infinite linear;
+}
+#openLogsModalBtn:active svg {
+  transform: scale(0.88);
+}
+@keyframes hudScanLine {
+  0% { stroke-dashoffset: 20; }
+  100% { stroke-dashoffset: 0; }
+}
+
+/* 4. Alarm Sound / Mute Toggle: Audio waveform amplitude bounce */
+#soundToggleBtn:hover svg path {
+  animation: hudSoundWave 0.6s infinite ease-in-out alternate;
+}
+#soundToggleBtn:active svg {
+  transform: scale(0.88);
+}
+@keyframes hudSoundWave {
+  0% { transform: scaleX(0.85); }
+  100% { transform: scaleX(1.18); }
+}
+
+/* 5. Self-Health: Sonar beacon ping ripple */
+#selfHealthBtn:hover .self-health-dot {
+  animation: hudBeaconPing 1.2s infinite cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes hudBeaconPing {
+  0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+  70% { box-shadow: 0 0 0 7px rgba(34, 197, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+
+/* 6. Celestial Theme Switcher: Rotational angle glide */
+#themeToggleBtn:hover svg {
+  transform: rotate(30deg) scale(1.08);
+}
+#themeToggleBtn:active svg {
+  transform: rotate(90deg) scale(0.88);
+}
+
+/* Long/short status wording — the count survives at every width. */
+.status-pill-lead .pill-short {
+  display: none;
+}
+
+.last-updated-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  padding: 0 8px;
+}
+
+/* Data freshness ageing past the configured refresh cadence — a stalled feed
+   has to look stalled, not like a ticking clock (audit 4.9). */
+.last-updated-text.is-stale { color: var(--warning, #f59e0b); }
+.last-updated-text.is-very-stale {
+  color: var(--critical, #ef4444);
+  font-weight: 700;
+}
+
+.interval-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: var(--surface-raised, #243044);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px;
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.12));
+  border-radius: var(--r-sm, 8px);
+  color: var(--text-primary, #F5F5F6);
+  font-size: 12px;
+  font-weight: 500;
+  height: 32px;
+  padding: 0 26px 0 10px;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: border-color var(--t-fast), color var(--t-fast);
+  outline: none;
+}
+
+.interval-select:hover,
+.interval-select:focus {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.interval-select option {
+  background-color: #0A0A0B;
+  color: #F5F5F6;
+  padding: 8px 12px;
+}
+
+/* ── Custom Filter Select Control ────────────────────────────── */
+.filter-select-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.filter-select,
+.interval-select {
+  max-width: min(220px, 45vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: var(--surface-raised, #0B101E);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2338BDF8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px;
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.15));
+  border-radius: var(--r-sm, 8px);
+  color: var(--text-primary, #F5F5F6);
+  font-family: var(--font, 'Inter', sans-serif);
+  font-size: 12px;
+  font-weight: 500;
+  height: 32px;
+  padding: 0 28px 0 12px;
+  cursor: pointer;
+  outline: none;
+  box-sizing: border-box;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.filter-select:hover,
+.interval-select:hover {
+  background-color: var(--surface-hover, #11182B);
+  border-color: var(--accent, #38BDF8);
+  color: #FFFFFF;
+}
+
+.filter-select:focus,
+.interval-select:focus,
+.filter-select:focus-visible,
+.interval-select:focus-visible {
+  border-color: var(--accent, #38BDF8);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+}
+
+.filter-select option,
+.interval-select option {
+  background-color: #0A0A0B !important;
+  color: #F5F5F6 !important;
+  padding: 10px 14px !important;
+  font-size: 12px !important;
+}
+
+[data-theme="light"] .filter-select,
+[data-theme="light"] .interval-select {
+  background-color: #FFFFFF;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  border-color: #CBD5E1;
+  color: #0F172A;
+}
+
+[data-theme="light"] .filter-select option,
+[data-theme="light"] .interval-select option {
+  background-color: #FFFFFF !important;
+  color: #0F172A !important;
+}
+
+@keyframes csMenuSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.custom-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary, #94A3B8);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.custom-select-option:hover {
+  background-color: var(--surface-hover, #2A3750);
+  color: var(--text-primary, #F5F5F6);
+}
+
+.custom-select-option.selected {
+  background-color: var(--accent-bg, rgba(56, 189, 248, 0.12));
+  color: var(--accent, #38BDF8);
+  font-weight: 600;
+}
+
+.icon-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast), transform var(--t-fast);
+  outline: none;
+}
+
+.icon-action:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.icon-action:focus-visible {
+  outline: 4px solid #FFFFFF;
+  outline-offset: 2px;
+  transform: scale(1.08);
+  box-shadow: 0 0 0 8px rgba(56, 189, 248, 0.6), 0 0 25px rgba(255, 255, 255, 0.8);
+}
+
+.icon-action svg {
+  display: block;
+  flex-shrink: 0;
+}
+
