@@ -659,6 +659,7 @@ def merge_hybrid_target_availability(
     prom_up_sec = 0.0
     prom_down_sec = 0.0
     prom_inc = 0
+    prom_inc_assumed = False  # 1 incident inferred (no transition data), not counted
     prom_lat = float(raw_duration or 0.0) if raw_duration is not None else 0.0
 
     if has_prom:
@@ -750,6 +751,7 @@ def merge_hybrid_target_availability(
                 prom_inc = 0
         if prom_inc == 0 and prom_down_sec > 0:
             prom_inc = 1
+            prom_inc_assumed = True
     else:
         p_start = req_end
         p_end = req_end
@@ -881,6 +883,16 @@ def merge_hybrid_target_availability(
         total_samples = sqlite_samples + int(round((s_count or 0) * prom_sample_frac))
     else:
         total_samples = sqlite_samples + (s_count or 0)
+    # 3b. Seam de-dup. A Prometheus segment with no up/down transition that is
+    # entirely DOWN gets an assumed incident above; if the SQLite hour it picks
+    # up from already ended still in outage, that is the SAME outage carried
+    # across the seam, not a second one.
+    if prom_inc_assumed and sqlite_inc > 0 and prom_down_sec >= prom_cov_sec > 0:
+        seam_b = [b for b in sqlite_buckets
+                  if _num(b.get("bucket_start")) < p_start <= _num(b.get("bucket_end")) + 1.0]
+        if seam_b and _outage_flag(seam_b[0], "ongoing_end"):
+            prom_inc = 0
+
     total_inc = sqlite_inc + prom_inc
 
     avg_lat = 0.0
@@ -1347,7 +1359,10 @@ def reconstruct_time_series_intervals(
         try:
             ts = float(ts_raw)
             val = 1 if str(val_raw) in ('1', '1.0', 'up', 'true', 'True') else 0
-            if window_start_ts <= ts <= window_end_ts:
+            # Half-open [start, end): the aggregator tiles this across
+            # consecutive hours, so a sample exactly on a boundary belongs to
+            # the hour it opens, not also the one it closes.
+            if window_start_ts <= ts < window_end_ts:
                 cleaned.append((ts, val))
         except (ValueError, TypeError):
             continue
@@ -1428,8 +1443,15 @@ def reconstruct_time_series_intervals(
     in_outage = (first_val == 0)
     if in_outage:
         incident_count += 1
-        current_outage_duration += (first_ts - window_start_ts)
-        current_outage_start_ts = window_start_ts
+        if pre_gap > max_gap_sec:
+            # Unobserved lead-in is UNKNOWN, not outage: only the observed
+            # slice counts (matches the downtime/unknown split above).
+            obs_lead = min(pre_gap, expected_interval_sec)
+            current_outage_duration += obs_lead
+            current_outage_start_ts = first_ts - obs_lead
+        else:
+            current_outage_duration += pre_gap
+            current_outage_start_ts = window_start_ts
 
     # 2. Intermediate intervals between consecutive samples
     for i in range(len(cleaned) - 1):

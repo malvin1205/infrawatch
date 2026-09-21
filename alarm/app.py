@@ -1116,6 +1116,7 @@ def add_target_api():
     )
     if drop:
         availability_engine.invalidate_cache()
+        fleet_state_engine.invalidate_state_cache()
         return jsonify({"ok": True, "message": "Target restored to monitoring."})
 
     discovered = _prometheus_discovered_instances()
@@ -1147,6 +1148,7 @@ def delete_target_api():
         return jsonify({"ok": False, "error": "Could not persist target removal — see server log"}), 500
 
     availability_engine.invalidate_cache()
+    fleet_state_engine.invalidate_state_cache()
     AuditLogRepository.record_action(
         actor_username=g.current_user.get("username", "admin"),
         actor_role=g.current_user.get("role", "admin"),
@@ -1805,9 +1807,17 @@ def target_history_api():
     for item in combined_sources:
         inst = item.get('instance') or ''
         ts = item.get('time')
+        ev_type = item.get('event') or item.get('status')
+        is_up = ev_type in ('resolved', 'ONLINE', 'up')
+        if 'event' not in item and item.get('status') == 'resolved':
+            # An incident-history row (no 'event' key), not a log event: its
+            # resolved_time/duration_seconds describe the OFFLINE stretch that
+            # just ended. Reading it as "resolved => ONLINE at `time`" painted
+            # the outage as a recovery carrying the "unreachable" summary; the
+            # actual ONLINE transition is the matching log event.
+            is_up = False
+            ts = item.get('resolved_time') or ts
         if ts and (inst == target_url or clean_target in inst) and start_ts <= ts <= end_ts:
-            ev_type = item.get('event') or item.get('status')
-            is_up = ev_type in ('resolved', 'ONLINE', 'up')
             dur = item.get('duration_seconds') or 0
             start_t = int(ts - dur if dur else ts)
             
@@ -2000,7 +2010,10 @@ def target_history_api():
         "events": events,
         "latency_points": latency_points,
         "failed_points": failed_points,
-        "intervals_summary": intervals_summary
+        "intervals_summary": intervals_summary,
+        # First probe_success sample in the window (None = no samples at all).
+        # Lets the drawer tell "no data yet" apart from "up throughout".
+        "data_start_ts": int(values[0][0]) if values else None,
     })
 
 

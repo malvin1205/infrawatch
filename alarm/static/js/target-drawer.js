@@ -55,7 +55,7 @@ class _DrawerMethods {
     }
   }
 
-  _renderDrawerAvailabilityBars(target, points = [], events = [], fetchedRangeStart = null) {
+  _renderDrawerAvailabilityBars(target, points = [], events = [], fetchedRangeStart = null, dataStartTs = undefined) {
     const container = document.getElementById('drawerAvailabilityBars');
     const timeLabelsEl = document.getElementById('drawerAvailabilityTimeLabels');
     if (!container) return;
@@ -80,11 +80,15 @@ class _DrawerMethods {
       const slotEnd = now_ts - (23 - i) * 3600;
 
       let slotDownSec = 0;
+      let slotUnknownSec = 0;
       let hasEventCoverage = false;
 
       if (Array.isArray(events) && events.length > 0) {
         events.forEach(ev => {
-          if (ev.status === 'OFFLINE') {
+          if (ev.status === 'UNKNOWN') {
+            // Prometheus gap: no probes, so neither up nor down.
+            slotUnknownSec += Math.max(0, Math.min(slotEnd, ev.end_ts || 0) - Math.max(slotStart, ev.start_ts || 0));
+          } else if (ev.status === 'OFFLINE') {
             const evStart = ev.start_ts;
             const evEnd = ev.ongoing ? now_ts : (ev.end_ts || now_ts);
             const oStart = Math.max(slotStart, evStart);
@@ -101,7 +105,12 @@ class _DrawerMethods {
       // leaves the other 23 of these 24 real hours unfetched) has no evidence
       // either way — mark it unknown instead of guessing from an aggregate
       // that belongs to a different window.
-      const isOutsideFetchedRange = fetchedRangeStart !== null && slotEnd <= fetchedRangeStart;
+      // dataStartTs is the first probe sample Prometheus holds for the window
+      // (null = none). A slot that ends before it — or any slot with no probe
+      // samples at all — was never observed, so its silence is NOT uptime.
+      const noProbeDataYet = dataStartTs === null || (typeof dataStartTs === 'number' && slotEnd <= dataStartTs);
+      const isOutsideFetchedRange = fetchedRangeStart !== null &&
+        (slotEnd <= fetchedRangeStart || ((noProbeDataYet || slotUnknownSec >= 1800) && slotDownSec === 0));
       const haveRealData = fetchedRangeStart !== null;
 
       if (!hasEventCoverage && !haveRealData) {
@@ -134,7 +143,7 @@ class _DrawerMethods {
       if (uptimePct === null) {
         barColor = 'var(--border)';
         barHeight = '15%';
-        statusText = 'No data (outside selected range)';
+        statusText = 'No data';
       } else if (uptimePct < 10) {
         barColor = '#EF4444';
         barHeight = '25%';
@@ -1421,7 +1430,7 @@ class _DrawerMethods {
         this._renderHistoryChart([]);
       }
 
-      this._renderDrawerAvailabilityBars(this.selectedTarget, data.latency_points || [], data.events || [], fetchedRangeStart);
+      this._renderDrawerAvailabilityBars(this.selectedTarget, data.latency_points || [], data.events || [], fetchedRangeStart, data.data_start_ts);
 
       if (!data.ok) {
         // An actual backend error (bad request, Prometheus unreachable, …) —

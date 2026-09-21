@@ -93,12 +93,29 @@ def fetch_down_since_prom_map(cache_ttl=300.0):
                 except ValueError:
                     pass
 
-    # 2. Initial DOWN timestamp for targets continuously DOWN (no `== 1` sample
-    #    in the query-1 window). Range widened to 32d so an outage older than a
-    #    day is no longer clamped to "~24h ago" — it now reads its real age up
-    #    to a month back. 1h step keeps the subquery affordable (~770 points);
-    #    the outage-start estimate is then accurate to ±1h, which is immaterial
-    #    for a multi-day outage. Falls back to `up == 0` the same way query 1 does.
+    # 2. Targets with no UP sample in the last day: the outage began at the last
+    #    UP sample within 32d (1h step keeps the subquery affordable and the
+    #    estimate accurate to ±1h). Using the FIRST `== 0` sample instead would
+    #    date the outage from the earliest failure in the window even when the
+    #    target flapped/recovered since, overstating "Down for X" by days.
+    query_up_wide = 'max_over_time(timestamp(probe_success == 1)[32d:1h])'
+    raw_up_wide, _ = _pc.fetch_prometheus_json(f"/api/v1/query?query={quote(query_up_wide)}", use_cache=True, cache_ttl=cache_ttl)
+    if not raw_up_wide or not raw_up_wide.get('data', {}).get('result'):
+        query_up_wide = 'max_over_time(timestamp(up == 1)[32d:1h])'
+        raw_up_wide, _ = _pc.fetch_prometheus_json(f"/api/v1/query?query={quote(query_up_wide)}", use_cache=True, cache_ttl=cache_ttl)
+    if raw_up_wide and raw_up_wide.get('status') == 'success':
+        for r in raw_up_wide.get('data', {}).get('result', []):
+            metric = r.get('metric', {})
+            inst = metric.get('instance') or metric.get('target') or metric.get('url')
+            val = r.get('value', [None, None])[1]
+            if inst and val is not None and inst not in last_up_map:
+                try:
+                    last_up_map[inst] = float(val)
+                except ValueError:
+                    pass
+
+    # 3. Initial DOWN timestamp for targets never UP in the 32d window (continuously
+    #    DOWN since monitoring began). Falls back to `up == 0` the same way query 1 does.
     query_down = 'min_over_time(timestamp(probe_success == 0)[32d:1h])'
     raw_down, _ = _pc.fetch_prometheus_json(f"/api/v1/query?query={quote(query_down)}", use_cache=True, cache_ttl=cache_ttl)
     if not raw_down or not raw_down.get('data', {}).get('result'):

@@ -139,6 +139,12 @@ class _AvailabilityMethods {
     else if (this.periodLabel === 'mtd') label = 'Month to date';
 
     if (this.availabilityLabel) this.availabilityLabel.textContent = `Availability (${label})${limited ? ' · limited data' : ''}`;
+    // Drawer captions too: the cache-hit path returns before loadAvailability()
+    // reaches its own label writes, leaving the previous range's name behind.
+    const drawerUptimeLabelEl = document.getElementById('drawerUptimeLabel');
+    if (drawerUptimeLabelEl) drawerUptimeLabelEl.textContent = `Uptime (${label})`;
+    const drawerSparklineRangeEl2 = document.getElementById('drawerSparklineRange');
+    if (drawerSparklineRangeEl2) drawerSparklineRangeEl2.textContent = `(${label})`;
 
     // Refresh drawer uptime figure if a host is currently open
     if (this.selectedTarget) this._updateDrawerUptime(this.selectedTarget);
