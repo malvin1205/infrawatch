@@ -525,3 +525,19 @@
   padding: 10px;
 }
 
+/* ── Read-only Endpoint Alert ────────────────────────── */
+.endpoint-readonly-alert {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: var(--r-sm);
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #f59e0b;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+

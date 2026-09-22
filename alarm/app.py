@@ -247,10 +247,12 @@ if _trust_proxy_hops > 0:
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_NAME'] = 'infrawatch_session'
-# Secure cookie is the default now; a plain-HTTP LAN install can opt out with
-# SESSION_COOKIE_SECURE=0. (Previously this was opt-IN, so every default
-# deployment shipped a non-Secure session cookie.)
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get("SESSION_COOKIE_SECURE", "1") != "0"
+# Session cookie Secure flag: Default to 0 (plain-HTTP LAN safe) unless
+# explicitly set to "1", "true", or "yes". Over plain HTTP, modern browsers
+# drop cookies marked Secure, breaking login sessions on LAN/Docker installs.
+# Set SESSION_COOKIE_SECURE=1 when running behind an HTTPS reverse proxy.
+_sec_cookie_env = str(os.environ.get("SESSION_COOKIE_SECURE", "0")).strip().lower()
+app.config['SESSION_COOKIE_SECURE'] = _sec_cookie_env in ("1", "true", "yes")
 # Flask defaults PERMANENT_SESSION_LIFETIME to 31 days; a NOC login on a
 # shared workstation shouldn't stay valid that long unattended.
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=int(os.environ.get("INFRAWATCH_SESSION_HOURS", "24")))

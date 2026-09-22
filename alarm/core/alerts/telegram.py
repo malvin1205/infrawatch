@@ -389,9 +389,9 @@ def test_telegram_connection(bot_token: Optional[str] = None, chat_id: Optional[
     cid = str(chat_id or config.get("chat_id", "")).strip()
 
     if not token:
-        return False, "Bot Token belum diisi"
+        return False, "Bot Token is not set"
     if not cid:
-        return False, "Chat ID belum diisi"
+        return False, "Chat ID is not set"
 
     now_str = format_timestamp(time.time())
     table_lines = [

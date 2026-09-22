@@ -134,15 +134,6 @@
   flex-shrink: 0;
 }
 
-.chip.filter-btn-active,
-.chip.filter-btn-active:hover {
-  background: var(--surface-raised);
-  color: var(--text-primary);
-  font-weight: 700;
-  border-bottom-color: var(--accent);
-  box-shadow: var(--shadow-sm);
-}
-
 /* Incident stat cards — compact, equal width, no glow */
 .hist-stat-row {
   display: grid;

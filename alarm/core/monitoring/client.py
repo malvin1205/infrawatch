@@ -40,7 +40,14 @@ logger = logging.getLogger("infrawatch")
 # Blank/unset PROMETHEUS_URL => no default endpoint: the deployment runs with
 # an empty endpoint list until the operator adds one in the UI. Only a
 # non-blank value seeds and acts as the failover fallback.
-_DEFAULT_PROM_URL = os.environ.get("PROMETHEUS_URL", "http://prometheus:9090").strip()
+#
+# The fallback used to be "http://prometheus:9090" — a docker-compose-only
+# service hostname. That silently seeded every bare `python app.py` run
+# (no compose, no env var set) with an endpoint that can never resolve
+# outside that one network, so a fresh local checkout looked broken
+# everywhere (empty trend, failed availability, timeouts) instead of
+# showing the documented "no endpoint yet — add one" empty state.
+_DEFAULT_PROM_URL = os.environ.get("PROMETHEUS_URL", "").strip()
 
 _ENDPOINTS_CACHE = {"ts": 0.0, "data": None}
 _ENDPOINTS_CACHE_TTL = 2.0  # SQLite rarely changes; avoid a query on every hot-path call
@@ -252,11 +259,25 @@ def fetch_prometheus_json(path, use_cache=True, cache_ttl=None, timeout=None):
                     if time.time() - cached_ts < cache_ttl:
                         return cached_data, cached_base
 
-        # Primary candidates: active endpoint + last known working endpoint
+        # Primary candidates: active endpoint + last known working endpoint.
+        # LAST_WORKING_PROMETHEUS_URL only counts while it is still a
+        # registered endpoint (or the env/compose default). It is a
+        # process-global that outlives DELETE /api/endpoints, so a removed
+        # endpoint stayed first in line and kept answering every query — the
+        # grid, /api/availability and /health all went on reporting a
+        # Prometheus the operator had deliberately unregistered (/health even
+        # named it as the healthy one while the sole registered endpoint was
+        # offline). Deleting the last endpoint is a deliberate "no Prometheus
+        # configured" state, so it must actually stop serving data.
+        allowed_urls = {(e or '').rstrip('/') for e in (endpoints_data.get("endpoints") or [])}
+        if _DEFAULT_PROM_URL:
+            allowed_urls.add(_DEFAULT_PROM_URL.rstrip('/'))
         primary_candidates = []
         if active_url:
             primary_candidates.append(active_url)
-        if LAST_WORKING_PROMETHEUS_URL and LAST_WORKING_PROMETHEUS_URL not in primary_candidates:
+        if (LAST_WORKING_PROMETHEUS_URL
+                and LAST_WORKING_PROMETHEUS_URL not in primary_candidates
+                and LAST_WORKING_PROMETHEUS_URL.rstrip('/') in allowed_urls):
             primary_candidates.append(LAST_WORKING_PROMETHEUS_URL)
         primary_candidates = _filter_safe_candidates(primary_candidates)
 

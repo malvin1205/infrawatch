@@ -281,7 +281,6 @@ async function fetchUsersList() {
 const WRITE_CONTROL_IDS = [
   'drawerMaintStartBtn',        // maintenance.write
   'drawerDependencyRemoveBtn',  // dependencies.write
-  'drawerDeleteBtn',            // targets.write
   'ackAlarmBtn',                // alerts.ack
   'openAddTargetModalBtn',      // targets.write
   'submitAddTargetBtn',         // targets.write
@@ -289,6 +288,8 @@ const WRITE_CONTROL_IDS = [
   'removeSelectedBtn',          // targets.write
   'bulkMaintenanceBtn',         // maintenance.write
   'bulkMaintSubmitBtn',         // maintenance.write
+  'endpointUrlInput',           // endpoints.write
+  'addEndpointSubmitBtn',       // endpoints.write
 ];
 
 function applyRolePermissions(user) {
@@ -304,6 +305,11 @@ function applyRolePermissions(user) {
       el.removeAttribute('title');
     }
   });
+
+  const readOnlyAlert = document.getElementById('endpointReadOnlyAlert');
+  if (readOnlyAlert) {
+    readOnlyAlert.classList.toggle('hidden', !readOnly);
+  }
 }
 
 function updateUserUI(user) {

@@ -5,6 +5,10 @@ RUN groupadd -g 10001 appgroup && \
 
 WORKDIR /app
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    SESSION_COOKIE_SECURE=0
+
 RUN apt update && \
     apt install -y curl && \
     rm -rf /var/lib/apt/lists/*

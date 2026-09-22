@@ -1127,7 +1127,12 @@ class _DrawerMethods {
           elList.innerHTML = [...onlyFailures].sort((a, b) => b[0] - a[0]).map(f => {
             const s = new Date(f[0] * 1000);
             const e = new Date((f[1] || f[0]) * 1000);
-            const spanTxt = (f[1] && f[1] > f[0]) ? ` – ${fmtT2(e)}` : '';
+            // Carry the date onto the end of a span that crosses midnight —
+            // a 24h outage otherwise read "21 Sep 10.13.40 – 10.13.20", i.e.
+            // as if it ended 20 seconds before it began.
+            const spanTxt = (f[1] && f[1] > f[0])
+              ? ` – ${fmtD2(e) === fmtD2(s) ? '' : fmtD2(e) + ' '}${fmtT2(e)}`
+              : '';
             const reason = f[2] ? `failed (HTTP ${f[2]})` : 'failed (no response)';
             const countTxt = (f[3] || 1) > 1 ? ` · ${(f[3]).toLocaleString()} probes` : '';
             return `
@@ -1206,7 +1211,9 @@ class _DrawerMethods {
 
         if (r.kind === 'fail') {
           const endObj = new Date((r.endTs || r.ts) * 1000);
-          const spanTxt = (r.endTs && r.endTs > r.ts) ? ` – ${fmtT(endObj)}` : '';
+          const spanTxt = (r.endTs && r.endTs > r.ts)
+            ? ` – ${fmtD(endObj) === fmtD(dObj) ? '' : fmtD(endObj) + ' '}${fmtT(endObj)}`
+            : '';
           const reason = r.code ? `failed (HTTP ${r.code})` : 'failed (no response)';
           const countTxt = r.count > 1 ? ` · ${r.count.toLocaleString()} probes` : '';
           return `
@@ -1481,7 +1488,10 @@ class _DrawerMethods {
         const statusColor = isOnline ? '#22C55E' : '#EF4444';
         
         const dateObj = new Date(ev.start_ts * 1000);
-        const dateStr = dateObj.toLocaleDateString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        // DATE_LOCALE, not the browser default: this list sat next to History's
+        // "21 Sep 10.13.40" rows showing "Sep 22, 09:40:17 AM" for the same
+        // kind of timestamp.
+        const dateStr = dateObj.toLocaleDateString(DATE_LOCALE, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
         // A bare "0s" duration looked like a rendering fault; it is a state
         // change that resolved inside one probe interval (audit 5.5).
         const durationStr = (!ev.ongoing && (ev.duration_seconds || 0) < 1)

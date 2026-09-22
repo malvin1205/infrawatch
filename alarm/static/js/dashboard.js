@@ -3,7 +3,7 @@
  * response-time / history charts. Still the largest module; a further
  * split into drawer / availability sub-modules is a separate pass.
  */
-import { escapeHtml, slowThresholdMs } from './ui/format.js';
+import { escapeHtml, slowThresholdMs, DATE_LOCALE } from './ui/format.js';
 import { apiFetch } from './net.js';
 import { enhanceAllSelects } from './ui/select-skin.js';
 import { installAvailability } from './availability.js';
@@ -308,10 +308,20 @@ export class InstancesPage {
         ackBtn.disabled = true;
         ackBtn.setAttribute('aria-busy', 'true');
         try {
+          // Send the instances THIS view is alarming on. An empty body means
+          // "every down host in the fleet" server-side, so with a job filter
+          // active the button labelled "Acknowledge all 15 outages" silenced
+          // 59 — including hosts the operator could not see and whose sirens
+          // this page never rang (_syncAlarmAudio reads the same filtered
+          // `data`). Falls back to the empty body when nothing is pending, so
+          // the "nothing to acknowledge" branch below is unchanged.
+          const pending = (this.data || [])
+            .filter(t => t.is_alarmable && t.health !== 'up' && !t.acknowledged)
+            .map(t => t.instance);
           const res = await apiFetch('/api/alerts/ack', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
+            body: JSON.stringify(pending.length ? { instances: pending } : {})
           });
           let data = {};
           try { data = await res.json(); } catch (_) { /* non-JSON error body */ }
@@ -413,6 +423,9 @@ export class InstancesPage {
 
         this._closeCustomRangePopover();
         this._setActiveRangeChip(range);
+        this._trendZoom = { lo: null, hi: null };
+        this._calendarOpenDate = null;
+        if (typeof this._clearTrendHighlight === 'function') this._clearTrendHighlight();
 
         if (range === 'mtd') {
           this.isRealtime = false;
@@ -503,6 +516,9 @@ export class InstancesPage {
     const modalRangeSelect = document.getElementById('modalRangeSelect');
     if (modalRangeSelect) {
       modalRangeSelect.addEventListener('change', async e => {
+        this._trendZoom = { lo: null, hi: null };
+        this._calendarOpenDate = null;
+        if (typeof this._clearTrendHighlight === 'function') this._clearTrendHighlight();
         if (e.target.value === 'mtd') {
           this.isRealtime = false;
           this.periodEnd = null;
@@ -912,12 +928,19 @@ export class InstancesPage {
   // reflows pagination without losing hosts or stranding the user on an
   // empty page — keeps whichever host was first-visible in view instead of
   // jumping back to page 1.
-  _applyGridCapacity() {
+  // `reflow: false` updates pageSize in place without re-rendering — for
+  // callers that are about to render anyway (see _render). The observer alone
+  // wasn't enough: a measurement taken during a transient layout (first paint,
+  // an empty-state grid) stuck until the grid's box changed again, so the
+  // wallboard sat on 33-40 cards a page where 66 fit, with a dead band under
+  // the last row and twice the pages it needed.
+  _applyGridCapacity(reflow = true) {
     const cap = this._calculateGridCapacity();
     if (cap.pageSize === this.pageSize) return;
     const firstVisibleIdx = (this.currentPage - 1) * this.pageSize;
     this.pageSize = cap.pageSize;
     this.currentPage = Math.floor(firstVisibleIdx / this.pageSize) + 1;
+    if (!reflow) return;
     // No data yet (first measurement lands before load() resolves) — the
     // updated pageSize is already in place for load()'s own _render() call,
     // don't churn the still-showing skeleton loader in the meantime.
@@ -1680,7 +1703,7 @@ export class InstancesPage {
     const intervalSec = Math.max(1, Math.round((this.refreshIntervalMs || 5000) / 1000));
     meta.classList.toggle('is-stale', ageSec > intervalSec * 3);
     meta.classList.toggle('is-very-stale', ageSec > intervalSec * 10);
-    meta.setAttribute('title', `Data last received at ${new Date(this._lastDataAt).toLocaleTimeString()}`);
+    meta.setAttribute('title', `Data last received at ${new Date(this._lastDataAt).toLocaleTimeString(DATE_LOCALE)}`);
   }
 
   // ── Bulk selection (Select + Remove) ──────────────────────────────────
@@ -1900,12 +1923,12 @@ export class InstancesPage {
       const startMs = this._outageStartMs(t);
       bits.push(startMs === null
         ? 'down, outage start unknown (older than the 1-day lookback)'
-        : `down since ${new Date(startMs).toLocaleString()}`);
+        : `down since ${new Date(startMs).toLocaleString(DATE_LOCALE)}`);
       if (t.failureCategory && t.failureCategory !== 'Unknown') bits.push(t.failureCategory);
       if (t.suppressedBy) bits.push(`caused by ${t.suppressedBy}`);
       if (isAcked) {
         const who = t.acknowledged_by || 'operator';
-        const when = t.acknowledged_at ? new Date(t.acknowledged_at * 1000).toLocaleString() : '';
+        const when = t.acknowledged_at ? new Date(t.acknowledged_at * 1000).toLocaleString(DATE_LOCALE) : '';
         bits.push(when ? `acknowledged by ${who} ${when}` : `acknowledged by ${who}`);
       } else {
         bits.push('NOT yet acknowledged');
@@ -1993,12 +2016,21 @@ export class InstancesPage {
 
     const downSub = document.getElementById('instDownSub');
     if (downSub) {
+      // `down` counts every offline host; unacked/acked only count the
+      // ALARMABLE ones (is_alarmable excludes maintenance and
+      // dependency-suppressed hosts). Without the remainder the breakdown
+      // didn't add up to the number right above it — "16 OFFLINE" over
+      // "15 not yet acknowledged · 0 acknowledged".
+      const suppressed = Math.max(0, down - unackedCount - ackedCount);
+      const suppressedTxt = suppressed > 0 ? ` · ${suppressed} alerts suppressed` : '';
       if (down === 0) {
         downSub.textContent = '';
+      } else if (unackedCount === 0 && ackedCount === 0) {
+        downSub.textContent = suppressed > 0 ? `${suppressed} alerts suppressed` : '';
       } else if (unackedCount === 0) {
-        downSub.textContent = `all ${ackedCount} acknowledged`;
+        downSub.textContent = `all ${ackedCount} acknowledged${suppressedTxt}`;
       } else {
-        downSub.textContent = `${unackedCount} not yet acknowledged · ${ackedCount} acknowledged`;
+        downSub.textContent = `${unackedCount} not yet acknowledged · ${ackedCount} acknowledged${suppressedTxt}`;
       }
       downSub.classList.toggle('is-urgent', unackedCount > 0);
     }
@@ -2024,7 +2056,7 @@ export class InstancesPage {
 
     // Last probe time
     if (this.lastProbe) {
-      this.lastProbe.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+      this.lastProbe.textContent = `Updated ${new Date().toLocaleTimeString(DATE_LOCALE)}`;
     }
 
     // Acknowledge Button & Global health badge (Server-Side Global Incident State)
@@ -2171,6 +2203,12 @@ export class InstancesPage {
     if (rows.length === 0) {
       this._downCardElements = [];
       this._maintCardElements = [];
+      this._sortedRows = rows;
+      // Without this the footer kept the PREVIOUS filter's numbers ("Showing
+      // 1–42 of 42 hosts") and its page buttons underneath an empty grid.
+      this._totalPages = 1;
+      this.currentPage = 1;
+      this._updatePaginationUI(0, 0, 0);
       this.table.innerHTML = `
         <div class="empty-state">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -2221,6 +2259,10 @@ export class InstancesPage {
     });
 
     this._sortedRows = rows;
+
+    // Re-measure before paginating: the grid is laid out and non-empty here,
+    // which is the only reliably measurable moment.
+    this._applyGridCapacity(false);
 
     // Paginate — pageSize is adaptive (see _calculateGridCapacity), not a
     // fixed count. Clamp instead of resetting to page 1 so polling/live

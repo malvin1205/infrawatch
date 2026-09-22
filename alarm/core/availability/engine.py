@@ -779,7 +779,7 @@ class AvailabilityEngine:
         )
 
         trend_series, trend_slot_sec = _build_fleet_trend(
-            req_end, query.minutes * 60.0, monitored_instances, db_bucket_records=db_bucket_records
+            req_end, query.minutes * 60.0, monitored_instances, db_bucket_records=db_bucket_records, job=query.job
         )
         t_done = time.perf_counter()
 
@@ -953,7 +953,7 @@ class AvailabilityEngine:
         )
 
         trend_series, trend_slot_sec = _build_fleet_trend(
-            req_end, query.minutes * 60.0, monitored_instances, db_bucket_records=db_bucket_records
+            req_end, query.minutes * 60.0, monitored_instances, db_bucket_records=db_bucket_records, job=query.job
         )
         t_done = time.perf_counter()
 

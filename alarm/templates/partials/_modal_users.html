@@ -17,7 +17,10 @@
         <!-- Users List Section -->
         <div style="margin-bottom: 20px;">
           <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">Existing Users</div>
-          <div id="usersListContainer" style="max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface);">
+          <!-- 180px fitted barely two rows, so a third user already produced a
+               nested scrollbar inside a modal that scrolls too. Still capped,
+               just high enough that a normal NOC roster fits in one view. -->
+          <div id="usersListContainer" style="max-height: min(44vh, 420px); overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface);">
             <div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">Loading users...</div>
           </div>
         </div>

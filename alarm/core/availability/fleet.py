@@ -818,16 +818,24 @@ def merge_hybrid_target_availability(
 
     # 2b. Cross-bucket incident de-dup. reconstruct_time_series_intervals runs
     # per hour, so an outage straddling an hour boundary is counted once in
-    # each hour's bucket. Where a fully-contained bucket ends still in outage
-    # and the next contiguous bucket begins still in outage, that is one
-    # outage seen twice — drop the duplicate. Only fully-contained buckets
-    # (a partially clipped boundary bucket already carries an approximate
-    # incident count from clip_hourly_bucket). No signal -> no change.
+    # each hour's bucket. Where a bucket ends still in outage and the next
+    # contiguous bucket begins still in outage, that is one outage seen twice
+    # — drop the duplicate. No signal -> no change.
+    #
+    # Every bucket OVERLAPPING the clip range takes part, not only the
+    # fully-contained ones: a live window (`req_start = now - 24h`) is never
+    # hour-aligned, so its first bucket is clipped and its last is the
+    # in-progress hour whose bucket_end is in the future — both were skipped,
+    # and each then kept an un-deduplicated +1. A host down for weeks read as
+    # "3 incidents" on the 24h view (and "Avg recovery time 8.0h" derived from
+    # it) while /api/target-history said 1 for the same window. The
+    # ongoing_start/ongoing_end flags are read off the stored bucket row, so
+    # they're just as valid for a partially clipped bucket.
     if sqlite_inc > 1 and len(sqlite_buckets) > 1:
         contained = sorted(
             (b for b in sqlite_buckets
-             if _num(b.get("bucket_start")) >= sqlite_clip_start - 1.0
-             and _num(b.get("bucket_end")) <= sqlite_clip_end + 1.0),
+             if _num(b.get("bucket_end")) > sqlite_clip_start
+             and _num(b.get("bucket_start")) < sqlite_clip_end),
             key=lambda b: _num(b.get("bucket_start")),
         )
         for prev_b, cur_b in zip(contained, contained[1:]):

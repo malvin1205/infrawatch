@@ -49,7 +49,7 @@ export class LogsPage {
       btn.addEventListener('click', () => {
         this.filter = btn.dataset.logFilter;
         document.querySelectorAll('[data-log-filter]').forEach(b =>
-          b.classList.toggle('filter-btn-active', b.dataset.logFilter === this.filter)
+          b.classList.toggle('chip-active', b.dataset.logFilter === this.filter)
         );
         this._render();
       });
@@ -192,7 +192,9 @@ export class LogsPage {
               <path d="M2 26h28M10 13h12M10 18h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
           </div>
-          <div class="es-text">No log entries yet — waiting for webhooks…</div>
+          <div class="es-text">${this.data.length > 0
+          ? 'No alert events match the current filter'
+          : 'No log entries yet — waiting for webhooks…'}</div>
         </div>`;
       return;
     }

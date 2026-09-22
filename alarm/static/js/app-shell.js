@@ -1,7 +1,7 @@
 /* Application shell: owns audio/alarm state, tab switching, endpoint
  * management, and constructs + coordinates the three page objects. */
 import { apiFetch } from './net.js';
-import { escapeHtml } from './ui/format.js';
+import { escapeHtml, DATE_LOCALE } from './ui/format.js';
 import { InstancesPage } from './dashboard.js';
 import { LogsPage } from './logs.js';
 import { HistoryPage } from './history.js';
@@ -259,7 +259,7 @@ export class ServerMonitor {
 
     if (updatedEl) {
       updatedEl.textContent = this._lastHealthSuccessAt
-        ? `Last successful update: ${this._lastHealthSuccessAt.toLocaleTimeString()}`
+        ? `Last successful update: ${this._lastHealthSuccessAt.toLocaleTimeString(DATE_LOCALE)}`
         : 'Last successful update: never (endpoint unreachable)';
     }
   }
@@ -330,14 +330,12 @@ export class ServerMonitor {
     // server 403s Select/Delete/Add already, but leaving these fully
     // interactive here would let a viewer click something that can only
     // ever fail (same class of bug as ackAlarmBtn — see auth.js).
+    // The add form's input + submit are gated by auth.js's WRITE_CONTROL_IDS
+    // so they follow login/logout; doing it once here left them dead for the
+    // rest of the session after a first-run setup or a login.
     const isReadOnlyUser = () => !window.currentUser
       || (window.currentUser.role !== 'admin' && window.currentUser.role !== 'owner');
     const readOnlyTitle = 'Read-only account — sign in as an operator to change this';
-    const addSubmitBtn = addForm ? addForm.querySelector('button[type="submit"]') : null;
-    if (isReadOnlyUser()) {
-      if (urlInput) urlInput.disabled = true;
-      if (addSubmitBtn) { addSubmitBtn.disabled = true; addSubmitBtn.title = readOnlyTitle; }
-    }
 
     const fetchEndpoints = async () => {
       try {
@@ -503,9 +501,20 @@ export class ServerMonitor {
     if (openBtn && modal) {
       openBtn.addEventListener('click', () => {
         modal.classList.remove('hidden');
+        const readOnlyAlert = document.getElementById('endpointReadOnlyAlert');
+        if (readOnlyAlert) readOnlyAlert.classList.toggle('hidden', !isReadOnlyUser());
         if (this._untrapEndpoint) this._untrapEndpoint();
         this._untrapEndpoint = window.trapModalFocus(modal);
         fetchEndpoints();
+      });
+    }
+
+    const loginTriggerBtn = document.getElementById('endpointLoginTriggerBtn');
+    if (loginTriggerBtn && modal) {
+      loginTriggerBtn.addEventListener('click', () => {
+        if (this._untrapEndpoint) { this._untrapEndpoint(); this._untrapEndpoint = null; }
+        modal.classList.add('hidden');
+        window.dispatchEvent(new CustomEvent('iw:unauthorized'));
       });
     }
 
@@ -581,6 +590,15 @@ export class ServerMonitor {
     const soundOff = document.getElementById('soundIconOff');
     if (soundOn) soundOn.style.display = enabled ? '' : 'none';
     if (soundOff) soundOff.style.display = enabled ? 'none' : '';
+    // The icon swapped but the tooltip didn't, so a muted wallboard still
+    // read "Alarm sound: ON — click to mute" on hover.
+    const soundBtn = document.getElementById('soundToggleBtn');
+    if (soundBtn) {
+      soundBtn.title = enabled
+        ? 'Alarm sound: ON — click to mute'
+        : 'Alarm sound: MUTED — click to unmute';
+      soundBtn.setAttribute('aria-pressed', enabled ? 'false' : 'true');
+    }
     // Recompute immediately against current truth — no stale "already
     // played" flag to get stuck on, so unmuting mid-outage resumes the siren
     // right away instead of silently staying dead until the next distinct event.

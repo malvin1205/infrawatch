@@ -7,12 +7,17 @@
       </div>
 
       <div class="modal-body">
+        <div id="endpointReadOnlyAlert" class="endpoint-readonly-alert hidden" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: var(--r-sm); padding: 8px 12px; font-size: 12px; color: #f59e0b; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span>Read-only mode. Sign in as Administrator or Owner to add or configure endpoints.</span>
+          <button type="button" id="endpointLoginTriggerBtn" class="btn btn-secondary" style="padding: 3px 10px; font-size: 11px; white-space: nowrap; flex-shrink: 0;">Sign In</button>
+        </div>
+
         <form id="addEndpointForm" style="margin-bottom: 20px;">
           <div class="form-group">
             <label for="endpointUrlInput" class="form-label">New Prometheus Endpoint URL</label>
             <div style="display: flex; gap: 8px;">
               <input type="text" id="endpointUrlInput" class="form-input" style="flex: 1;" placeholder="http://192.168.10.5:9090" required>
-              <button type="submit" class="add-target-btn" style="padding: 0 14px; flex-shrink: 0;">
+              <button type="submit" id="addEndpointSubmitBtn" class="add-target-btn" style="padding: 0 14px; flex-shrink: 0;">
                 <span>+ Add</span>
               </button>
             </div>

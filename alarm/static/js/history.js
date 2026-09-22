@@ -44,7 +44,7 @@ export class HistoryPage {
       btn.addEventListener('click', () => {
         this.severityFilter = btn.dataset.histFilter;
         document.querySelectorAll('[data-hist-filter]').forEach(b =>
-          b.classList.toggle('filter-btn-active', b.dataset.histFilter === this.severityFilter)
+          b.classList.toggle('chip-active', b.dataset.histFilter === this.severityFilter)
         );
         this._resetPaging();
         this._render();
@@ -55,7 +55,7 @@ export class HistoryPage {
       btn.addEventListener('click', () => {
         this.statusFilter = btn.dataset.histStatus;
         document.querySelectorAll('[data-hist-status]').forEach(b =>
-          b.classList.toggle('filter-btn-active', b.dataset.histStatus === this.statusFilter)
+          b.classList.toggle('chip-active', b.dataset.histStatus === this.statusFilter)
         );
         this._resetPaging();
         this._render();
