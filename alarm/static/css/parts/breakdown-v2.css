@@ -447,6 +447,14 @@
 .avb .avb-trend-tip.flip-x { transform: translate(-100%, calc(-100% - 8px)); }
 .avb .avb-trend-tip.flip-y { transform: translate(-50%, 8px); }
 .avb .avb-trend-tip.flip-x.flip-y { transform: translate(-100%, 8px); }
+/* Mirror of flip-x for a point near the LEFT edge: centering the tooltip on
+   the point (the default transform above) pushes half its width past x=0,
+   off the plot and clipped by the modal's overflow-x:hidden scroll
+   container — exactly the "Sep" in "Sep 2, 01:00 WIB" getting cut off.
+   Anchoring the tooltip's own left edge to the point instead keeps it fully
+   on-screen, same fix as flip-x but for the opposite edge. */
+.avb .avb-trend-tip.edge-left { transform: translate(0, calc(-100% - 8px)); }
+.avb .avb-trend-tip.edge-left.flip-y { transform: translate(0, 8px); }
 
 /* Persistent pin (set by clicking an Outage Rail event) — same shape as the
    hover crosshair/dot/tip above, but stays visible without a pointer over
@@ -553,12 +561,12 @@
   color: var(--warn, #f59e0b);
 }
 .avb .avb-evd-sub { margin: 4px 0 0; font-size: 11px; color: var(--text-low); }
-.avb .avb-evd-more { font-size: 10.5px; color: var(--text-low); }
 .avb .avb-evd-rows { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
-/* Secondary rows (other hosts changing near the same moment) sit visually
-   behind the primary — the one row that IS the clicked event — so there is
-   never doubt about which result belongs to the click itself. */
-.avb .avb-evd-rows-secondary { margin-top: 6px; opacity: 0.75; }
+/* Every affected host is listed — no "+N more" truncation. A busy incident
+   (dozens of hosts) grows the panel and scrolls with the modal's own
+   scroll container (.avb-scroll) rather than a second nested scrollbox —
+   a fixed-height inner scroll area cut rows off mid-card at its boundary. */
+.avb .avb-evd-rows-secondary { margin-top: 6px; }
 .avb .avb-evd-row {
   display: flex;
   flex-direction: column;
@@ -567,10 +575,6 @@
   background: var(--bg-surface);
   border: 1px solid var(--border-soft);
   border-radius: 5px;
-}
-.avb .avb-evd-row.is-primary {
-  border-color: var(--accent, #6ea8ff);
-  box-shadow: 0 0 0 1px var(--accent, #6ea8ff) inset;
 }
 .avb .avb-evd-row-top { display: flex; align-items: center; gap: 6px; }
 .avb .avb-evd-badge {

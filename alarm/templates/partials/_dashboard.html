@@ -62,9 +62,18 @@
         </div>
       </div>
       <div class="summary-card sc-availability">
+        <!-- Card-level loading cue: while a range switch/poll refresh is in
+             flight, this button itself swaps its icon+label for a spinner +
+             "Updating…" — same spot, same size class, no separate badge
+             fighting the icon/content for the card's tight real estate. It
+             reverts to the normal icon + "Detail" the instant the request
+             lands (still fully clickable throughout). Toggled by the SAME
+             _updateAvailLoadingUI() call the modal's own updating badge
+             uses — one request lifecycle, two indicators. -->
         <button id="availabilityDetailBtn" class="sc-detail-btn" type="button" title="View availability metrics breakdown" aria-haspopup="dialog" aria-controls="availabilityBreakdownModal">
-          <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-          <span>Detail</span>
+          <svg class="sc-detail-icon" aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <span class="sc-detail-spinner" aria-hidden="true"></span>
+          <span class="sc-detail-label">Detail</span>
         </button>
         <div class="sc-icon-box">
           <svg aria-hidden="true" focusable="false" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

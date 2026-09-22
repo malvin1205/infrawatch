@@ -4,6 +4,7 @@
  * methods keep their original `this` and every existing call site works
  * unchanged. */
 import { apiFetch } from './net.js';
+import { DATE_LOCALE } from './ui/format.js';
 
 // An SLA target is an exact operator-set value, not a measurement — unlike
 // availability/coverage %, it must never get silently rounded for display.
@@ -73,6 +74,18 @@ class _AvailabilityMethods {
     // previous range's numbers with no sign a refresh is in flight.
     const modalBody = document.querySelector('.avail-modal-body');
     if (modalBody) modalBody.classList.toggle('is-refreshing', !!isLoading);
+    // Same signal, mirrored onto the dashboard card's own Detail button —
+    // the modal is usually closed, so the card is the only place an
+    // operator would otherwise see the OLD range's number sitting there
+    // looking finalized while a range switch or poll refresh is still in
+    // flight. The button swaps icon+label for spinner+"Updating…" in place
+    // (still clickable) rather than adding a second element to the card.
+    const detailBtn = document.getElementById('availabilityDetailBtn');
+    if (detailBtn) {
+      detailBtn.classList.toggle('is-loading', !!isLoading);
+      const label = detailBtn.querySelector('.sc-detail-label');
+      if (label) label.textContent = isLoading ? 'Updating…' : 'Detail';
+    }
   }
 
   // The headline % is honest math over whatever was observed, but for a young
@@ -182,6 +195,7 @@ class _AvailabilityMethods {
     // 1. Instant Cache Render: If valid cached data exists, apply immediately with 0ms delay!
     if (cached && cached.data) {
       this._applyAvailabilityData(cached.data, 'cache_hit');
+      this._displayedAvailKey = cacheKey;
       if (!force && hasFreshCache) {
         this._updateAvailLoadingUI(false);
         return;
@@ -240,6 +254,7 @@ class _AvailabilityMethods {
 
       if (!data.ok) {
         this._availFailCount = Math.min(this._availFailCount + 1, 6);
+        this._markAvailabilityUnavailable(cacheKey);
         this._scheduleRetry('availability');
         return;
       }
@@ -249,12 +264,14 @@ class _AvailabilityMethods {
       // Store response in client-side memory cache
       this._availCache.set(cacheKey, { timestamp: Date.now(), data });
       this._applyAvailabilityData(data, 'network_response');
+      this._displayedAvailKey = cacheKey;
     } catch (e) {
       if (e.name === 'AbortError' || isStale()) {
         return;
       }
       console.warn('[InfraWatch] Availability fetch failed:', e);
       this._availFailCount = Math.min(this._availFailCount + 1, 6);
+      this._markAvailabilityUnavailable(cacheKey);
       this._scheduleRetry('availability');
     } finally {
       if (this._availAbortController === controller) {
@@ -263,6 +280,20 @@ class _AvailabilityMethods {
         this._availLoading = false;
         this._updateAvailLoadingUI(false);
       }
+    }
+  }
+
+  // The "Availability (<range>)" label is switched before the fetch, so a
+  // failed fetch for a NEW range left the previous range's number sitting
+  // under the new caption — a custom range that 503s read as if it had been
+  // scored. Blank the number instead whenever what's painted isn't this
+  // range; the retry (_scheduleRetry) repaints it once the fetch succeeds.
+  _markAvailabilityUnavailable(wantedKey) {
+    if (this._displayedAvailKey === wantedKey) return;
+    if (this.statUptime) {
+      this.statUptime.textContent = '—';
+      this.statUptime.classList.remove('is-limited-data');
+      this.statUptime.title = 'Availability for this range is unavailable — retrying.';
     }
   }
 
@@ -356,6 +387,10 @@ class _AvailabilityMethods {
     this.periodMinutes = minutes;
     this.periodEnd = Math.floor(toDate.getTime() / 1000);
     this.periodLabel = 'custom';
+
+    this._trendZoom = { lo: null, hi: null };
+    this._calendarOpenDate = null;
+    if (typeof this._clearTrendHighlight === 'function') this._clearTrendHighlight();
 
     this._setActiveRangeChip('custom');
     this.customRangePopover.classList.add('hidden');
@@ -1057,7 +1092,16 @@ class _AvailabilityMethods {
     let hover = document.getElementById('avbTrendHover');
 
     this._lastAvailabilityData = data;
-    if (!this._trendZoom) this._trendZoom = { lo: null, hi: null };
+    const fullEnd = typeof data.trend_end_ts === 'number' ? data.trend_end_ts : (Date.now() / 1000);
+    const fullStart = typeof data.trend_start_ts === 'number' && data.trend_start_ts < fullEnd
+      ? data.trend_start_ts
+      : fullEnd - 86400;
+
+    const bucketSec = typeof data.trend_bucket_seconds === 'number' ? data.trend_bucket_seconds : 3600;
+
+    if (!this._trendZoom || (typeof this._trendZoom.lo === 'number' && typeof this._trendZoom.hi === 'number' && (this._trendZoom.lo >= fullEnd || this._trendZoom.hi <= fullStart || this._trendZoom.lo >= this._trendZoom.hi))) {
+      this._trendZoom = { lo: null, hi: null };
+    }
     const zoom = zoomOverride || this._trendZoom;
 
     const allPts = Array.isArray(data && data.trend)
@@ -1065,16 +1109,11 @@ class _AvailabilityMethods {
       : [];
     allPts.sort((a, b) => a.ts - b.ts);
 
-    const fullEnd = typeof data.trend_end_ts === 'number' ? data.trend_end_ts : (Date.now() / 1000);
-    const fullStart = typeof data.trend_start_ts === 'number' && data.trend_start_ts < fullEnd
-      ? data.trend_start_ts
-      : fullEnd - 86400;
-
     const startTs = (typeof zoom.lo === 'number') ? Math.max(fullStart, zoom.lo) : fullStart;
     const endTs = (typeof zoom.hi === 'number') ? Math.min(fullEnd, zoom.hi) : fullEnd;
     const windowSec = Math.max(1, endTs - startTs);
     const isZoomed = startTs > fullStart + 1 || endTs < fullEnd - 1;
-    const pts = allPts.filter(p => p.ts >= startTs && p.ts <= endTs);
+    const pts = allPts.filter(p => p.ts >= startTs && (p.ts <= endTs || (p.ts - bucketSec < endTs && Math.abs(endTs - fullEnd) < 60)));
 
     const resetBtn = document.getElementById('avbTrendZoomReset');
     if (resetBtn) resetBtn.classList.toggle('hidden', !isZoomed);
@@ -1136,8 +1175,19 @@ class _AvailabilityMethods {
     const yOf = v => clamp(((yMax - v) / (yMax - yMin)) * 100, 0, 100);
     const coords = pts.map(p => [xOf(p.ts), yOf(p.availability_pct)]);
 
-    const lineD = coords.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`).join(' ');
-    const areaD = `${lineD} L${coords[coords.length - 1][0].toFixed(2)} 100 L${coords[0][0].toFixed(2)} 100 Z`;
+    // The drawn line/area extends flat from the last real sample to the
+    // visible right edge (x=100) when that sample doesn't already reach it —
+    // e.g. a zoom whose end falls between two bucket boundaries, or the
+    // in-progress bucket sitting slightly before `endTs`. This is a display-
+    // only extension of the last KNOWN value (nothing changed since that
+    // sample), never a new coordinate: `coords`/`pts` (hover crosshair, click
+    // event-detail lookup) are untouched, so the drawn edge still hover/
+    // click-resolves to the real last point behind it.
+    const drawCoords = coords[coords.length - 1][0] < 99.95
+      ? [...coords, [100, coords[coords.length - 1][1]]]
+      : coords;
+    const lineD = drawCoords.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`).join(' ');
+    const areaD = `${lineD} L${drawCoords[drawCoords.length - 1][0].toFixed(2)} 100 L${drawCoords[0][0].toFixed(2)} 100 Z`;
 
     if (!wrap) {
       // Build the <svg> as a string inside an HTML <div> — same pattern as
@@ -1213,7 +1263,6 @@ class _AvailabilityMethods {
     // no extra fetch, and it always agrees with the Downtime Calendar /
     // Outage Today chart since all three read the same fleet sweep
     // (_buildFleetSweep).
-    const bucketSec = typeof data.trend_bucket_seconds === 'number' ? data.trend_bucket_seconds : 3600;
     this._entriesByHost = new Map((data.entries || []).map(e => [e.id || e.name, e]));
     this._trendHoverState = {
       coords, pts, windowSec, bucketSec, startTs, endTs,
@@ -1252,10 +1301,11 @@ class _AvailabilityMethods {
         cross.style.left = `${cx}%`;
         dot.style.left = `${cx}%`;
         dot.style.top = `${cy}%`;
-        tip.textContent = `${this._trendTsLabel(p.ts, st.windowSec)} · ${p.availability_pct.toFixed(2)}%${this._trendWhyText(p, st)}`;
+        tip.textContent = `${this._trendTsLabel(Math.min(p.ts, st.endTs), st.windowSec)} · ${p.availability_pct.toFixed(2)}%${this._trendWhyText(p, st)}`;
         tip.style.left = `${cx}%`;
         tip.style.top = `${cy}%`;
         tip.classList.toggle('flip-x', cx > 62);
+        tip.classList.toggle('edge-left', cx < 38);
         tip.classList.toggle('flip-y', cy < 22);
         hover.classList.add('active');
       };
@@ -1280,23 +1330,28 @@ class _AvailabilityMethods {
       plot,
       { lo: startTs, hi: endTs },
       (lo, hi) => {
+        this._clearTrendHighlight();
         this._trendZoom = { lo, hi };
         this._renderAvailabilityTrend(this._lastAvailabilityData, this._trendZoom);
       },
-      ts => this._pinEventDetail('avbTrendEventDetail', ts, this._fleetSweep, windowSec)
+      (ts, clientX) => this._pinEventDetail('avbTrendEventDetail', ts, this._fleetSweep, windowSec, clientX)
     );
     const hint = document.getElementById('avbTrendHint');
     if (hint && resetBtn && !resetBtn.dataset.wired) {
       resetBtn.dataset.wired = '1';
       resetBtn.addEventListener('click', () => {
         this._trendZoom = { lo: null, hi: null };
+        this._clearTrendHighlight();
         this._renderAvailabilityTrend(this._lastAvailabilityData);
       });
     }
     const todayBtn = document.getElementById('avbTrendTodayBtn');
     if (todayBtn && !todayBtn.dataset.wired) {
       todayBtn.dataset.wired = '1';
-      todayBtn.addEventListener('click', () => this._zoomTrendToWibDay(this._todayWibDateStr()));
+      todayBtn.addEventListener('click', () => {
+        this._clearTrendHighlight();
+        this._zoomTrendToWibDay(this._todayWibDateStr());
+      });
     }
   }
 
@@ -1323,16 +1378,23 @@ class _AvailabilityMethods {
   // isn't rendered yet or `ts` falls outside the current window — a rail
   // click for a day the Trend line doesn't cover isn't an error, just
   // nothing to point at up there.
-  _highlightTrendAt(ts) {
+  _highlightTrendAt(ts, pointOverride) {
     const st = this._trendHoverState;
     const pin = document.getElementById('avbTrendPin');
-    if (!st || !pin || typeof ts !== 'number' || !st.pts.length) { this._clearTrendHighlight(); return; }
-    if (ts < st.startTs || ts > st.startTs + st.windowSec) { this._clearTrendHighlight(); return; }
-    let best = 0, bd = Infinity;
-    for (let i = 0; i < st.pts.length; i++) {
-      const d = Math.abs(st.pts[i].ts - ts);
-      if (d < bd) { bd = d; best = i; }
+    if (!st || !pin || typeof ts !== 'number' || !st.pts || !st.pts.length) { this._clearTrendHighlight(); return; }
+    if (!pointOverride && (ts < st.startTs - 1 || ts > st.startTs + st.windowSec + 1)) { this._clearTrendHighlight(); return; }
+    let best = -1;
+    if (pointOverride && st.pts) {
+      best = st.pts.indexOf(pointOverride);
     }
+    if (best === -1) {
+      let bd = Infinity;
+      for (let i = 0; i < st.pts.length; i++) {
+        const d = Math.abs(st.pts[i].ts - ts);
+        if (d < bd) { bd = d; best = i; }
+      }
+    }
+    if (best === -1 || !st.coords[best] || !st.pts[best]) { this._clearTrendHighlight(); return; }
     const [cx, cy] = st.coords[best];
     const p = st.pts[best];
     pin.querySelector('.avb-trend-cross').style.left = `${cx}%`;
@@ -1340,10 +1402,11 @@ class _AvailabilityMethods {
     dot.style.left = `${cx}%`;
     dot.style.top = `${cy}%`;
     const tip = pin.querySelector('.avb-trend-tip');
-    tip.textContent = `${this._trendTsLabel(p.ts, st.windowSec)} · ${p.availability_pct.toFixed(2)}%${this._trendWhyText(p, st)}`;
+    tip.textContent = `${this._trendTsLabel(Math.min(p.ts, st.endTs), st.windowSec)} · ${p.availability_pct.toFixed(2)}%${this._trendWhyText(p, st)}`;
     tip.style.left = `${cx}%`;
     tip.style.top = `${cy}%`;
     tip.classList.toggle('flip-x', cx > 62);
+    tip.classList.toggle('edge-left', cx < 38);
     tip.classList.toggle('flip-y', cy < 22);
     pin.classList.remove('hidden');
   }
@@ -1351,6 +1414,11 @@ class _AvailabilityMethods {
   _clearTrendHighlight() {
     const pin = document.getElementById('avbTrendPin');
     if (pin) pin.classList.add('hidden');
+    const evd = document.getElementById('avbTrendEventDetail');
+    if (evd) {
+      evd.classList.add('hidden');
+      evd.innerHTML = '';
+    }
   }
 
   // Shared click-drag-to-zoom for an SVG time-series plot. `domain` is
@@ -1374,6 +1442,8 @@ class _AvailabilityMethods {
   _attachZoomDrag(plotEl, domain, onZoom, onClick) {
     if (!plotEl) return;
     plotEl.__avbZoomDomain = domain;
+    plotEl.__avbOnZoom = onZoom;
+    plotEl.__avbOnClick = onClick;
     if (plotEl.dataset.zoomBound) return;
     plotEl.dataset.zoomBound = '1';
     const box = document.createElement('div');
@@ -1411,9 +1481,13 @@ class _AvailabilityMethods {
       if (dragged) {
         const a = tsAtClientX(startX), b = tsAtClientX(e.clientX);
         const lo = Math.min(a, b), hi = Math.max(a, b);
-        if (hi - lo >= 30) onZoom(lo, hi); // ignore a near-zero accidental drag
+        if (hi - lo >= 30 && typeof plotEl.__avbOnZoom === 'function') {
+          plotEl.__avbOnZoom(lo, hi); // ignore a near-zero accidental drag
+        }
       } else {
-        onClick(tsAtClientX(e.clientX));
+        if (typeof plotEl.__avbOnClick === 'function') {
+          plotEl.__avbOnClick(tsAtClientX(e.clientX), e.clientX);
+        }
       }
     };
     plotEl.addEventListener('pointerup', finish);
@@ -1427,7 +1501,7 @@ class _AvailabilityMethods {
   // used to scale the click-snap tolerance to the zoom level (see
   // _eventDetailHtml) so "click near a boundary" means the same number of
   // PIXELS whether zoomed to a week or to ten minutes.
-  _pinEventDetail(containerId, ts, sweep, windowSec) {
+  _pinEventDetail(containerId, ts, sweep, windowSec, clientX) {
     const el = document.getElementById(containerId);
     if (!el) return;
     if (ts === null || typeof ts !== 'number') {
@@ -1435,9 +1509,18 @@ class _AvailabilityMethods {
       el.innerHTML = '';
       return;
     }
-    el.innerHTML = this._eventDetailHtml(ts, sweep, windowSec);
+    const st = this._trendHoverState;
+    let point = null;
+    if (st && Array.isArray(st.pts) && st.pts.length) {
+      let bd = Infinity;
+      for (let i = 0; i < st.pts.length; i++) {
+        const d = Math.abs(st.pts[i].ts - ts);
+        if (d < bd) { bd = d; point = st.pts[i]; }
+      }
+    }
+    el.innerHTML = this._eventDetailHtml(ts, sweep, windowSec, st, point);
     el.classList.remove('hidden');
-    if (containerId === 'avbTrendEventDetail') this._highlightTrendAt(ts);
+    if (containerId === 'avbTrendEventDetail') this._highlightTrendAt(ts, point);
   }
 
   // Stable per-occurrence reference (host + exact start second) so an
@@ -1561,89 +1644,97 @@ class _AvailabilityMethods {
   // Everything else within tolerance is real, separate context (other hosts
   // changing around the same moment) — shown below the primary row, never
   // blended into it.
-  _eventDetailHtml(ts, sweep, windowSec) {
+  _eventDetailHtml(ts, sweep, windowSec, stOverride, pointOverride) {
     if (!sweep) return '';
-    // Proportional to the visible span, not a flat 5 minutes: a fixed time
-    // radius is a huge chunk of a zoomed-in view (swallowing unrelated
-    // events) and a rounding error on a week-wide view. Floored/ceilinged so
-    // it's never useless at either extreme.
+    const st = stOverride || this._trendHoverState;
+    let point = pointOverride || null;
+    const bucketSec = (st && typeof st.bucketSec === 'number') ? st.bucketSec : 3600;
+
+    if (!point && st && Array.isArray(st.pts) && st.pts.length) {
+      let bd = Infinity;
+      for (let i = 0; i < st.pts.length; i++) {
+        const d = Math.abs(st.pts[i].ts - ts);
+        if (d < bd) { bd = d; point = st.pts[i]; }
+      }
+    }
+
+    // 1. Changes that occurred inside this point's bucket (the same slice the hover tooltip explains)
+    const bucketStart = point ? (point.ts - bucketSec) : (ts - bucketSec);
+    const bucketEnd = point ? point.ts : ts;
+    const bucketChanges = sweep.changes.filter(c => c.ts >= bucketStart && c.ts <= bucketEnd);
+
+    // 2. Also check if the user clicked very close to an exact change (within snap tolerance)
     const TOL = Math.max(15, Math.min(300, (windowSec || 86400) * 0.01));
-    const nearby = sweep.changes
-      .filter(c => Math.abs(c.ts - ts) <= TOL)
-      .sort((a, b) => {
-        const d = Math.abs(a.ts - ts) - Math.abs(b.ts - ts);
-        if (d !== 0) return d;
-        // Exact ties (two different hosts changing at the identical second)
-        // need a deterministic tiebreak, not whatever order Array.sort's
-        // stability happens to preserve — otherwise the same click can
-        // "flip" between two answers depending on unrelated array order.
-        // Recovery ticks are the only boundary actually drawn on the chart
-        // right now with full certainty at this exact x (drops draw one
-        // too, but recovery is the historically-established mark operators
-        // look for first), so it wins a dead-even tie; remaining ties break
-        // on host name so repeated clicks are always identical.
-        if (a.type !== b.type) return a.type === 'recovery' ? -1 : 1;
-        return a.host < b.host ? -1 : a.host > b.host ? 1 : 0;
-      });
-    const hostsDown = sweep.hostsDownAt(ts);
-    const timeStr = `${this._calendarFormatTime(ts)} WIB`;
+    const tolChanges = sweep.changes.filter(c => Math.abs(c.ts - ts) <= TOL);
+
+    // Combine and deduplicate
+    const changeMap = new Map();
+    bucketChanges.forEach(c => changeMap.set(c, c));
+    tolChanges.forEach(c => changeMap.set(c, c));
+    const nearby = [...changeMap.values()];
+
+    nearby.sort((a, b) => {
+      const d = Math.abs(a.ts - ts) - Math.abs(b.ts - ts);
+      if (d !== 0) return d;
+      // Recoveries prioritized over drops if distance is equal
+      if (a.type !== b.type) return a.type === 'recovery' ? -1 : 1;
+      return a.host < b.host ? -1 : a.host > b.host ? 1 : 0;
+    });
+
+    const displayTs = point ? Math.min(point.ts, st?.endTs || Infinity) : ts;
+    const timeStr = point ? this._trendTsLabel(displayTs, windowSec) : `${this._calendarFormatTime(ts)} WIB`;
     const entries = this._entriesByHost || new Map();
 
     if (!nearby.length) {
+      const evalTs = point ? point.ts : ts;
+      const hostsDown = sweep.hostsDownAt(evalTs);
       if (!hostsDown.length) {
         return `
           <div class="avb-evd-head">
             <span class="avb-evd-time">${timeStr}</span>
             <span class="avb-evd-state is-up">UP</span>
           </div>
-          <p class="avb-evd-sub">All monitored hosts up — no drop or recovery right here</p>`;
+          <p class="avb-evd-sub">All monitored hosts up — no drop or recovery in this period</p>`;
       }
-      // Clicked the middle of an ongoing outage, away from either edge — full
-      // chain per host: since when, duration-so-far, and (if this window's
-      // data already shows it recovering later) when it comes back, not just
-      // a bare name chip. Every point on an event must answer "who, since
-      // when, for how long, and did it come back."
-      const rows = hostsDown.slice(0, 8).map(iv => this._evdHostRowHtml({
+      const rows = hostsDown.map(iv => this._evdHostRowHtml({
         host: iv.host, name: iv.name, job: iv.job, id: iv.id,
-        startTs: iv.s, isOngoing: true, durationOverride: ts - iv.s,
+        startTs: iv.s, isOngoing: true, durationOverride: evalTs - iv.s,
         laterRecoveryTs: iv.isRecovery ? iv.e : null,
         openStart: iv.openStart,
         entries,
       })).join('');
-      const more = hostsDown.length > 8 ? `<span class="avb-evd-more">+${hostsDown.length - 8} more</span>` : '';
       const incidentTag = hostsDown.length > 1
-        ? `<span class="avb-evd-incident-badge" title="Multiple hosts down at this same moment">INCIDENT</span>` : '';
+        ? `<span class="avb-evd-incident-badge" title="Multiple hosts down during this period">INCIDENT</span>` : '';
       return `
         <div class="avb-evd-head">
           <span class="avb-evd-time">${timeStr}</span>
           <span class="avb-evd-state is-down">${hostsDown.length} down</span>
           ${incidentTag}
         </div>
-        <p class="avb-evd-sub">Steady — no drop or recovery right at this point</p>
-        <div class="avb-evd-rows">${rows}</div>${more}`;
+        <p class="avb-evd-sub">Steady — no drop or recovery during this period</p>
+        <div class="avb-evd-rows">${rows}</div>`;
     }
 
     const [primary, ...rest] = nearby;
+    const primaryIsOngoing = primary.type === 'recovery' ? false : !primary.interval.isRecovery;
     const primaryRow = this._evdHostRowHtml({
       host: primary.host, name: primary.name, job: primary.interval.job,
       startTs: primary.interval.s, endTs: primary.interval.e,
-      changeType: primary.type, isOngoing: !primary.interval.isRecovery,
+      changeType: primary.type, isOngoing: primaryIsOngoing,
       id: primary.interval.id, isPrimary: true,
       openStart: primary.interval.openStart,
       entries,
     });
-    const restCap = rest.slice(0, 7);
-    const restRows = restCap.map(c => this._evdHostRowHtml({
+    const restRows = rest.map(c => this._evdHostRowHtml({
       host: c.host, name: c.name, job: c.interval.job,
       startTs: c.interval.s, endTs: c.interval.e,
-      changeType: c.type, isOngoing: !c.interval.isRecovery,
+      changeType: c.type, isOngoing: c.type === 'recovery' ? false : !c.interval.isRecovery,
       id: c.interval.id,
       openStart: c.interval.openStart,
       entries,
     })).join('');
-    const more = rest.length > 7 ? `<span class="avb-evd-more">+${rest.length - 7} more</span>` : '';
     const incidentTag = nearby.length > 1
-      ? `<span class="avb-evd-incident-badge" title="Multiple state changes clustered at this moment">INCIDENT</span>` : '';
+      ? `<span class="avb-evd-incident-badge" title="Multiple state changes clustered in this period">INCIDENT</span>` : '';
     const primaryLabel = primary.type === 'drop' ? 'DOWN' : 'RECOVERED';
 
     return `
@@ -1652,9 +1743,9 @@ class _AvailabilityMethods {
         <span class="avb-evd-state ${primary.type === 'drop' ? 'is-down' : 'is-up'}">${primaryLabel}</span>
         ${incidentTag}
       </div>
-      <p class="avb-evd-sub">Selected: ${this._esc(primary.name)} ${primaryLabel.toLowerCase()} at ${this._calendarFormatTime(primary.ts)} WIB${rest.length ? ` · ${rest.length} other change${rest.length === 1 ? '' : 's'} within ${Math.round(TOL)}s` : ''}</p>
+      <p class="avb-evd-sub">Selected: ${this._esc(primary.name)} ${primaryLabel.toLowerCase()} at ${this._calendarFormatTime(primary.ts)} WIB${rest.length ? ` · ${rest.length} other change${rest.length === 1 ? '' : 's'} in this period` : ''}</p>
       <div class="avb-evd-rows">${primaryRow}</div>
-      ${restRows ? `<div class="avb-evd-rows avb-evd-rows-secondary">${restRows}</div>${more}` : ''}`;
+      ${restRows ? `<div class="avb-evd-rows avb-evd-rows-secondary">${restRows}</div>` : ''}`;
   }
 
   /* ── Downtime Calendar (day grid, below the Trend chart) ──
@@ -1786,13 +1877,13 @@ class _AvailabilityMethods {
       const avg = sums[dow] / counts[dow];
       if (avg < worstAvg) { worstAvg = avg; worstDow = dow; }
     }
-    return worstDow < 0 ? null : names[worstDow];
+    return (worstDow < 0 || worstAvg >= 100.0) ? null : names[worstDow];
   }
 
   _calendarWorstDates(daily, n) {
     return new Set(
       [...daily]
-        .filter(d => typeof d.availability_pct === 'number')
+        .filter(d => typeof d.availability_pct === 'number' && (d.availability_pct < 100.0 || (d.hosts_down && d.hosts_down > 0)))
         .sort((a, b) => a.availability_pct - b.availability_pct)
         .slice(0, n)
         .map(d => d.date)
@@ -1815,6 +1906,7 @@ class _AvailabilityMethods {
   // or an in-flight load, and _renderAvailabilityTrend persists _trendZoom
   // across every later re-render (poll ticks included) until explicitly reset.
   _zoomTrendToWibDay(dateStr) {
+    this._clearTrendHighlight();
     const dayStart = this._wibDayStartTs(dateStr);
     this._trendZoom = this._calendarDayWindow(dayStart);
     this._renderAvailabilityTrend(this._lastAvailabilityData, this._trendZoom);
@@ -1972,9 +2064,10 @@ class _AvailabilityMethods {
   // [p.ts, p.ts+bucket), whatever the trend's bucket width happens to be
   // (hourly for 24h/7d, a few hours for 30d).
   _trendWhyText(p, st) {
-    const bucketEnd = p.ts + st.bucketSec;
-    const downCount = st.sweep.downAt(p.ts);
-    const changesHere = st.sweep.changes.filter(c => c.ts >= p.ts && c.ts < bucketEnd);
+    const bucketStart = p.ts - st.bucketSec;
+    const bucketEnd = p.ts;
+    const changesHere = st.sweep.changes.filter(c => c.ts >= bucketStart && c.ts <= bucketEnd);
+    const downCount = Math.max(st.sweep.downAt(p.ts), st.sweep.downAt(bucketStart));
     if (downCount === 0 && !changesHere.length) return '';
     const drops = changesHere.filter(c => c.type === 'drop').length;
     const recs = changesHere.filter(c => c.type === 'recovery').length;
@@ -2028,8 +2121,11 @@ class _AvailabilityMethods {
 
     // Calendar weekday offset (Monday-first grid: 0=Mon, ..., 6=Sun)
     let emptyCellsHtml = '';
+    let dayCellsHtml = '';
     if (daily.length > 0) {
+      const dailyMap = new Map(daily.map(d => [d.date, d]));
       const firstDate = new Date(`${daily[0].date}T00:00:00Z`);
+      const lastDate = new Date(`${daily[daily.length - 1].date}T00:00:00Z`);
       const firstDow = firstDate.getUTCDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
       const leadingOffset = (firstDow + 6) % 7;
       if (leadingOffset > 0) {
@@ -2037,31 +2133,45 @@ class _AvailabilityMethods {
           '<div class="avb-calendar-cell is-empty" aria-hidden="true"></div>'
         ).join('');
       }
-    }
 
-    const dayCellsHtml = daily.map(d => {
-      const dayNum = new Date(`${d.date}T00:00:00Z`).getUTCDate();
-      const sevClass = this._calendarSevClass(d.availability_pct);
-      const isSelected = d.date === this._calendarOpenDate;
-      const isWorst = worstOn && worstDates.has(d.date);
-      const availPctTxt = typeof d.availability_pct === 'number' ? `${d.availability_pct.toFixed(1)}%` : '—';
-      // Cell label stays 1 decimal (no room), but "worst 3 days" tie-breaks
-      // on the full value, so two days can show the same rounded 73.3% and
-      // land on opposite sides of the highlight with no visible reason why —
-      // the tooltip/aria-label use 2 decimals so that's checkable on hover.
-      const availPctPrecise = typeof d.availability_pct === 'number' ? `${d.availability_pct.toFixed(2)}%` : '—';
-      const tooltip = `${d.date}: ${availPctPrecise} availability${d.hosts_down ? `, ${d.hosts_down} host${d.hosts_down === 1 ? '' : 's'} down` : ''}`;
-      return `
-        <button type="button" class="avb-calendar-cell ${sevClass}${isSelected ? ' is-selected' : ''}${isWorst ? ' is-worst' : ''}"
-                data-date="${d.date}"
-                title="${tooltip}"
-                aria-label="${this._calendarDayLabel(d.date)}, ${availPctPrecise} availability, ${d.hosts_down} host${d.hosts_down === 1 ? '' : 's'} down"
-                aria-pressed="${isSelected}">
-          <span class="avb-calendar-date-num">${dayNum}</span>
-          <span class="avb-calendar-avail-pct">${availPctTxt}</span>
-          ${d.hosts_down ? `<span class="avb-calendar-badge" title="${d.hosts_down} host${d.hosts_down === 1 ? '' : 's'} were down at some point on this day">${d.hosts_down}<span class="avb-calendar-badge-unit"> hosts</span></span>` : ''}
-        </button>`;
-    }).join('');
+      const cells = [];
+      let cur = new Date(firstDate.getTime());
+      while (cur <= lastDate) {
+        const y = cur.getUTCFullYear();
+        const m = String(cur.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(cur.getUTCDate()).padStart(2, '0');
+        const dateStr = `${y}-${m}-${day}`;
+        const dayNum = cur.getUTCDate();
+        const d = dailyMap.get(dateStr);
+
+        if (d) {
+          const sevClass = this._calendarSevClass(d.availability_pct);
+          const isSelected = d.date === this._calendarOpenDate;
+          const isWorst = worstOn && worstDates && worstDates.has(d.date);
+          const availPctTxt = typeof d.availability_pct === 'number' ? `${d.availability_pct.toFixed(1)}%` : '—';
+          const availPctPrecise = typeof d.availability_pct === 'number' ? `${d.availability_pct.toFixed(2)}%` : '—';
+          const tooltip = `${d.date}: ${availPctPrecise} availability${d.hosts_down ? `, ${d.hosts_down} host${d.hosts_down === 1 ? '' : 's'} down` : ''}`;
+          cells.push(`
+            <button type="button" class="avb-calendar-cell ${sevClass}${isSelected ? ' is-selected' : ''}${isWorst ? ' is-worst' : ''}"
+                    data-date="${d.date}"
+                    title="${tooltip}"
+                    aria-label="${this._calendarDayLabel(d.date)}, ${availPctPrecise} availability, ${d.hosts_down} host${d.hosts_down === 1 ? '' : 's'} down"
+                    aria-pressed="${isSelected}">
+              <span class="avb-calendar-date-num">${dayNum}</span>
+              <span class="avb-calendar-avail-pct">${availPctTxt}</span>
+              ${d.hosts_down ? `<span class="avb-calendar-badge" title="${d.hosts_down} host${d.hosts_down === 1 ? '' : 's'} were down at some point on this day">${d.hosts_down}<span class="avb-calendar-badge-unit"> hosts</span></span>` : ''}
+            </button>`);
+        } else {
+          cells.push(`
+            <div class="avb-calendar-cell is-empty" aria-hidden="true" title="${dateStr}: No data">
+              <span class="avb-calendar-date-num">${dayNum}</span>
+              <span class="avb-calendar-avail-pct">—</span>
+            </div>`);
+        }
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+      dayCellsHtml = cells.join('');
+    }
 
     gridEl.innerHTML = emptyCellsHtml + dayCellsHtml;
 
@@ -2109,6 +2219,7 @@ class _AvailabilityMethods {
     const wasSelected = this._calendarOpenDate === dateStr;
     this._calendarOpenDate = wasSelected ? null : dateStr;
     this._renderDowntimeCalendar(this.availabilityBreakdown);
+    this._clearTrendHighlight();
     if (wasSelected) {
       this._trendZoom = { lo: null, hi: null };
       this._renderAvailabilityTrend(this._lastAvailabilityData);
@@ -2517,7 +2628,7 @@ class _AvailabilityMethods {
       if (target && target.acknowledged && target.health !== 'up') {
         const who = target.acknowledged_by || 'operator';
         const when = target.acknowledged_at
-          ? new Date(target.acknowledged_at * 1000).toLocaleString()
+          ? new Date(target.acknowledged_at * 1000).toLocaleString(DATE_LOCALE)
           : '';
         ackHtml = `<span class="ara-ack-badge" title="${this._esc(when ? `Acknowledged by ${who} at ${when}` : `Acknowledged by ${who}`)}">✓ ACKED</span>`;
       } else if (target && target.health !== 'up' && !target.maintenance && !target.suppressedBy) {

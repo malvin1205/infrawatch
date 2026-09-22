@@ -90,7 +90,7 @@ _FLEET_TREND_CACHE = {}          # key -> (wall_ts, (series, slot))
 _FLEET_TREND_CACHE_TTL = 60.0    # hourly slots — a minute stale is nothing
 
 
-def _build_fleet_trend(trend_end_ts, window_seconds, instances, max_points=180, db_bucket_records=None):
+def _build_fleet_trend(trend_end_ts, window_seconds, instances, max_points=180, db_bucket_records=None, job=None):
     """Fleet availability time series for the modal's Availability Trend chart.
 
     Prefers materialized hourly bucket records (from SQLite fast-path) which
@@ -109,16 +109,21 @@ def _build_fleet_trend(trend_end_ts, window_seconds, instances, max_points=180, 
     if not instances:
         return [], slot
 
+    # Materialized series that covers only part of the window — kept as the
+    # last resort if the Prometheus fallback below can't be reached.
+    partial_series = None
+    slot_map = {}
+
     # 1. Prefer materialized hourly buckets if provided (Fast Path & 100% consistent with fleet_aggregate)
     if db_bucket_records:
-        slot_map = {}
         for r in db_bucket_records:
             b_start = float(r.get("bucket_start", 0))
+            b_end = float(r.get("bucket_end") or (b_start + slot))
             cov = float(r.get("coverage_seconds", 0) or 0)
             upt = float(r.get("uptime_seconds", 0) or 0)
             if cov <= 0:
                 continue
-            if b_start < (end - win - 60.0) or b_start >= end:
+            if b_end <= (end - win) or b_start >= end:
                 continue
             slot_key = int(math.floor(b_start / slot) * slot)
             if slot_key not in slot_map:
@@ -126,28 +131,118 @@ def _build_fleet_trend(trend_end_ts, window_seconds, instances, max_points=180, 
             slot_map[slot_key]["uptime"] += upt
             slot_map[slot_key]["coverage"] += cov
 
-        if slot_map:
-            series = []
-            for slot_key in sorted(slot_map.keys()):
-                d = slot_map[slot_key]
-                if d["coverage"] > 0:
-                    pct = round(max(0.0, min(100.0, (d["uptime"] / d["coverage"]) * 100.0)), 2)
-                    series.append({
-                        "ts": slot_key + slot,
-                        "availability_pct": pct,
-                    })
-            if len(series) >= 2:
-                return series, slot
+    series_by_ts = {}
+    for slot_key in sorted(slot_map.keys()):
+        d = slot_map[slot_key]
+        if d["coverage"] > 0:
+            pct = round(max(0.0, min(100.0, (d["uptime"] / d["coverage"]) * 100.0)), 2)
+            # The in-progress slot's underlying bucket row carries a
+            # *nominal* full-hour bucket_end (fleet.py's "bucket_end is
+            # clipped to now" convention doesn't apply to the raw column,
+            # only to coverage_seconds) — so slot_key + slot can land after
+            # `end` (now) for whichever slot is still accumulating. Left
+            # un-clipped, that point's ts is a timestamp in the future,
+            # which the Trend chart's x-axis (domain capped at `end`) then
+            # has to clamp — the chart only looked right by accident of
+            # that clamp, and any zoom ending before `end` excluded the
+            # point entirely, leaving real, already-computed partial-slot
+            # data unused.
+            series_by_ts[min(slot_key + slot, end)] = pct
 
-    # 2. Prometheus TSDB fallback (query_range)
-    trend_timeout = max(6.0, min(25.0, win / 120000.0))
+    # Every slot boundary the requested window is supposed to cover, so gaps
+    # in the materialized series can be found by set difference rather than
+    # by an aggregate coverage ratio. A single missing slot in the middle of
+    # an otherwise-complete month used to be invisible to the old ">=80% of
+    # the window" check — it just accepted the 89%-complete series as good
+    # enough and returned it, silently dropping whichever slots (often a
+    # contiguous run at one edge, e.g. the oldest day the depth backfill
+    # hasn't reached yet) had no SQLite row. A calendar day built from the
+    # SAME db_bucket_records could show a confident percentage for that
+    # exact day (via engine.py's own hybrid rollup) while the Trend chart —
+    # reading nothing but this now-accepted-as-"good enough" series — showed
+    # no line there at all.
+    # The grid to check for gaps against must be the SAME one series_by_ts's
+    # keys actually land on: epoch-aligned slot boundaries (slot_key + slot,
+    # per the materialized loop above), not a grid anchored to `start` (which
+    # is itself anchored to "now" and essentially never lines up with epoch-
+    # aligned boundaries). Comparing against a `start`-anchored grid instead
+    # made EVERY tick look "missing" regardless of real coverage — turning
+    # every request into a full-window Prometheus re-query (the 8s+ slowdown
+    # this comment is warning against) and merging in a second, slightly
+    # offset near-duplicate point for every real one already in series_by_ts.
+    first_slot_key = int(math.floor(start / slot) * slot)
+    last_slot_key = int(math.floor((end - 1) / slot) * slot)
+    expected_ts = set()
+    k = first_slot_key
+    while k <= last_slot_key:
+        expected_ts.add(min(k + slot, end))
+        k += slot
+    missing_ts = expected_ts - set(series_by_ts.keys())
+    # A single missing tick right at `end` is expected, not a gap: the
+    # in-progress bucket's point is clipped to `end` itself, which can land
+    # a few seconds off the epoch-aligned grid depending on exactly when the
+    # request lands within the current slot. Only a gap of 2+ slots (a real
+    # missing stretch, e.g. the depth backfill not having reached this far
+    # back yet) triggers the fallback below.
+    if len(missing_ts) < 2:
+        missing_ts = set()
 
-    # 60s cache
-    ck = (tuple(sorted(instances)), int(win), slot, max_points)
+    if len(series_by_ts) >= 2 and not missing_ts:
+        return [{"ts": ts, "availability_pct": series_by_ts[ts]} for ts in sorted(series_by_ts)], slot
+    if len(series_by_ts) >= 2:
+        partial_series = [{"ts": ts, "availability_pct": series_by_ts[ts]} for ts in sorted(series_by_ts)]
+
+    # 2. Prometheus TSDB fallback — fills whichever slots the materialized
+    # series above didn't have a row for (real telemetry from the same TSDB
+    # engine.py's own hybrid path already trusts for the day/overall
+    # figures), or replaces it entirely if there was no usable materialized
+    # data at all. A slot the materialized pass already priced is never
+    # overwritten here — one slot never has two disagreeing sources.
+    #
+    # Queried over [min(missing_ts), max(missing_ts)] ONLY, not the full
+    # [start, end] window — a 22-day MTD range with one missing day at the
+    # edge doesn't need a 22-day query_range to fill it. Re-querying the
+    # whole window on every gap (which, mid-backfill, is most requests) is
+    # what made this fallback take 20s+ before; scoping it to the actual gap
+    # keeps it proportional to what's actually missing.
+    gap_start, gap_end = min(missing_ts), max(missing_ts)
+    trend_timeout = max(6.0, min(25.0, (gap_end - gap_start) / 120000.0))
+
+    # 60s cache — keyed on the Prometheus-only result (a dict of {ts: pct}),
+    # so a cache hit still gets merged against the CURRENT slot_map below
+    # rather than short-circuiting the gap-fill entirely. slot_map changes
+    # between requests as the aggregator materializes more hours; the
+    # Prometheus side of the merge doesn't need to be re-fetched that often.
+    ck = (job or "", tuple(sorted(instances)), gap_start, gap_end, slot)
     hit = _FLEET_TREND_CACHE.get(ck)
-    if hit and (time.time() - hit[0]) < _FLEET_TREND_CACHE_TTL:
-        return hit[1]
+    prom_by_ts = hit[1] if hit and (time.time() - hit[0]) < _FLEET_TREND_CACHE_TTL else None
 
+    if prom_by_ts is None:
+        prom_by_ts = _query_prometheus_trend(job, instances, gap_start, gap_end, slot, trend_timeout)
+        _FLEET_TREND_CACHE[ck] = (time.time(), prom_by_ts)
+
+    for ts, pct in prom_by_ts.items():
+        if ts not in series_by_ts:
+            series_by_ts[ts] = pct
+
+    if len(series_by_ts) >= 2:
+        return [{"ts": ts, "availability_pct": series_by_ts[ts]} for ts in sorted(series_by_ts)], slot
+    if partial_series:
+        # Prometheus gave us nothing usable and the materialized series alone
+        # was too short — a short materialized series still beats an empty
+        # chart.
+        return partial_series, slot
+    return [], slot
+
+
+def _query_prometheus_trend(job, instances, start, end, slot, timeout):
+    """One query_range sweep of the real TSDB for [start, end] at `slot`
+    resolution, tried as a few PromQL variants until one returns data.
+    Returns {ts: availability_pct} — a plain lookup, not the API's point-list
+    shape, since the only caller merges it into a materialized series keyed
+    the same way. Never raises; an unreachable/erroring Prometheus just
+    yields an empty dict, same as "no data available".
+    """
     # Classify instances to properly query mixed fleets (probe_success vs up)
     try:
         try:
@@ -162,6 +257,12 @@ def _build_fleet_trend(trend_end_ts, window_seconds, instances, max_points=180, 
     up_instances = [i for i in instances if not job_map.get(i, "").startswith("blackbox")]
 
     queries_to_try = []
+    if job and job != "all":
+        job_escaped = job.replace('"', '\\"')
+        is_bb = job.startswith("blackbox")
+        metric = "probe_success" if is_bb else "up"
+        queries_to_try.append(f"avg(avg_over_time({metric}{{job=\"{job_escaped}\"}}[{slot}s]))")
+
     if probe_instances and up_instances:
         # Mixed fleet (All Jobs): combine probe_success and up with instance-weighted averages
         p_re = "|".join(re.escape(i) for i in probe_instances)
@@ -192,7 +293,7 @@ def _build_fleet_trend(trend_end_ts, window_seconds, instances, max_points=180, 
             f"&start={start}&end={end}&step={slot}"
         )
         try:
-            raw, _ = promclient.fetch_prometheus_json(path, use_cache=True, cache_ttl=45.0, timeout=trend_timeout)
+            raw, _ = promclient.fetch_prometheus_json(path, use_cache=True, cache_ttl=45.0, timeout=timeout)
         except Exception:
             logger.warning("fleet trend query_range failed for expr: %s", expr[:60], exc_info=True)
             raw = None
@@ -201,7 +302,7 @@ def _build_fleet_trend(trend_end_ts, window_seconds, instances, max_points=180, 
         result = raw.get("data", {}).get("result", [])
         if not result:
             continue
-        series = []
+        by_ts = {}
         for pair in result[0].get("values", []):
             try:
                 ts = int(float(pair[0]))
@@ -210,16 +311,11 @@ def _build_fleet_trend(trend_end_ts, window_seconds, instances, max_points=180, 
                 continue
             if frac != frac:  # NaN -> no samples in this slot, leave a gap
                 continue
-            series.append({
-                "ts": ts,
-                "availability_pct": round(max(0.0, min(100.0, frac * 100.0)), 2),
-            })
-        if series:
-            _FLEET_TREND_CACHE[ck] = (time.time(), (series, slot))
-            return series, slot
+            by_ts[ts] = round(max(0.0, min(100.0, frac * 100.0)), 2)
+        if by_ts:
+            return by_ts
 
-    _FLEET_TREND_CACHE[ck] = (time.time(), ([], slot))
-    return [], slot
+    return {}
 
 
 # Cap on how many downtime events a single day returns — a bad week on a big
