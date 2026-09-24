@@ -240,308 +240,264 @@
   box-shadow: 0 1px 2px rgba(220, 38, 38, 0.25);
 }
 
-/* Top 5 Summary Cards Light Mode - Soft Filled Surfaces */
+/* Top 5 Summary Cards Light Mode - Clean White Surface + Black Typography */
 [data-theme="light"] .summary-card {
-  border-radius: 12px;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease !important;
+}
+[data-theme="light"] .summary-card:hover {
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06) !important;
+}
+
+/* Metric values: ALL CRISP BLACK / CHARCOAL */
+[data-theme="light"] .summary-card .sc-value {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+
+/* Metric labels: CALM SLATE */
+[data-theme="light"] .summary-card .sc-label {
+  color: #475569 !important;
+  font-weight: 600 !important;
 }
 
 /* Card 1: Total Hosts */
-[data-theme="light"] .summary-card:nth-child(1) {
-  background: #f0f7ff;
-  border: 1px solid #d0e3fc;
-  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.05);
-}
-[data-theme="light"] .summary-card:nth-child(1):hover {
-  filter: brightness(0.97);
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.1);
-}
 [data-theme="light"] .summary-card:nth-child(1) .sc-icon-box {
-  background: #dbeafe;
-  color: #1d4ed8;
-  border: 1px solid #bfdbfe;
-}
-[data-theme="light"] .summary-card:nth-child(1) .sc-value {
-  color: #1e40af !important;
-}
-[data-theme="light"] .summary-card:nth-child(1) .sc-label {
+  background: #eff6ff !important;
   color: #2563eb !important;
-  font-weight: 700 !important;
+  border: 1px solid #dbeafe !important;
 }
 
 /* Card 2: Online */
-[data-theme="light"] .summary-card:nth-child(2) {
-  background: #f0fdf4;
-  border: 1px solid #c7f3d6;
-  box-shadow: 0 1px 3px rgba(34, 197, 94, 0.05);
-}
-[data-theme="light"] .summary-card:nth-child(2):hover {
-  filter: brightness(0.97);
-  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.1);
-}
 [data-theme="light"] .summary-card:nth-child(2) .sc-icon-box {
-  background: #dcfce7;
-  color: #15803d;
-  border: 1px solid #bbf7d0;
-}
-[data-theme="light"] .summary-card:nth-child(2) .sc-value {
-  color: #166534 !important;
-}
-[data-theme="light"] .summary-card:nth-child(2) .sc-label {
-  color: #15803d !important;
-  font-weight: 700 !important;
+  background: #f0fdf4 !important;
+  color: #16a34a !important;
+  border: 1px solid #bbf7d0 !important;
 }
 
 /* Card 3: Warning */
-[data-theme="light"] .summary-card:nth-child(3) {
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.05);
-}
-[data-theme="light"] .summary-card:nth-child(3):hover {
-  filter: brightness(0.97);
-  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.1);
-}
 [data-theme="light"] .summary-card:nth-child(3) .sc-icon-box {
-  background: #fef3c7;
-  color: #b45309;
-  border: 1px solid #fde68a;
-}
-[data-theme="light"] .summary-card:nth-child(3) .sc-value {
-  color: #854d0e !important;
-}
-[data-theme="light"] .summary-card:nth-child(3) .sc-label {
-  color: #b45309 !important;
-  font-weight: 700 !important;
+  background: #fffbeb !important;
+  color: #d97706 !important;
+  border: 1px solid #fde68a !important;
 }
 
 /* Card 4: Offline */
-[data-theme="light"] .summary-card:nth-child(4) {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  box-shadow: 0 1px 3px rgba(239, 68, 68, 0.06);
-}
-[data-theme="light"] .summary-card:nth-child(4):hover {
-  filter: brightness(0.97);
-  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.12);
-}
 [data-theme="light"] .summary-card:nth-child(4) .sc-icon-box {
-  background: #fee2e2;
-  color: #b91c1c;
-  border: 1px solid #fecaca;
-}
-[data-theme="light"] .summary-card:nth-child(4) .sc-value {
-  color: #991b1b !important;
-}
-[data-theme="light"] .summary-card:nth-child(4) .sc-label {
+  background: #fef2f2 !important;
   color: #dc2626 !important;
-  font-weight: 700 !important;
+  border: 1px solid #fecaca !important;
 }
 [data-theme="light"] .summary-card:nth-child(4) .sc-sub {
-  color: #b91c1c !important;
-  font-weight: 600 !important;
+  color: #dc2626 !important;
+  font-weight: 500 !important;
 }
 
 /* Card 5: Availability */
-[data-theme="light"] .summary-card:nth-child(5) {
-  background: #f0f9ff;
-  border: 1px solid #cae8ff;
-  box-shadow: 0 1px 3px rgba(2, 132, 199, 0.05);
-}
-[data-theme="light"] .summary-card:nth-child(5):hover {
-  filter: brightness(0.97);
-  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.1);
-}
 [data-theme="light"] .summary-card:nth-child(5) .sc-icon-box {
-  background: #e0f2fe;
-  color: #0284c7;
-  border: 1px solid #bae6fd;
-}
-[data-theme="light"] .summary-card:nth-child(5) .sc-value {
-  color: #0369a1 !important;
-}
-[data-theme="light"] .summary-card:nth-child(5) .sc-label {
+  background: #f0f9ff !important;
   color: #0284c7 !important;
-  font-weight: 700 !important;
+  border: 1px solid #bae6fd !important;
 }
 [data-theme="light"] .summary-card:nth-child(5) .sc-sub {
-  color: #0369a1 !important;
-  font-weight: 600 !important;
+  color: #64748b !important;
+  font-weight: 500 !important;
 }
 [data-theme="light"] .summary-card:nth-child(5) .sc-detail-btn {
-  background: #ffffff;
-  border: 1px solid #bae6fd;
-  color: #0369a1;
-  box-shadow: 0 1px 2px rgba(2, 132, 199, 0.06);
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  color: #334155 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
 }
 [data-theme="light"] .summary-card:nth-child(5) .sc-detail-btn:hover,
 [data-theme="light"] .summary-card:nth-child(5) .sc-detail-btn:focus-visible {
-  background: #e0f2fe;
-  border-color: #7dd3fc;
-  color: #0284c7;
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
 }
 
-/* Host Grid Light Mode Polish - Soft Filled Surfaces, Clean & Soothing */
+/* Host Grid Cards: Model Card 2 (Desaturated Nordic Sage / Clay Wash) + Clean Contrast */
 [data-theme="light"] .host-card.hc-up {
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  box-shadow: 0 1px 2px rgba(34, 197, 94, 0.05);
+  background: #f2f7f4 !important;
+  border: 1px solid #d4e5da !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02) !important;
 }
 [data-theme="light"] .host-card.hc-up:hover {
-  background: #dcfce7;
-  border-color: #86efac;
-  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.12);
+  background: #e7f1eb !important;
+  border-color: #bdd6c6 !important;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.06) !important;
 }
 [data-theme="light"] .host-card.hc-up .hc-ip {
-  color: #14532d !important;
-  font-weight: 700 !important;
+  color: #0f172a !important;
+  font-weight: 600 !important;
 }
 [data-theme="light"] .host-card.hc-up .hc-latency {
-  color: #166534 !important;
-  font-weight: 500 !important;
+  color: #1e7046 !important;
+  font-weight: 600 !important;
+}
+[data-theme="light"] .host-card.hc-up .hc-uptime {
+  color: #3d7055 !important;
+  opacity: 0.85 !important;
 }
 
+/* Down Unacknowledged: Muted Terracotta / Soft Clay Fill */
 [data-theme="light"] .host-card.hc-down:not(.hc-acked):not(.hc-suppressed) {
-  background: #fee2e2;
-  border: 1.5px solid #f87171;
-  box-shadow: 0 1px 3px rgba(239, 68, 68, 0.12);
+  background: #f9eeee !important;
+  border: 1.5px solid #e8bcbc !important;
+  box-shadow: 0 1px 3px rgba(185, 28, 28, 0.08) !important;
 }
 [data-theme="light"] .host-card.hc-down:not(.hc-acked):not(.hc-suppressed):hover {
-  background: #fecaca;
-  border-color: #ef4444;
+  background: #f3dede !important;
+  border-color: #db9f9f !important;
 }
 [data-theme="light"] .host-card.hc-down:not(.hc-acked):not(.hc-suppressed) .hc-ip {
-  color: #7f1d1d !important;
+  color: #782424 !important;
   font-weight: 700 !important;
 }
 [data-theme="light"] .host-card.hc-down:not(.hc-acked):not(.hc-suppressed) .hc-latency {
-  color: #991b1b !important;
-  font-weight: 500 !important;
+  color: #943131 !important;
+  font-weight: 600 !important;
+}
+[data-theme="light"] .host-card.hc-down:not(.hc-acked):not(.hc-suppressed) .hc-uptime {
+  color: #943131 !important;
+  opacity: 0.85 !important;
 }
 
+/* Down Acknowledged: Very Muted Soft Blush Slate */
 [data-theme="light"] .host-card.hc-down.hc-acked {
-  background: #fdf2f2;
-  border: 1px solid #fca5a5;
-  box-shadow: 0 1px 2px rgba(239, 68, 68, 0.05);
+  background: #f8f2f2 !important;
+  border: 1px solid #ebd8d8 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02) !important;
 }
 [data-theme="light"] .host-card.hc-down.hc-acked:hover {
-  background: #fee2e2;
-  border-color: #f87171;
+  background: #f2e7e7 !important;
+  border-color: #dfc4c4 !important;
 }
 [data-theme="light"] .host-card.hc-down.hc-acked .hc-ip {
-  color: #7f1d1d !important;
-  font-weight: 700 !important;
+  color: #782424 !important;
+  font-weight: 600 !important;
 }
 [data-theme="light"] .host-card.hc-down.hc-acked .hc-latency {
-  color: #991b1b !important;
-  font-weight: 500 !important;
+  color: #943131 !important;
 }
 [data-theme="light"] .host-card.hc-down.hc-acked .hc-ack-mark {
-  color: #dc2626;
+  color: #943131 !important;
+}
+[data-theme="light"] .host-card.hc-down.hc-acked .hc-uptime {
+  color: #943131 !important;
+  opacity: 0.8 !important;
 }
 
+/* Slow: Soft Warm Linen */
 [data-theme="light"] .host-card.hc-slow {
-  background: #fef9c3;
-  border: 1px solid #fde68a;
-  box-shadow: 0 1px 2px rgba(245, 158, 11, 0.05);
+  background: #f9f5eb !important;
+  border: 1px solid #ecdebe !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02) !important;
 }
 [data-theme="light"] .host-card.hc-slow:hover {
-  background: #fef08a;
-  border-color: #facc15;
+  background: #f2ebd7 !important;
+  border-color: #dec89c !important;
 }
 [data-theme="light"] .host-card.hc-slow .hc-ip {
-  color: #78350f !important;
-  font-weight: 700 !important;
+  color: #5c4217 !important;
+  font-weight: 600 !important;
 }
 [data-theme="light"] .host-card.hc-slow .hc-latency {
-  color: #92400e !important;
-  font-weight: 500 !important;
+  color: #78581e !important;
+}
+[data-theme="light"] .host-card.hc-slow .hc-uptime {
+  color: #78581e !important;
+  opacity: 0.8 !important;
 }
 
+/* No data & Maintenance */
 [data-theme="light"] .host-card.hc-nodata {
-  background: #f1f5f9;
-  border: 1px dashed #cbd5e1;
+  background: #f1f5f9 !important;
+  border: 1px dashed #cbd5e1 !important;
 }
 [data-theme="light"] .host-card.hc-nodata:hover {
-  background: #e2e8f0;
+  background: #e2e8f0 !important;
 }
 [data-theme="light"] .host-card.hc-nodata .hc-ip {
   color: #334155 !important;
-  font-weight: 700 !important;
+  font-weight: 600 !important;
 }
-[data-theme="light"] .host-card.hc-nodata .hc-latency {
+[data-theme="light"] .host-card.hc-nodata .hc-latency,
+[data-theme="light"] .host-card.hc-nodata .hc-uptime {
   color: #64748b !important;
 }
 
 [data-theme="light"] .host-card.hc-maintenance {
-  background:
-    repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.03) 0px, rgba(0, 0, 0, 0.03) 10px, transparent 10px, transparent 20px),
-    #f1f5f9;
-  border: 1px solid #cbd5e1;
+  background: repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.03) 0px, rgba(0, 0, 0, 0.03) 10px, transparent 10px, transparent 20px), #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
 }
 [data-theme="light"] .host-card.hc-maintenance:hover {
-  background:
-    repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.04) 0px, rgba(0, 0, 0, 0.04) 10px, transparent 10px, transparent 20px),
-    #e2e8f0;
+  background: repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.04) 0px, rgba(0, 0, 0, 0.04) 10px, transparent 10px, transparent 20px), #e2e8f0 !important;
 }
 [data-theme="light"] .host-card.hc-maintenance .hc-ip {
   color: #334155 !important;
 }
-[data-theme="light"] .host-card.hc-maintenance .hc-latency {
+[data-theme="light"] .host-card.hc-maintenance .hc-latency,
+[data-theme="light"] .host-card.hc-maintenance .hc-uptime {
   color: #64748b !important;
 }
 
 [data-theme="light"] .host-card.hc-down.hc-suppressed {
-  background: #f3e8ff;
-  border: 1px dotted #d8b4fe;
+  background: #f5f0fb !important;
+  border: 1px dotted #d8b4fe !important;
 }
 [data-theme="light"] .host-card.hc-down.hc-suppressed:hover {
-  background: #e9d5ff;
+  background: #ece3f7 !important;
 }
 [data-theme="light"] .host-card.hc-down.hc-suppressed .hc-ip {
   color: #581c87 !important;
-  font-weight: 700 !important;
+  font-weight: 600 !important;
 }
-[data-theme="light"] .host-card.hc-down.hc-suppressed .hc-latency {
+[data-theme="light"] .host-card.hc-down.hc-suppressed .hc-latency,
+[data-theme="light"] .host-card.hc-down.hc-suppressed .hc-uptime {
   color: #7e22ce !important;
 }
 
-/* Status Legend Ribbon Light Mode */
+/* Status Legend Ribbon */
 [data-theme="light"] .brand-status-ribbon {
   background: #ffffff !important;
   border: 1px solid #e2e8f0 !important;
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.06) !important;
 }
 [data-theme="light"] .brand-status-ribbon .hl-chip {
-  color: #334155;
+  color: #334155 !important;
 }
 [data-theme="light"] .brand-status-ribbon .hl-chip:hover {
-  background: #f1f5f9;
-  color: #0f172a;
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
 }
 [data-theme="light"] .brand-status-ribbon .hl-divider {
-  background: #e2e8f0;
+  background: #e2e8f0 !important;
 }
 
-/* Status Legend Swatches in Light Mode - Exactly matching card fills */
+/* Status Legend Swatches in Light Mode - Matching blended palette */
 [data-theme="light"] .hl-swatch.hl-up {
-  background: #dcfce7 !important;
-  border: 1px solid #86efac !important;
+  background: #e7f1eb !important;
+  border: 1px solid #bdd6c6 !important;
 }
 [data-theme="light"] .hl-swatch.hl-slow {
-  background: #fef9c3 !important;
-  border: 1px solid #fde68a !important;
+  background: #f9f5eb !important;
+  border: 1px solid #ecdebe !important;
 }
 [data-theme="light"] .hl-swatch.hl-down {
-  background: #fee2e2 !important;
-  border: 1.5px solid #f87171 !important;
+  background: #f9eeee !important;
+  border: 1.5px solid #e8bcbc !important;
 }
 [data-theme="light"] .hl-swatch.hl-acked {
-  background: #fdf2f2 !important;
-  border: 1px solid #fca5a5 !important;
+  background: #f8f2f2 !important;
+  border: 1px solid #ebd8d8 !important;
 }
 [data-theme="light"] .hl-swatch.hl-supp {
-  background: #f3e8ff !important;
+  background: #f5f0fb !important;
   border: 1px dotted #d8b4fe !important;
 }
 [data-theme="light"] .hl-swatch.hl-maint {
@@ -551,32 +507,6 @@
 [data-theme="light"] .hl-swatch.hl-nodata {
   background: #f1f5f9 !important;
   border: 1px dashed #cbd5e1 !important;
-}
-
-/* Host Card Uptime/Downtime Subtext - Legible High Contrast in Light Mode */
-[data-theme="light"] .host-card .hc-uptime {
-  font-weight: 500 !important;
-}
-[data-theme="light"] .host-card.hc-up .hc-uptime {
-  color: #166534 !important;
-  opacity: 0.85;
-}
-[data-theme="light"] .host-card.hc-down .hc-uptime {
-  color: #991b1b !important;
-  opacity: 0.85;
-}
-[data-theme="light"] .host-card.hc-slow .hc-uptime {
-  color: #854d0e !important;
-  opacity: 0.85;
-}
-[data-theme="light"] .host-card.hc-nodata .hc-uptime,
-[data-theme="light"] .host-card.hc-maintenance .hc-uptime {
-  color: #64748b !important;
-  opacity: 0.85;
-}
-[data-theme="light"] .host-card.hc-down.hc-suppressed .hc-uptime {
-  color: #7e22ce !important;
-  opacity: 0.85;
 }
 
 /* Brand Mark Node Colors in Light Mode - Harmonious, Soft Tones */
