@@ -561,4 +561,84 @@
 [data-theme="light"] .brand-btn:hover .node-4,
 [data-theme="light"] .topnav-brand.is-open .brand-btn .node-4 { fill: #9333ea; }
 
+/* Modal Backdrop & Overlays in Light Mode (Translucent Slate Scrim) */
+[data-theme="light"] .modal-backdrop,
+[data-theme="light"] .modal-overlay {
+  background: rgba(15, 23, 42, 0.45) !important;
+  backdrop-filter: blur(4px) !important;
+  -webkit-backdrop-filter: blur(4px) !important;
+}
+
+/* Modal Info Box Callouts */
+.modal-info-box {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  background: rgba(59, 130, 246, 0.08);
+  border-left: 3px solid #3b82f6;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.modal-info-box strong {
+  color: var(--accent);
+  display: block;
+  margin-bottom: 2px;
+}
+[data-theme="light"] .modal-info-box {
+  background: #eff6ff !important;
+  border-left: 3px solid #2563eb !important;
+  color: #1e40af !important;
+}
+[data-theme="light"] .modal-info-box strong {
+  color: #1d4ed8 !important;
+}
+
+/* Endpoint Readonly Alert */
+.endpoint-readonly-alert {
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--r-sm);
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--warning);
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+[data-theme="light"] .endpoint-readonly-alert {
+  background: #fffbeb !important;
+  border-color: #fde68a !important;
+  color: #b45309 !important;
+}
+
+/* Drawer Sparkline Badge */
+.sparkline-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid var(--success-border);
+  font-weight: 600;
+}
+[data-theme="light"] .sparkline-badge {
+  background: #dcfce7 !important;
+  color: #15803d !important;
+  border-color: #86efac !important;
+}
+
+/* Multi-select Checkbox in Light Mode */
+[data-theme="light"] .hc-select-box {
+  border: 1.5px solid #94a3b8 !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+[data-theme="light"] .host-card.hc-selected .hc-select-box {
+  background: #0284c7 !important;
+  border-color: #0284c7 !important;
+}
+
 

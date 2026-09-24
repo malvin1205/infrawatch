@@ -449,14 +449,17 @@
 }
 .avb .avb-trend-tip {
   transform: translate(-50%, calc(-100% - 8px));
-  padding: 3px 6px;
-  border-radius: 4px;
-  background: var(--bg-elevated, #1c2330);
-  border: 1px solid var(--border);
-  color: var(--text-high, #e6edf3);
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #f8fafc;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   font-family: var(--avb-font-mono);
-  font-size: 9.5px;
+  font-size: 10px;
   white-space: nowrap;
+  font-weight: 500;
+  z-index: 10;
 }
 .avb .avb-trend-tip.flip-x { transform: translate(-100%, calc(-100% - 8px)); }
 .avb .avb-trend-tip.flip-y { transform: translate(-50%, 8px); }
