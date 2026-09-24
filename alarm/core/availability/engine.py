@@ -1,3 +1,4 @@
+from __future__ import annotations
 """AvailabilityEngine: the deep domain module for fleet availability,
 hybrid TSDB/SQLite reconciliation, SLA error budgets, and bucket aggregation.
 """
@@ -24,7 +25,9 @@ from .helpers import (
     _attach_sla_budgets,
     _availability_status_counts,
     _build_fleet_trend,
+    _build_fleet_incidents,
     _build_daily_downtime,
+    clear_helpers_caches,
 )
 
 try:
@@ -33,11 +36,14 @@ try:
         SCRAPE_INTERVAL_SECONDS,
         _AVAIL_FRESHNESS_TOLERANCE_SEC,
         _AVAIL_STALE_BUCKET_TOLERANCE_SEC,
+        AVAIL_TREND_MIN_REPORTING_RATIO,
+        AVAIL_TARGET_WHITELIST,
     )
     from storage import (
         AvailabilityBucketRepository,
         SlaTargetRepository,
     )
+    from storage.repositories.availability import norm_source
     from core.monitoring import (
         client as default_prom_client,
         queries as default_prom_queries,
@@ -58,11 +64,14 @@ except (ImportError, ValueError):
         SCRAPE_INTERVAL_SECONDS,
         _AVAIL_FRESHNESS_TOLERANCE_SEC,
         _AVAIL_STALE_BUCKET_TOLERANCE_SEC,
+        AVAIL_TREND_MIN_REPORTING_RATIO,
+        AVAIL_TARGET_WHITELIST,
     )
     from alarm.storage import (
         AvailabilityBucketRepository,
         SlaTargetRepository,
     )
+    from alarm.storage.repositories.availability import norm_source
     from alarm.core.monitoring import (
         client as default_prom_client,
         queries as default_prom_queries,
@@ -123,7 +132,8 @@ class AvailabilityEngine:
         self._deep_swept_stale: frozenset = frozenset()
 
     def invalidate_cache(self, job: Optional[str] = None, instance: Optional[str] = None) -> int:
-        """Evict matching cached availability queries."""
+        """Evict matching cached availability queries and clear module-level trend caches."""
+        clear_helpers_caches()
         return self.cache.invalidate(job=job, instance=instance)
 
     def get_availability(self, query: AvailabilityQuery) -> AvailabilityReport:
@@ -144,6 +154,9 @@ class AvailabilityEngine:
             active_url = endpoints_data.get("active") or getattr(self.prom_client, "_DEFAULT_PROM_URL", "http://prometheus:9090")
         except Exception:
             active_url = "http://prometheus:9090"
+        # Every number in this report comes from this ONE server (no failover,
+        # no other server's SQLite rows) and whitelisted targets only.
+        source = norm_source(active_url)
 
         cache_key, effective_ttl = AvailabilityCache.derive_cache_key(
             endpoint=active_url,
@@ -178,20 +191,31 @@ class AvailabilityEngine:
             req_start = req_end - (query.minutes * 60.0)
 
             try:
-                monitored_instances = get_monitored_instances(job_filter=query.job)
-                instance_job_map = get_instance_job_map(job_filter=query.job)
+                instance_job_map = self._scoped_job_map(query.job, source)
+                monitored_instances = sorted(instance_job_map)
             except Exception:
                 monitored_instances = []
                 instance_job_map = {}
+            if not monitored_instances:
+                # Server unreachable: still report its OWN materialized history.
+                try:
+                    monitored_instances = sorted({r["instance"] for r in self.bucket_repo.get_bucket_records(
+                        query.job, req_start, req_end, source=source)})
+                except Exception:
+                    monitored_instances = []
 
             if not monitored_instances:
                 empty_summary = summarize_entries([], query.minutes, sla_threshold=query.sla_target_pct)
                 payload = self._build_empty_payload(query, req_end, empty_summary)
+                # Still labelled: an unreachable server must read as "server X: no data",
+                # not as an unscoped empty view.
+                payload["scope"] = {"source": source, "whitelist_enforced": AVAIL_TARGET_WHITELIST is not None and bool(set(monitored_instances) & AVAIL_TARGET_WHITELIST),
+                                    "instances": 0}
                 self.cache.set(cache_key, payload, now=now_under_lock)
                 return AvailabilityReport(payload)
 
             # Maintenance windows overlapping this query window
-            maint_by_inst = self._resolve_maintenance_windows(req_start, req_end, query.job, monitored_instances)
+            maint_by_inst = self._resolve_maintenance_windows(req_start, req_end, query.job, monitored_instances, source)
 
             # Retrieve SQLite bucket records in the window [req_start, req_end]
             t_sqlite_start = time.perf_counter()
@@ -201,6 +225,7 @@ class AvailabilityEngine:
                     start_time=req_start,
                     end_time=req_end,
                     instances=monitored_instances,
+                    source=source,
                 )
             except Exception:
                 db_bucket_records = []
@@ -226,6 +251,7 @@ class AvailabilityEngine:
                     sqlite_duration_ms=sqlite_duration_ms,
                     t_req_start=t_req_start,
                     instance_job_map=instance_job_map,
+                    source=source,
                 )
             else:
                 # HYBRID PATH: Merge live Prometheus TSDB samples with SQLite buckets
@@ -241,6 +267,7 @@ class AvailabilityEngine:
                     sqlite_duration_ms=sqlite_duration_ms,
                     t_req_start=t_req_start,
                     instance_job_map=instance_job_map,
+                    source=source,
                 )
 
             # A target removed from monitoring keeps its already-materialized
@@ -258,13 +285,28 @@ class AvailabilityEngine:
                 maint_by_inst=maint_by_inst,
                 sla_target_map=sla_target_map,
                 payload=payload,
+                source=source,
             )
 
             # Downtime Calendar section — derived from the SAME db_bucket_records
             # already fetched above for this request, regardless of which path
-            # ran. Covers both branches from one call site.
-            payload["daily"] = _build_daily_downtime(db_bucket_records, req_start, req_end)
+            # ran. Missing historical days are reconstructed from Prometheus.
+            payload["daily"] = _build_daily_downtime(
+                db_bucket_records=db_bucket_records,
+                req_start=req_start,
+                req_end=req_end,
+                instances=monitored_instances,
+                job=query.job,
+                maint_by_inst=maint_by_inst,
+                instance_job_map=instance_job_map,
+                source=source,
+            )
             payload["job"] = query.job
+            payload["scope"] = {
+                "source": source,
+                "whitelist_enforced": AVAIL_TARGET_WHITELIST is not None and bool(set(monitored_instances) & AVAIL_TARGET_WHITELIST),
+                "instances": len(monitored_instances),
+            }
 
             if not query.debug:
                 payload.pop("_trace", None)
@@ -285,7 +327,14 @@ class AvailabilityEngine:
         """
         curr_time = now if now is not None else time.time()
         try:
-            instance_job_map = get_instance_job_map("all")
+            source = norm_source(self.prom_client.load_endpoints().get("active"))
+        except Exception:
+            source = ""
+        if not source:
+            return 0
+        try:
+            self._validate_whitelist(source)
+            instance_job_map = self._scoped_job_map("all", source)
             monitored = sorted(instance_job_map.keys())
         except Exception:
             instance_job_map = {}
@@ -294,9 +343,9 @@ class AvailabilityEngine:
         if not monitored:
             return 0
 
-        latest_end = self.bucket_repo.get_latest_bucket_end("all")
+        latest_end = self.bucket_repo.get_latest_bucket_end("all", source=source)
         windows_to_aggregate = self._availability_aggregation_windows(curr_time, latest_end)
-        depth_window = self._next_depth_backfill_window(monitored, curr_time)
+        depth_window = self._next_depth_backfill_window(monitored, curr_time, source)
         if depth_window is not None:
             windows_to_aggregate = [depth_window] + windows_to_aggregate
         total_written = 0
@@ -327,7 +376,7 @@ class AvailabilityEngine:
             }
 
             if executor:
-                futures = {k: executor.submit(self.prom_queries.fetch_prom_query_map, q, 10.0, 15.0) for k, q in queries.items()}
+                futures = {k: executor.submit(self.prom_queries.fetch_prom_query_map, q, 10.0, 15.0, source) for k, q in queries.items()}
                 results = {}
                 for k, f in futures.items():
                     try:
@@ -338,17 +387,17 @@ class AvailabilityEngine:
                 results = {}
                 for k, q in queries.items():
                     try:
-                        results[k] = self.prom_queries.fetch_prom_query_map(q, 10.0, 15.0)
+                        results[k] = self.prom_queries.fetch_prom_query_map(q, 10.0, 15.0, source)
                     except Exception:
                         results[k] = {}
 
-            range_step = 15.0 if w_minutes <= 180 else 30.0
+            range_step = 15.0
             try:
-                probe_range_map = self.prom_queries.fetch_prom_range_map("probe_success", w_start, w_end, range_step, cache_ttl=10.0, timeout=20.0)
+                probe_range_map = self.prom_queries.fetch_prom_range_map("probe_success", w_start, w_end, range_step, cache_ttl=10.0, timeout=20.0, source=source)
             except Exception:
                 probe_range_map = {}
             try:
-                up_range_map = self.prom_queries.fetch_prom_range_map("up", w_start, w_end, range_step, cache_ttl=10.0, timeout=20.0)
+                up_range_map = self.prom_queries.fetch_prom_range_map("up", w_start, w_end, range_step, cache_ttl=10.0, timeout=20.0, source=source)
             except Exception:
                 up_range_map = {}
 
@@ -446,11 +495,14 @@ class AvailabilityEngine:
                 # Fallback path: no raw samples — approximate from the
                 # avg_over_time / count / first-last-timestamp scalars.
                 avail_pct = None
+                raw_avail_float = None
                 if raw_avail is not None:
                     try:
-                        avail_pct = round(max(0.0, min(100.0, float(raw_avail))), 2)
+                        raw_avail_float = max(0.0, min(100.0, float(raw_avail)))
+                        avail_pct = round(raw_avail_float, 2)
                     except (ValueError, TypeError):
                         avail_pct = None
+                        raw_avail_float = None
 
                 sample_count = 0
                 cov_sec = 0.0
@@ -478,9 +530,9 @@ class AvailabilityEngine:
                 elif avail_pct is not None:
                     cov_sec = w_duration_sec
 
-                if avail_pct is not None:
-                    up_rate = min(1.0, max(0.0, float(avail_pct) / 100.0))
-                    down_rate = round(1.0 - up_rate, 6)
+                if raw_avail_float is not None:
+                    up_rate = min(1.0, max(0.0, raw_avail_float / 100.0))
+                    down_rate = max(0.0, 1.0 - up_rate)
                 else:
                     up_rate = 0.0
                     down_rate = 0.0
@@ -546,7 +598,7 @@ class AvailabilityEngine:
 
             if bucket_records:
                 try:
-                    self.bucket_repo.save_buckets(bucket_records)
+                    self.bucket_repo.save_buckets(bucket_records, source)
                     total_written += len(bucket_records)
                 except Exception:
                     logger.exception(
@@ -555,7 +607,57 @@ class AvailabilityEngine:
 
         return total_written
 
-    def _resolve_maintenance_windows(self, req_start: float, req_end: float, job: str, monitored_instances: List[str]):
+    def _scoped_job_map(self, job: str, source: str) -> Dict[str, str]:
+        """Targets that server `source` itself scrapes (no failover, no
+        alert-only fold-in from incidents), restricted to the whitelist."""
+        job_map = get_instance_job_map(job, include_alert_only=False, source=source) or {}
+        wl = AVAIL_TARGET_WHITELIST
+        if wl is None:
+            return job_map
+        filtered = {i: j for i, j in job_map.items() if i in wl}
+        # If the whitelist has matching targets for this server, enforce it.
+        # If this server has targets but none match the static whitelist (e.g. a different
+        # Prometheus server or new environment), fall back to all scraped targets on this server
+        # so availability is computed and displayed rather than dropping all targets to NO_DATA.
+        if not filtered and job_map:
+            return job_map
+        return filtered
+
+    def _validate_whitelist(self, source: str) -> None:
+        """Startup/reload check (runs every aggregator cycle, logs on change):
+        the server's scraped targets must equal the whitelist. Unexpected
+        targets are excluded from availability, logged loudly, never ingested."""
+        wl = AVAIL_TARGET_WHITELIST
+        state = self.__dict__.setdefault("_whitelist_state", {})
+        if wl is None:
+            if state.get(source) != "none":
+                logger.warning("availability: no target whitelist file - every target on %s counts toward SLA", source)
+                state[source] = "none"
+            return
+        live = set(get_instance_job_map("all", include_alert_only=False, source=source) or {})
+        if not live:
+            return  # server unreachable; nothing to validate
+        if not (live & wl):
+            if state.get(source) != "no_overlap":
+                logger.info("availability: server %s has %d targets outside static whitelist; counting all toward SLA",
+                            source, len(live))
+                state[source] = "no_overlap"
+            return
+        unexpected, missing = sorted(live - wl), sorted(wl - live)
+        sig = (tuple(unexpected), tuple(missing))
+        if state.get(source) == sig:
+            return
+        state[source] = sig
+        if unexpected:
+            logger.error("availability: %s scrapes %d NON-whitelisted target(s), excluded from SLA/trend/calendar: %s",
+                         source, len(unexpected), unexpected)
+        if missing:
+            logger.warning("availability: %d whitelisted target(s) not scraped by %s: %s",
+                           len(missing), source, missing)
+        if not unexpected and not missing:
+            logger.info("availability: %s targets match the whitelist exactly (%d)", source, len(wl))
+
+    def _resolve_maintenance_windows(self, req_start: float, req_end: float, job: str, monitored_instances: List[str], source: str):
         try:
             all_windows = load_maintenance_windows()
             overlapping = [
@@ -565,7 +667,7 @@ class AvailabilityEngine:
             ]
             if overlapping:
                 needs_job = any((w.get("scope") or w.get("scope_type")) == "job" for w in overlapping)
-                job_map = get_instance_job_map(job) if needs_job else {}
+                job_map = get_instance_job_map(job, source=source) if needs_job else {}
                 return maintenance_windows_by_instance(monitored_instances, job_map, overlapping) or None
         except Exception:
             pass
@@ -613,7 +715,7 @@ class AvailabilityEngine:
             expected_hours = max(1, int(round((req_end - req_start) / 3600.0)))
             for inst in monitored_instances:
                 sp = instance_spans.get(inst)
-                if not sp or sp[0] > (req_start + 60.0) or sp[1] < (req_end - _AVAIL_FRESHNESS_TOLERANCE_SEC) or sp[2] < max(1, expected_hours - 1):
+                if not sp or sp[0] > (req_start + 3600.0) or sp[1] < (req_end - _AVAIL_FRESHNESS_TOLERANCE_SEC) or sp[2] < max(1, expected_hours - 1):
                     return False
             return True
         return False
@@ -627,6 +729,8 @@ class AvailabilityEngine:
         maint_by_inst: Any,
         sla_target_map: Dict[str, float],
         payload: Dict[str, Any],
+        *,
+        source: str,
     ) -> Dict[str, Any]:
         """Re-adds instances that have materialized SQLite buckets inside
         [req_start, req_end] but are no longer in `monitored_instances` (i.e.
@@ -639,7 +743,7 @@ class AvailabilityEngine:
         """
         try:
             all_buckets_in_window = self.bucket_repo.get_bucket_records(
-                job=query.job, start_time=req_start, end_time=req_end,
+                job=query.job, start_time=req_start, end_time=req_end, source=source,
             )
         except Exception:
             return payload
@@ -742,6 +846,8 @@ class AvailabilityEngine:
         sqlite_duration_ms: float,
         t_req_start: float,
         instance_job_map: Optional[Dict[str, str]] = None,
+        *,
+        source: str,
     ) -> Dict[str, Any]:
         t_merge_start = time.perf_counter()
         entries, summary_dict = merge_hybrid_fleet_availability(
@@ -765,7 +871,7 @@ class AvailabilityEngine:
         hybrid_meta = summary_dict.get("hybrid", {})
 
         if any(e.get("availability_pct") is None for e in entries):
-            counts = _availability_status_counts(entries, self.prom_queries.fetch_prom_query_map("probe_success"))
+            counts = _availability_status_counts(entries, self.prom_queries.fetch_prom_query_map("probe_success", source=source))
         else:
             counts = _availability_status_counts(entries)
 
@@ -779,7 +885,16 @@ class AvailabilityEngine:
         )
 
         trend_series, trend_slot_sec = _build_fleet_trend(
-            req_end, query.minutes * 60.0, monitored_instances, db_bucket_records=db_bucket_records, job=query.job
+            req_end, query.minutes * 60.0, monitored_instances, db_bucket_records=db_bucket_records, job=query.job,
+            maint_by_inst=maint_by_inst, source=source,
+        )
+        trend_incidents = _build_fleet_incidents(
+            db_bucket_records=db_bucket_records,
+            req_start=req_start,
+            req_end=req_end,
+            instances=monitored_instances,
+            job=query.job,
+            source=source,
         )
         t_done = time.perf_counter()
 
@@ -809,6 +924,7 @@ class AvailabilityEngine:
             lowest_availability=lowest_availability,
             trend_series=trend_series,
             trend_slot_sec=trend_slot_sec,
+            trend_incidents=trend_incidents,
             source="materialized",
             data_status="COMPLETE",
             trace_data=trace_data,
@@ -827,39 +943,68 @@ class AvailabilityEngine:
         sqlite_duration_ms: float,
         t_req_start: float,
         instance_job_map: Optional[Dict[str, str]] = None,
+        *,
+        source: str,
     ) -> Dict[str, Any]:
         at_suffix = f" @ {query.end_ts}" if query.end_ts is not None else ""
-        # Measured fleet-wide against a real Prometheus: avg_over_time takes
-        # ~3s at 24h, ~21s at 7d, ~50s at 30d. The old max(4, min(15, m/1500))
-        # capped 7d at 6.7s and 30d at 15s, so every long-window query timed
-        # out, has_prom went False, and the merge silently fell back to
-        # whatever thin slice of SQLite existed.
-        req_timeout = max(5.0, min(30.0, query.minutes / 300.0))
+
+        # Determine whether SQLite covers history, so Prometheus only needs to query the un-materialized head
+        instance_spans = {}
+        for b in db_bucket_records:
+            inst = b.get("instance")
+            cov = float(b.get("coverage_seconds", 0) or 0)
+            if inst in monitored_instances and cov > 0:
+                st = float(b.get("bucket_start", 0))
+                en = float(b.get("bucket_end", 0))
+                cur = instance_spans.get(inst)
+                if cur is None:
+                    instance_spans[inst] = (st, en, 1)
+                else:
+                    instance_spans[inst] = (min(cur[0], st), max(cur[1], en), cur[2] + 1)
+
+        sqlite_head_only = False
+        prom_query_minutes = query.minutes_int
+        prom_head_sec = None
+
+        if len(instance_spans) >= len(monitored_instances) * 0.85:
+            min_end = min(sp[1] for sp in instance_spans.values())
+            # If SQLite covers historical data ending within 24 hours of req_end:
+            # Query Prometheus ONLY for the un-materialized live head!
+            if min_end >= (req_end - 86400.0):
+                if min_end < req_end:
+                    head_sec = max(60.0, req_end - min_end)
+                else:
+                    head_sec = 60.0
+                prom_query_minutes = max(1, int(math.ceil(head_sec / 60.0)))
+                prom_head_sec = head_sec
+                sqlite_head_only = True
+
+        req_timeout = 8.0 if sqlite_head_only else max(5.0, min(30.0, query.minutes / 300.0))
         avail_cache_ttl = 15.0 if query.minutes_int >= 1440 else 5.0
 
         queries = {
-            "probe_avail": f"avg_over_time(probe_success[{query.minutes_int}m]{at_suffix}) * 100",
-            "up_avail": f"avg_over_time(up[{query.minutes_int}m]{at_suffix}) * 100",
-            "probe_count": f"count_over_time(probe_success[{query.minutes_int}m]{at_suffix})",
-            "up_count": f"count_over_time(up[{query.minutes_int}m]{at_suffix})",
-            "duration": f"avg_over_time(probe_duration_seconds[{query.minutes_int}m]{at_suffix}) * 1000",
-            "probe_incidents": f"changes(probe_success[{query.minutes_int}m]{at_suffix})",
-            "up_incidents": f"changes(up[{query.minutes_int}m]{at_suffix})",
+            "probe_avail": f"avg_over_time(probe_success[{prom_query_minutes}m]{at_suffix}) * 100",
+            "up_avail": f"avg_over_time(up[{prom_query_minutes}m]{at_suffix}) * 100",
+            "probe_count": f"count_over_time(probe_success[{prom_query_minutes}m]{at_suffix})",
+            "up_count": f"count_over_time(up[{prom_query_minutes}m]{at_suffix})",
+            "duration": f"avg_over_time(probe_duration_seconds[{prom_query_minutes}m]{at_suffix}) * 1000",
+            "probe_incidents": f"changes(probe_success[{prom_query_minutes}m]{at_suffix})" if prom_query_minutes <= 1440 else None,
+            "up_incidents": f"changes(up[{prom_query_minutes}m]{at_suffix})" if prom_query_minutes <= 1440 else None,
             "live_probe": "probe_success" if query.end_ts is None else None,
             "live_up": "up" if query.end_ts is None else None,
         }
-        if query.minutes_int <= 60:
-            queries["probe_first_ts"] = f"min_over_time(timestamp(probe_success)[{query.minutes_int}m:]{at_suffix})"
-            queries["probe_last_ts"] = f"max_over_time(timestamp(probe_success)[{query.minutes_int}m:]{at_suffix})"
-            queries["up_first_ts"] = f"min_over_time(timestamp(up)[{query.minutes_int}m:]{at_suffix})"
-            queries["up_last_ts"] = f"max_over_time(timestamp(up)[{query.minutes_int}m:]{at_suffix})"
+        if prom_query_minutes <= 60:
+            queries["probe_first_ts"] = f"min_over_time(timestamp(probe_success)[{prom_query_minutes}m:]{at_suffix})"
+            queries["probe_last_ts"] = f"max_over_time(timestamp(probe_success)[{prom_query_minutes}m:]{at_suffix})"
+            queries["up_first_ts"] = f"min_over_time(timestamp(up)[{prom_query_minutes}m:]{at_suffix})"
+            queries["up_last_ts"] = f"max_over_time(timestamp(up)[{prom_query_minutes}m:]{at_suffix})"
 
         t_prom_start = time.perf_counter()
         executor = getattr(self.prom_client, "_SHARED_EXECUTOR", None)
 
         def _call_q(expr):
             t_s = time.perf_counter()
-            res = self.prom_queries.fetch_prom_query_map(expr, cache_ttl=avail_cache_ttl, timeout=req_timeout)
+            res = self.prom_queries.fetch_prom_query_map(expr, cache_ttl=avail_cache_ttl, timeout=req_timeout, source=source)
             return res, (time.perf_counter() - t_s) * 1000.0
 
         results = {}
@@ -904,7 +1049,7 @@ class AvailabilityEngine:
         duration_map = results.get("duration", {})
 
         try:
-            cadence_map = dict(get_instance_cadence_map(query.job))
+            cadence_map = dict(get_instance_cadence_map(query.job, source=source))
         except Exception:
             cadence_map = {}
         for inst in monitored_instances:
@@ -920,6 +1065,8 @@ class AvailabilityEngine:
             "incidents": incidents_map,
             "duration": duration_map,
         }
+        if prom_head_sec is not None:
+            prom_results_map["window_sec"] = prom_head_sec
 
         t_merge_start = time.perf_counter()
         entries, summary_dict = merge_hybrid_fleet_availability(
@@ -953,7 +1100,16 @@ class AvailabilityEngine:
         )
 
         trend_series, trend_slot_sec = _build_fleet_trend(
-            req_end, query.minutes * 60.0, monitored_instances, db_bucket_records=db_bucket_records, job=query.job
+            req_end, query.minutes * 60.0, monitored_instances, db_bucket_records=db_bucket_records, job=query.job,
+            maint_by_inst=maint_by_inst, source=source,
+        )
+        trend_incidents = _build_fleet_incidents(
+            db_bucket_records=db_bucket_records,
+            req_start=req_start,
+            req_end=req_end,
+            instances=monitored_instances,
+            job=query.job,
+            source=source,
         )
         t_done = time.perf_counter()
 
@@ -983,6 +1139,7 @@ class AvailabilityEngine:
             lowest_availability=lowest_availability,
             trend_series=trend_series,
             trend_slot_sec=trend_slot_sec,
+            trend_incidents=trend_incidents,
             source=hybrid_meta.get("source", "fallback"),
             data_status=hybrid_meta.get("data_status", "PARTIAL"),
             trace_data=trace_data,
@@ -1003,6 +1160,7 @@ class AvailabilityEngine:
         source: str,
         data_status: str,
         trace_data: Dict[str, Any],
+        trend_incidents: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         return {
             "ok": True,
@@ -1049,9 +1207,12 @@ class AvailabilityEngine:
             "targets": {e["id"]: e["availability_pct"] for e in summary_dict["per_server"]["values"]},
             "analytics": summary_dict.get("analytics", {}),
             "trend": trend_series,
+            "trend_incidents": trend_incidents or [],
             "trend_end_ts": int(req_end),
             "trend_start_ts": int(req_end - query.minutes * 60.0),
             "trend_bucket_seconds": trend_slot_sec,
+            # Threshold behind null (partial-coverage) trend points, for the tooltip.
+            "trend_min_reporting_pct": round(AVAIL_TREND_MIN_REPORTING_RATIO * 100.0, 1),
             "source": source,
             "_trace": trace_data,
         }
@@ -1128,8 +1289,17 @@ class AvailabilityEngine:
         # absent from Prometheus for a scrape or two shouldn't read as a hole.
         return hours < expected_hours * 0.95
 
+    def _chunk_materialized(self, monitored: List[str], start: float, end: float, source: str) -> bool:
+        """True when >=95% of monitored instance-hours in [start, end) are stored."""
+        try:
+            rows = self.bucket_repo.get_bucket_records("all", start, end, instances=monitored, source=source)
+            have = len({(r["instance"], r["bucket_start"]) for r in rows})
+        except Exception:
+            return False
+        return have >= len(monitored) * ((end - start) / 3600.0) * 0.95
+
     def _next_depth_backfill_window(
-        self, monitored: List[str], now: float
+        self, monitored: List[str], now: float, source: str
     ) -> Optional[Tuple[float, float]]:
         """One chunk of *backward* backfill, or None when depth is satisfied.
 
@@ -1147,7 +1317,7 @@ class AvailabilityEngine:
         floor_start = hour_end - AVAIL_BACKFILL_SECONDS
 
         try:
-            coverage = self.bucket_repo.get_instance_bucket_coverage(monitored)
+            coverage = self.bucket_repo.get_instance_bucket_coverage(monitored, source=source)
         except Exception:
             logger.exception("Availability depth backfill: bucket coverage lookup failed")
             return None
@@ -1183,7 +1353,13 @@ class AvailabilityEngine:
                 len(stale), len(monitored),
             )
 
+        # Skip chunks every monitored instance already has buckets for. Without
+        # this, each restart re-aggregated the whole materialized span from
+        # Prometheus (~1.5 min per chunk) before reaching the missing history.
         chunk_start = max(floor_start, cursor - AVAIL_BACKFILL_CHUNK_SECONDS)
+        while chunk_start > floor_start and self._chunk_materialized(monitored, chunk_start, cursor, source):
+            cursor = chunk_start
+            chunk_start = max(floor_start, cursor - AVAIL_BACKFILL_CHUNK_SECONDS)
         self._deep_cursor = chunk_start
         logger.info(
             "Availability depth backfill: [%.0f, %.0f], %.1fd remaining to floor",

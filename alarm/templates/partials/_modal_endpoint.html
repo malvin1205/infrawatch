@@ -2,7 +2,7 @@
   <div id="endpointModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="endpointModalTitle">
     <div class="modal-card">
       <div class="modal-header">
-        <h3 class="modal-title" id="endpointModalTitle">Manage Prometheus Endpoints</h3>
+        <h3 class="modal-title" id="endpointModalTitle">Settings &amp; Prometheus Endpoints</h3>
         <button id="closeEndpointModalBtn" class="modal-close" type="button" aria-label="Close modal">&times;</button>
       </div>
 
@@ -29,6 +29,21 @@
           <div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 10px;">Registered Endpoints:</div>
           <div id="endpointListContainer" style="display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto;">
             <!-- Populated via JS -->
+          </div>
+        </div>
+
+        <div style="border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px;">
+          <div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Duration Display Preference</div>
+          <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 10px;">Select how durations exceeding 24 hours are formatted across host cards, target drawer, and incident logs:</div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; color: var(--text-primary);">
+              <input type="radio" name="durationDisplayFormat" value="days" id="durationPrefDays">
+              <span><strong>Days</strong> (format 24+h as days, e.g. <code>31d 23h</code>)</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; color: var(--text-primary);">
+              <input type="radio" name="durationDisplayFormat" value="hours" id="durationPrefHours">
+              <span><strong>Full Hours</strong> (keep duration in hours, e.g. <code>767h 12m</code>)</span>
+            </label>
           </div>
         </div>
       </div>

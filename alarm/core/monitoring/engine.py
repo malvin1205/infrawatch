@@ -229,6 +229,8 @@ class FleetStateEngine:
         # underlying query cache every 15s.
         self._down_since_cache: Tuple[float, Dict[str, Any]] = (0.0, {})
         self._down_since_refreshing = False
+        self._up_since_cache: Tuple[float, Dict[str, Any]] = (0.0, {})
+        self._up_since_refreshing = False
 
     @property
     def active_incident_provider(self):
@@ -392,6 +394,29 @@ class FleetStateEngine:
                 self._down_since_refreshing = False
         return data
 
+    def _up_since_map_nonblocking(self) -> Dict[str, Any]:
+        """Return the last completed up-since map immediately; kick off a
+        background refresh if older than 60s. Never blocks the poll."""
+        ts, data = self._up_since_cache
+        if time.time() - ts > 60 and not self._up_since_refreshing:
+            self._up_since_refreshing = True
+
+            def _refresh():
+                try:
+                    fn = getattr(self.prom_queries, "fetch_up_since_prom_map", None)
+                    if fn:
+                        self._up_since_cache = (time.time(), fn(300.0))
+                except Exception:
+                    logger.warning("up-since refresh failed", exc_info=True)
+                finally:
+                    self._up_since_refreshing = False
+
+            try:
+                self.executor.submit(_refresh)
+            except Exception:
+                self._up_since_refreshing = False
+        return data
+
     def _fetch_probe_snapshot(self) -> Dict[str, Any]:
         """Stage 1: Concurrent fetch of /api/v1/targets and probe metrics, plus conditional subqueries."""
         # /api/v1/targets is a big payload; under concurrent polling it can blow
@@ -429,6 +454,8 @@ class FleetStateEngine:
             down_since_prom_map = {}
             node_exporter_up_map = {}
 
+        up_since_prom_map = self._up_since_map_nonblocking()
+
         return {
             "unreachable": False,
             "raw_targets": raw_targets,
@@ -437,6 +464,7 @@ class FleetStateEngine:
             "probe_duration_map": probe_duration_map or {},
             "probe_status_code_map": probe_status_code_map or {},
             "down_since_prom_map": down_since_prom_map or {},
+            "up_since_prom_map": up_since_prom_map or {},
             "node_exporter_up_map": node_exporter_up_map or {},
             "use_node_exporter": use_node_exporter,
         }
@@ -453,6 +481,7 @@ class FleetStateEngine:
         probe_duration_map = snapshot["probe_duration_map"]
         probe_status_code_map = snapshot["probe_status_code_map"]
         down_since_prom_map = snapshot["down_since_prom_map"]
+        up_since_prom_map = snapshot.get("up_since_prom_map") or {}
         node_exporter_up_map = snapshot["node_exporter_up_map"]
         use_node_exporter = snapshot["use_node_exporter"]
 
@@ -526,6 +555,7 @@ class FleetStateEngine:
                         if a not in alerts_by_instance.get(inst_name, [])
                     ]
                     down_since_val = _earliest_outage_start(down_since_val, matched_alerts, health)
+                    up_since_val = _sane_epoch(up_since_prom_map.get(inst_name) or up_since_prom_map.get(scrape_url)) if health == 'up' else 0
 
                     result.append({
                         "instance": inst_name,
@@ -543,6 +573,7 @@ class FleetStateEngine:
                         "labels": labels,
                         "isWeb": False,
                         "downSince": down_since_val,
+                        "upSince": up_since_val,
                         "active_alerts": matched_alerts,
                     })
 
@@ -554,6 +585,7 @@ class FleetStateEngine:
                     is_any_down = any(a.get('name') == ALERTNAME_TARGET_DOWN for a in inst_alerts)
                     health = 'down' if is_any_down else 'up'
                     down_since_val = _sane_epoch(inst_alerts[0].get('time')) if is_any_down else 0
+                    up_since_val = _sane_epoch(inst_alerts[0].get('time')) if health == 'up' else 0
                     result.append({
                         "instance": inst,
                         "job": alert_job,
@@ -569,6 +601,7 @@ class FleetStateEngine:
                         "labels": {"job": alert_job, "instance": inst},
                         "isWeb": False,
                         "downSince": down_since_val,
+                        "upSince": up_since_val,
                         "active_alerts": inst_alerts,
                     })
                     seen_instances.add(inst)
@@ -749,7 +782,7 @@ class FleetStateEngine:
         )
 
     def get_instance_job_map(
-        self, job_filter: Optional[str] = None, include_alert_only: bool = True
+        self, job_filter: Optional[str] = None, include_alert_only: bool = True, source: Optional[str] = None
     ) -> Dict[str, str]:
         """Instance -> real Prometheus job name for every monitored target matching job_filter.
 
@@ -762,7 +795,7 @@ class FleetStateEngine:
         if job_filter is None:
             job_filter = DEFAULT_JOB_FILTER
 
-        raw_targets, _ = self.prom_client.fetch_prometheus_json('/api/v1/targets', use_cache=True, cache_ttl=3.0)
+        raw_targets, _ = self.prom_client.fetch_prometheus_json('/api/v1/targets', use_cache=True, cache_ttl=3.0, source=source)
         try:
             deleted_targets = set(self.deleted_targets_loader())
         except Exception:
@@ -795,12 +828,12 @@ class FleetStateEngine:
 
         return job_map
 
-    def get_instance_cadence_map(self, job_filter: Optional[str] = None) -> Dict[str, float]:
+    def get_instance_cadence_map(self, job_filter: Optional[str] = None, source: Optional[str] = None) -> Dict[str, float]:
         """Instance -> real per-target scrape interval (seconds)."""
         if job_filter is None:
             job_filter = DEFAULT_JOB_FILTER
 
-        raw_targets, _ = self.prom_client.fetch_prometheus_json('/api/v1/targets', use_cache=True, cache_ttl=3.0)
+        raw_targets, _ = self.prom_client.fetch_prometheus_json('/api/v1/targets', use_cache=True, cache_ttl=3.0, source=source)
         try:
             deleted_targets = set(self.deleted_targets_loader())
         except Exception:

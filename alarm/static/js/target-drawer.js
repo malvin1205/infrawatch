@@ -5,6 +5,7 @@
 import { calculateNiceScale, buildMSGradientDefs } from './ui/charts.js';
 import { escapeHtml, slowThresholdMs, latencySeverity, latencyColor, DATE_LOCALE } from './ui/format.js';
 import { apiFetch } from './net.js';
+import { alarmPolicyManager, evaluateAlarmState, AlarmState } from './alarm-policy.js';
 
 class _DrawerMethods {
   _updateDrawerUptime(target) {
@@ -29,6 +30,69 @@ class _DrawerMethods {
     }
     const pct = this.availabilityMap[target.instance];
     uptimeEl.textContent = (typeof pct === 'number') ? `${pct.toFixed(2)}%` : 'No data';
+  }
+
+  _updateDrawerAlarmPill(target, now = Date.now()) {
+    const alarmPill = document.getElementById('drawerAlarmPill');
+    if (!alarmPill) return;
+    if (!target || target.health === 'up' || target.maintenance || target.suppressedBy) {
+      alarmPill.classList.add('hidden');
+      return;
+    }
+
+    const isAcked = (this.acknowledgedDownInstances && this.acknowledgedDownInstances.has(target.instance)) || target.acknowledged;
+    const evalTarget = { ...target, acknowledged: isAcked };
+    const alarmEval = evaluateAlarmState(evalTarget, now, alarmPolicyManager.getPolicy());
+
+    alarmPill.classList.remove('hidden');
+    alarmPill.textContent = alarmEval.label;
+    alarmPill.title = alarmEval.description;
+
+    alarmPill.className = 'drawer-status-pill drawer-alarm-pill';
+    if (alarmEval.state === AlarmState.ALARMING) {
+      alarmPill.classList.add('dap-alarming');
+    } else if (alarmEval.state === AlarmState.PENDING_ALARM) {
+      alarmPill.classList.add('dap-pending');
+    } else if (alarmEval.state === AlarmState.COOLDOWN) {
+      alarmPill.classList.add('dap-cooldown');
+    } else if (alarmEval.state === AlarmState.ACKNOWLEDGED || alarmEval.state === AlarmState.ACK_COOLDOWN) {
+      alarmPill.classList.add('dap-acked');
+    } else {
+      alarmPill.classList.add('dap-neutral');
+    }
+  }
+
+  _updateDrawerAckButton(target) {
+    const drawerAckBtn = document.getElementById('drawerAckBtn');
+    const drawerAckBtnLabel = document.getElementById('drawerAckBtnLabel');
+    if (!drawerAckBtn) return;
+    if (!target) {
+      drawerAckBtn.classList.add('hidden');
+      this._updateDrawerAlarmPill(target);
+      return;
+    }
+    const isDown = target.health !== 'up';
+    const isMaint = !!target.maintenance;
+    if (isDown && !isMaint) {
+      drawerAckBtn.classList.remove('hidden');
+      const isAcked = (this.acknowledgedDownInstances && this.acknowledgedDownInstances.has(target.instance)) || target.acknowledged;
+      if (isAcked) {
+        drawerAckBtn.className = 'btn btn-sm btn-secondary is-acked';
+        drawerAckBtn.style.color = '#10B981';
+        drawerAckBtn.style.borderColor = '#10B981';
+        if (drawerAckBtnLabel) drawerAckBtnLabel.textContent = '✓ Acknowledged';
+        drawerAckBtn.title = 'Click to unacknowledge this outage';
+      } else {
+        drawerAckBtn.className = 'btn btn-sm btn-warning';
+        drawerAckBtn.style.color = '';
+        drawerAckBtn.style.borderColor = '';
+        if (drawerAckBtnLabel) drawerAckBtnLabel.textContent = 'Acknowledge';
+        drawerAckBtn.title = 'Acknowledge this outage';
+      }
+    } else {
+      drawerAckBtn.classList.add('hidden');
+    }
+    this._updateDrawerAlarmPill(target);
   }
 
   _switchModalTab(tabName) {
@@ -441,6 +505,8 @@ class _DrawerMethods {
       statusTextEl.style.color = isDown ? '#EF4444' : (isSlow ? '#F59E0B' : '#22C55E');
     }
 
+    this._updateDrawerAckButton(target);
+
     // Last check / Aging
     const lastCheckEl = document.getElementById('drawerLastCheck');
     if (lastCheckEl) {
@@ -453,7 +519,9 @@ class _DrawerMethods {
         }
         lastCheckEl.textContent = `Down for ${this._fmtDownAging(downMs)}`;
       } else {
-        lastCheckEl.textContent = target.lastScrape ? this._relTime(target.lastScrape) : 'Just now';
+        const upStart = typeof this._upStartMs === 'function' ? this._upStartMs(target) : null;
+        const upStr = upStart ? ` · Up for ${this._fmtDownAging(Math.max(0, now - upStart))}` : '';
+        lastCheckEl.textContent = (target.lastScrape ? this._relTime(target.lastScrape) : 'Just now') + upStr;
       }
     }
 

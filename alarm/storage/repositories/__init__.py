@@ -22,6 +22,7 @@ from .auth import (
     UserRepository,
     AuditLogRepository,
 )
+from .alarm_sounds import AlarmSoundRepository
 
 __all__ = [
     "IncidentRepository",
@@ -38,4 +39,5 @@ __all__ = [
     "DeletedTargetRepository",
     "UserRepository",
     "AuditLogRepository",
+    "AlarmSoundRepository",
 ]

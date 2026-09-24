@@ -3,11 +3,12 @@
  * response-time / history charts. Still the largest module; a further
  * split into drawer / availability sub-modules is a separate pass.
  */
-import { escapeHtml, slowThresholdMs, DATE_LOCALE } from './ui/format.js';
+import { escapeHtml, slowThresholdMs, DATE_LOCALE, formatDuration, getDurationFormatPreference } from './ui/format.js';
 import { apiFetch } from './net.js';
 import { enhanceAllSelects } from './ui/select-skin.js';
 import { installAvailability } from './availability.js';
 import { installTargetDrawer } from './target-drawer.js';
+import { alarmPolicyManager, evaluateAlarmState } from './alarm-policy.js';
 
 const JOB_DEFAULT_LS_KEY = 'infrawatch.defaultJob';
 
@@ -61,6 +62,7 @@ export class InstancesPage {
     this.countBadge = document.getElementById('instanceCount');
     this._downCardElements = [];
     this._maintCardElements = [];
+    this._upCardElements = [];
 
     // Pagination (TV wallboard) — pageSize is not a fixed number, it's
     // however many cards actually fit the grid viewport without shrinking
@@ -298,14 +300,13 @@ export class InstancesPage {
         // limit on /api/alerts/ack and locks acking out for a minute.
         if (this.isAcknowledged) return;
 
-        // One ack at a time, and no re-arm until the button has actually
-        // repainted from server truth. The in-flight flag alone was not
-        // enough: the round trip is ~10ms, so five clicks 45ms apart sailed
-        // straight through it as five separate acks, five audit rows, five
-        // toasts and five full grid reloads. Measured: 5 clicks -> 5 POSTs.
+        // One ack at a time, with cooldown and no re-arm until button repaints
+        if (this._lastAckClick && (Date.now() - this._lastAckClick < 1000)) return;
+        this._lastAckClick = Date.now();
         if (this._ackInFlight) return;
         this._ackInFlight = true;
         ackBtn.disabled = true;
+        ackBtn.style.pointerEvents = 'none';
         ackBtn.setAttribute('aria-busy', 'true');
         try {
           // Send the instances THIS view is alarming on. An empty body means
@@ -359,6 +360,7 @@ export class InstancesPage {
           this._triggerEventToast('Acknowledge failed — could not reach the server.');
         } finally {
           this._ackInFlight = false;
+          ackBtn.style.pointerEvents = '';
           // Restore from state, don't force-enable: the await above already
           // re-rendered, and in the all-acked state the button is a status
           // label that must stay non-interactive. A flat `= false` here put
@@ -388,6 +390,12 @@ export class InstancesPage {
         this._render();
       });
     }
+
+    // Reactively update card and duration formatting when operator changes preference
+    window.addEventListener('iw:duration-format-changed', () => {
+      this._lastDataSignature = null;
+      this._render();
+    });
 
     // Job select filter
     const jobSelect = document.getElementById('jobSelect');
@@ -435,7 +443,7 @@ export class InstancesPage {
           this.periodMinutes = this._monthToDateMinutes();
           const modalRangeSelectEl = document.getElementById('modalRangeSelect');
           if (modalRangeSelectEl) modalRangeSelectEl.value = range;
-          this.loadAvailability(true);
+          this.loadAvailability(false);
           if (this.selectedTarget) this.loadTargetHistory(this.selectedTarget.instance);
           return;
         }
@@ -525,7 +533,7 @@ export class InstancesPage {
           this.periodLabel = 'mtd';
           this.periodMinutes = this._monthToDateMinutes();
           this._setActiveRangeChip('mtd');
-          this.loadAvailability(true);
+          this.loadAvailability(false);
           return;
         }
         const mins = parseFloat(e.target.value);
@@ -733,6 +741,56 @@ export class InstancesPage {
       });
     }
 
+    const drawerAckBtn = document.getElementById('drawerAckBtn');
+    if (drawerAckBtn) {
+      drawerAckBtn.addEventListener('click', async () => {
+        if (!this.selectedTarget) return;
+        const target = this.selectedTarget;
+        const isAcked = (this.acknowledgedDownInstances && this.acknowledgedDownInstances.has(target.instance)) || target.acknowledged;
+        const endpoint = isAcked ? '/api/alerts/unack' : '/api/alerts/ack';
+        drawerAckBtn.disabled = true;
+        try {
+          const res = await apiFetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instance: target.instance })
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.ok) {
+            if (isAcked) {
+              if (this.acknowledgedDownInstances) this.acknowledgedDownInstances.delete(target.instance);
+              target.acknowledged = false;
+              target.acknowledged_by = null;
+              target.acknowledged_at = null;
+              target._ackedAtMs = null;
+              this._triggerEventToast(`Outage on ${target.instance} unacknowledged`);
+            } else {
+              if (this.acknowledgedDownInstances) this.acknowledgedDownInstances.add(target.instance);
+              target.acknowledged = true;
+              const u = window.currentUser ? window.currentUser.username : 'operator';
+              target.acknowledged_by = u;
+              const ackItem = (data.acknowledged || []).find(x => x.instance === target.instance);
+              target.acknowledged_at = (ackItem && ackItem.acknowledged_at) || Math.floor(Date.now() / 1000);
+              target._ackedAtMs = target.acknowledged_at * 1000;
+              this._triggerEventToast(`Outage on ${target.instance} acknowledged by ${u}`);
+            }
+            if (typeof this._updateDrawerAckButton === 'function') {
+              this._updateDrawerAckButton(target);
+            }
+            await this.load();
+            this.monitor?._syncAlarmAudio?.();
+          } else {
+            this._triggerEventToast(data.error || 'Failed to update acknowledgment');
+          }
+        } catch (e) {
+          console.error(e);
+          this._triggerEventToast('Network error updating acknowledgment');
+        } finally {
+          drawerAckBtn.disabled = false;
+        }
+      });
+    }
+
     const modalCloseBottomBtn = document.getElementById('modalCloseBottomBtn');
     if (modalCloseBottomBtn) {
       modalCloseBottomBtn.addEventListener('click', () => this._closeDrawer());
@@ -784,6 +842,10 @@ export class InstancesPage {
     // (Escape/Back is handled globally — see the window-level BACK interceptor below.)
     if (this.table) {
       this.table.addEventListener('click', e => {
+        if (e.target && e.target.closest('.empty-state-reset-btn')) {
+          this._resetAllFilters();
+          return;
+        }
         const card = e.target.closest('.host-card');
         if (!card) return;
         const inst = card.dataset.instance;
@@ -1025,16 +1087,37 @@ export class InstancesPage {
           if (latEl) latEl.textContent = `Maint ${this._fmtDownAging(remainMs)} left`;
         });
       }
+
+      if (this._upCardElements && this._upCardElements.length > 0) {
+        this._upCardElements.forEach(({ inst, uptimeEl }) => {
+          const target = this.data.find(t => t.instance === inst);
+          if (!target || !uptimeEl) return;
+          const text = this._upAgingFor(target, now);
+          if (uptimeEl.textContent !== text) uptimeEl.textContent = text;
+        });
+      }
     }
 
-    if (this.selectedTarget && this.selectedTarget.health !== 'up') {
-      const drawerLatEl = document.getElementById('drawerLatency');
-      if (drawerLatEl) {
-        // Same resolver as the tile — the drawer used to run its own copy of
-        // the session-timer fallback, which is how one host could read
-        // "Down 27m 15s" here and "96h 57m" in its own Events tab (audit 5.6).
-        const aging = this._downAgingFor(this.selectedTarget, now);
-        drawerLatEl.textContent = aging === null ? 'Down · start unknown' : `Down ${aging}`;
+    if (this.selectedTarget) {
+      if (this.selectedTarget.health !== 'up') {
+        if (typeof this._updateDrawerAlarmPill === 'function') {
+          this._updateDrawerAlarmPill(this.selectedTarget, now);
+        }
+        const drawerLatEl = document.getElementById('drawerLatency');
+        if (drawerLatEl) {
+          // Same resolver as the tile — the drawer used to run its own copy of
+          // the session-timer fallback, which is how one host could read
+          // "Down 27m 15s" here and "96h 57m" in its own Events tab (audit 5.6).
+          const aging = this._downAgingFor(this.selectedTarget, now);
+          drawerLatEl.textContent = aging === null ? 'Down · start unknown' : `Down ${aging}`;
+        }
+      } else {
+        const lastCheckEl = document.getElementById('drawerLastCheck');
+        if (lastCheckEl) {
+          const upStart = typeof this._upStartMs === 'function' ? this._upStartMs(this.selectedTarget) : null;
+          const upStr = upStart ? ` · Up for ${this._fmtDownAging(Math.max(0, now - upStart))}` : '';
+          lastCheckEl.textContent = (this.selectedTarget.lastScrape ? this._relTime(this.selectedTarget.lastScrape) : 'Just now') + upStr;
+        }
       }
 
       const ongoingLogEl = document.querySelector('#drawerLogsList .ongoing-duration-val[data-ongoing="true"]');
@@ -1045,10 +1128,10 @@ export class InstancesPage {
           ongoingLogEl.textContent = this._fmtDownAging(durationMs);
         }
       }
-    }
 
-    if (this.selectedTarget && this.selectedTarget.maintenance) {
-      this._renderDrawerMaintenance(this.selectedTarget);
+      if (this.selectedTarget.maintenance) {
+        this._renderDrawerMaintenance(this.selectedTarget);
+      }
     }
   }
 
@@ -1602,6 +1685,25 @@ export class InstancesPage {
     this.availabilityBreakdown = null;
     this.serverPayload = null;
     this.currentPage = 1;
+    this._downCardElements = [];
+    this._maintCardElements = [];
+    this._upCardElements = [];
+
+    // Invalidate client-side availability cache and abort any pending fetch for the old endpoint
+    if (this._availCache && typeof this._availCache.clear === 'function') {
+      this._availCache.clear();
+    }
+    if (this._availAbortController) {
+      this._availAbortController.abort();
+      this._availAbortController = null;
+    }
+    this._availInFlightKey = null;
+    this._displayedAvailKey = null;
+    this._availLoading = false;
+    ++this._availRequestSeq;
+    if (typeof this._updateAvailLoadingUI === 'function') {
+      this._updateAvailLoadingUI(false);
+    }
 
     // A drawer left open is pinned to a host that may not exist here at all.
     if (this.selectedTarget) this._closeDrawer();
@@ -1634,18 +1736,19 @@ export class InstancesPage {
     });
   }
 
-  _fmtDownAging(ms) {
-    if (!ms || ms <= 0) return '0s';
-    const sec = Math.floor(ms / 1000);
-    if (sec < 60) return `${sec}s`;
-    if (sec < 3600) {
-      const m = Math.floor(sec / 60);
-      const s = sec % 60;
-      return `${m}m ${s}s`;
-    }
-    const h = Math.floor(sec / 3600);
-    const m = Math.floor((sec % 3600) / 60);
-    return `${h}h ${m}m`;
+  _fmtDownAging(ms, compact = true) {
+    return formatDuration(ms, { compact });
+  }
+
+  _upStartMs(t) {
+    return (t && t.upSince && t.upSince > 0) ? t.upSince * 1000 : null;
+  }
+
+  _upAgingFor(t, now = Date.now(), compact = true) {
+    const startMs = this._upStartMs(t);
+    if (!startMs) return 'Online';
+    const elapsed = Math.max(0, now - startMs);
+    return `Up ${formatDuration(elapsed, { compact })}`;
   }
 
   // The ONE place an outage's start is resolved, for the tile ticker, the tile
@@ -1738,8 +1841,11 @@ export class InstancesPage {
     if (btn) {
       btn.classList.toggle('is-active', on);
       btn.setAttribute('aria-pressed', String(on));
-      const label = btn.querySelector('span');
-      if (label) label.textContent = on ? 'Cancel select' : 'Select';
+      btn.title = on ? 'Cancel selection' : 'Select multiple hosts';
+      btn.setAttribute('aria-label', btn.title);
+      btn.innerHTML = on
+        ? '<svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+        : '<svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><polyline points="8 12 11 15 16 9"/></svg>';
     }
     if (bar) bar.classList.toggle('hidden', !on);
     if (this.table) this.table.classList.toggle('select-mode', on);
@@ -1921,11 +2027,17 @@ export class InstancesPage {
       bits.push('under maintenance — alerts suppressed');
     } else if (t.health === 'down') {
       const startMs = this._outageStartMs(t);
+      const downDur = startMs ? ` (${formatDuration(Date.now() - startMs, { compact: false })})` : '';
       bits.push(startMs === null
         ? 'down, outage start unknown (older than the 1-day lookback)'
-        : `down since ${new Date(startMs).toLocaleString(DATE_LOCALE)}`);
+        : `down since ${new Date(startMs).toLocaleString(DATE_LOCALE)}${downDur}`);
       if (t.failureCategory && t.failureCategory !== 'Unknown') bits.push(t.failureCategory);
       if (t.suppressedBy) bits.push(`caused by ${t.suppressedBy}`);
+      if (t.is_alarmable !== false && !t.suppressedBy) {
+        const evalTarget = { ...t, acknowledged: isAcked };
+        const alarmEval = evaluateAlarmState(evalTarget, Date.now(), alarmPolicyManager.getPolicy());
+        bits.push(`Alarm: ${alarmEval.label}`);
+      }
       if (isAcked) {
         const who = t.acknowledged_by || 'operator';
         const when = t.acknowledged_at ? new Date(t.acknowledged_at * 1000).toLocaleString(DATE_LOCALE) : '';
@@ -1934,7 +2046,9 @@ export class InstancesPage {
         bits.push('NOT yet acknowledged');
       }
     } else if (t.health === 'up') {
-      bits.push(t.responseTimeMs != null ? `up, ${t.responseTimeMs} ms` : 'up');
+      const upStart = this._upStartMs(t);
+      const upDur = upStart ? `, up for ${formatDuration(Date.now() - upStart, { compact: false })}` : '';
+      bits.push(t.responseTimeMs != null ? `up, ${t.responseTimeMs} ms${upDur}` : `up${upDur}`);
     } else {
       bits.push('no probe data');
     }
@@ -2188,6 +2302,10 @@ export class InstancesPage {
       rows = rows.filter(t => t.health === 'up' && !(t.responseTimeMs > slowThresholdMs(t)));
     } else if (this.activeStatus === 'down') {
       rows = rows.filter(t => t.health !== 'up');
+    } else if (this.activeStatus === 'unacked') {
+      rows = rows.filter(t => t.health !== 'up' && !t.maintenance && !this.acknowledgedDownInstances?.has(t.instance));
+    } else if (this.activeStatus === 'maint') {
+      rows = rows.filter(t => t.maintenance);
     } else if (this.activeStatus === 'slow') {
       rows = rows.filter(t => t.health === 'up' && t.responseTimeMs > slowThresholdMs(t));
     }
@@ -2203,6 +2321,7 @@ export class InstancesPage {
     if (rows.length === 0) {
       this._downCardElements = [];
       this._maintCardElements = [];
+      this._upCardElements = [];
       this._sortedRows = rows;
       // Without this the footer kept the PREVIOUS filter's numbers ("Showing
       // 1–42 of 42 hosts") and its page buttons underneath an empty grid.
@@ -2210,9 +2329,10 @@ export class InstancesPage {
       this.currentPage = 1;
       this._updatePaginationUI(0, 0, 0);
       this.table.innerHTML = `
-        <div class="empty-state">
+        <div class="empty-state" style="grid-column: 1 / -1; padding: 40px 20px; text-align: center; color: var(--text-secondary);">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-          <span>No hosts match the current filter</span>
+          <div style="font-size: 14px; font-weight: 500; margin-top: 8px;">No hosts match the current filter</div>
+          <button type="button" class="btn btn-secondary btn-sm empty-state-reset-btn" style="margin-top: 12px; cursor: pointer;">Reset All Filters</button>
         </div>`;
       return;
     }
@@ -2344,6 +2464,26 @@ export class InstancesPage {
         const latEl = card.querySelector('.hc-latency') || card.children[1];
         if (latEl && latEl.textContent !== latencyText) latEl.textContent = latencyText;
 
+        let uptimeEl = card.querySelector('.hc-uptime');
+        if (isUp) {
+          const upText = this._upAgingFor(t, now);
+          if (!uptimeEl) {
+            uptimeEl = document.createElement('div');
+            uptimeEl.className = 'hc-uptime';
+            uptimeEl.textContent = upText;
+            const ackMark = card.querySelector('.hc-ack-mark');
+            if (ackMark) {
+              card.insertBefore(uptimeEl, ackMark);
+            } else {
+              card.appendChild(uptimeEl);
+            }
+          } else if (uptimeEl.textContent !== upText) {
+            uptimeEl.textContent = upText;
+          }
+        } else if (uptimeEl) {
+          uptimeEl.remove();
+        }
+
         const cardTitle = this._cardTooltip(t, isAcked);
         if (card.getAttribute('title') !== cardTitle) card.setAttribute('title', cardTitle);
       });
@@ -2357,9 +2497,11 @@ export class InstancesPage {
         }
         this.table.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1; padding: 40px 20px; text-align: center; color: var(--text-secondary);">
           <div style="font-size: 14px; font-weight: 500;">${msg}</div>
+          <button type="button" class="btn btn-secondary btn-sm empty-state-reset-btn" style="margin-top: 12px; cursor: pointer;">Reset All Filters</button>
         </div>`;
         this._downCardElements = [];
         this._maintCardElements = [];
+        this._upCardElements = [];
         return;
       }
 
@@ -2389,6 +2531,11 @@ export class InstancesPage {
           latencyText = (t.responseTimeMs != null) ? `${t.responseTimeMs} ms` : '—';
         }
 
+        let uptimeHtml = '';
+        if (isUp) {
+          uptimeHtml = `<div class="hc-uptime">${this._esc(this._upAgingFor(t, now))}</div>`;
+        }
+
         return `<div class="${fullClass}"
                      data-instance="${this._esc(t.instance)}"
                      role="listitem"
@@ -2398,6 +2545,7 @@ export class InstancesPage {
           ${this._selectMode ? this._selectBoxHtml() : ''}
           <div class="hc-ip">${this._esc(t.instance)}</div>
           <div class="hc-latency">${this._esc(latencyText)}</div>
+          ${uptimeHtml}
           ${isAcked ? '<span class="hc-ack-mark" aria-hidden="true">✓</span>' : ''}
         </div>`;
       }).join('');
@@ -2408,7 +2556,7 @@ export class InstancesPage {
       }
     }
 
-    // Cache down and maintenance card DOM references to avoid periodic querySelectorAll in _tickDownCounters
+    // Cache down, maintenance, and up card DOM references to avoid periodic querySelectorAll in _tickDownCounters
     this._downCardElements = Array.from(this.table.querySelectorAll('.host-card.hc-down')).map(card => ({
       inst: card.dataset.instance,
       latEl: card.querySelector('.hc-latency')
@@ -2416,6 +2564,10 @@ export class InstancesPage {
     this._maintCardElements = Array.from(this.table.querySelectorAll('.host-card.hc-maintenance')).map(card => ({
       inst: card.dataset.instance,
       latEl: card.querySelector('.hc-latency')
+    }));
+    this._upCardElements = Array.from(this.table.querySelectorAll('.host-card.hc-up, .host-card.hc-slow')).map(card => ({
+      inst: card.dataset.instance,
+      uptimeEl: card.querySelector('.hc-uptime')
     }));
   }
 
@@ -2473,6 +2625,22 @@ export class InstancesPage {
       if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
       return `${Math.floor(diff / 86400)}d ago`;
     } catch { return '—'; }
+  }
+
+  _resetAllFilters() {
+    this.searchQ = '';
+    const searchInput = this.searchEl || document.getElementById('instanceSearch');
+    if (searchInput) searchInput.value = '';
+    const clearBtn = document.getElementById('clearSearchBtn');
+    if (clearBtn) clearBtn.classList.add('hidden');
+    this.activeStatus = 'all';
+    if (this.chipGroup) {
+      this.chipGroup.querySelectorAll('.chip').forEach(c => {
+        c.classList.toggle('chip-active', c.dataset.status === 'all');
+      });
+    }
+    this._lastDataSignature = null;
+    this._render();
   }
 
   _esc(s) { return escapeHtml(s); }

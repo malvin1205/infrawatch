@@ -73,6 +73,8 @@ ROLE_PERMISSIONS: Dict[str, Set[str]] = {
         "users.manage",
         "alerts.ack",
         "audit.read",
+        "alarm_policy.read",
+        "alarm_policy.write",
     },
     "viewer": {
         "dashboard.read",
@@ -81,6 +83,7 @@ ROLE_PERMISSIONS: Dict[str, Set[str]] = {
         "maintenance.read",
         "dependencies.read",
         "availability.read",
+        "alarm_policy.read",
     }
 }
 ROLE_PERMISSIONS["owner"] = set(ROLE_PERMISSIONS["admin"])

@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 try:
-    from ..connection import db_read, db_transaction
-except (ImportError, ValueError):
     from alarm.storage.connection import db_read, db_transaction
+except (ImportError, ValueError):
+    from storage.connection import db_read, db_transaction
 
 
 class MaintenanceRepository:
@@ -147,10 +147,36 @@ class EndpointRepository:
     @staticmethod
     def delete_endpoint(endpoint_id_or_url: str, db_path: Optional[str] = None) -> bool:
         with db_transaction(db_path) as conn:
+            row = conn.execute("SELECT url FROM endpoints WHERE id = ? OR url = ?", (endpoint_id_or_url, endpoint_id_or_url)).fetchone()
+            del_url = (row["url"] if row else endpoint_id_or_url).rstrip("/")
+
             cursor = conn.execute("DELETE FROM endpoints WHERE id = ? OR url = ?", (endpoint_id_or_url, endpoint_id_or_url))
+            if cursor.rowcount == 0:
+                return False
+
             remaining = conn.execute("SELECT * FROM endpoints ORDER BY created_at ASC").fetchall()
             if remaining and not any(r["is_active"] for r in remaining):
                 conn.execute("UPDATE endpoints SET is_active = 1 WHERE id = ?", (remaining[0]["id"],))
+
+            # Auto-resolve open firing incidents for the deleted endpoint
+            now_ts = time.time()
+            conn.execute("""
+                UPDATE incidents
+                SET status = 'resolved',
+                    resolved_at = COALESCE(resolved_at, ?),
+                    duration_seconds = COALESCE(duration_seconds, round(? - started_at, 1)),
+                    total_down_seconds = COALESCE(total_down_seconds, 0) + COALESCE(duration_seconds, round(? - started_at, 1)),
+                    updated_at = ?
+                WHERE source = ? AND status = 'firing'
+            """, (now_ts, now_ts, now_ts, now_ts, del_url))
+
+            # Clear alert acknowledgments for targets that no longer have any firing incidents across any remaining endpoint
+            conn.execute("""
+                DELETE FROM alert_acknowledgments
+                WHERE instance NOT IN (
+                    SELECT instance FROM incidents WHERE status = 'firing'
+                )
+            """)
             return cursor.rowcount > 0
 
     @staticmethod

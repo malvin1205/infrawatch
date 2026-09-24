@@ -11,6 +11,7 @@ __pycache__
 data/*
 !data/.gitkeep
 !data/*.example
+!data/target_whitelist.txt
 
 # Legacy per-deployment secrets and stores
 .api_key

@@ -49,13 +49,13 @@ _WEBHOOK_LOCK = threading.Lock()
 _LAST_WEBHOOK_AT = [0.0]
 
 
-def active_incident_list():
+def active_incident_list(source=None):
     """The current set of firing alerts. SQLite `incidents` is the single
     source of truth (audit F1); status.json is a denormalized cache used only
     as a fallback when the SQLite read itself fails (corrupt/locked DB), which
     preserves the pre-F1 resilience of the read paths."""
     try:
-        return IncidentRepository.get_active_incidents()
+        return IncidentRepository.get_active_incidents(source=source)
     except Exception:
         logger.exception("active_incident_list: SQLite read failed; using status.json cache")
         status_data = json_store.load_json(json_store.STATUS_FILE, None)
@@ -166,7 +166,7 @@ def get_active_maintenance(instance, job=None, windows=None, now=None):
 
 def record_alert_event(name, severity, instance, summary, job, event_time, is_now_firing,
                         receiver='', generatorURL='', key=None, latency_ms=None,
-                        http_status_code=None, last_error=None):
+                        http_status_code=None, last_error=None, source=None):
     """Applies one alert firing/resolved transition to status.json/logs.json/
     history.json and SQLite database. Shared by the Alertmanager webhook and the Prometheus-poller
     fallback so both get identical transition-only dedupe and incident-history reconciliation.
@@ -206,7 +206,7 @@ def record_alert_event(name, severity, instance, summary, job, event_time, is_no
                     name=name, severity=severity, instance=instance, summary=summary,
                     job=job, event_time=event_time, is_now_firing=is_now_firing,
                     receiver=receiver, generatorURL=generatorURL, key=key, latency_ms=latency_ms,
-                    http_status_code=http_status_code, last_error=last_error
+                    http_status_code=http_status_code, last_error=last_error, source=source
                 )
                 break
             except Exception as e:
@@ -217,6 +217,7 @@ def record_alert_event(name, severity, instance, summary, job, event_time, is_no
         if is_now_firing:
             active_alerts[key] = {
                 "key":      key,
+                "source":   source or "",
                 "name":     name,
                 "severity": severity,
                 "instance": instance,

@@ -30,6 +30,7 @@ async function checkAuthStatus() {
 }
 
 function showSetupModal() {
+  closeLoginModal();
   const modal = document.getElementById('setupModal');
   if (modal) {
     modal.classList.remove('hidden');
@@ -43,6 +44,10 @@ function closeSetupModal() {
 }
 
 function showLoginModal() {
+  if (!window.isSystemInitialized) {
+    showSetupModal();
+    return;
+  }
   const modal = document.getElementById('loginModal');
   if (modal) {
     modal.classList.remove('hidden');
@@ -290,6 +295,7 @@ const WRITE_CONTROL_IDS = [
   'bulkMaintSubmitBtn',         // maintenance.write
   'endpointUrlInput',           // endpoints.write
   'addEndpointSubmitBtn',       // endpoints.write
+  'apSubmitBtn',                // alarm_policy.write
 ];
 
 function applyRolePermissions(user) {
@@ -322,6 +328,7 @@ function updateUserUI(user) {
   const logoutBtn = document.getElementById('headerLogoutBtn');
   const manageUsersBtn = document.getElementById('headerManageUsersBtn');
   const telegramBtn = document.getElementById('headerTelegramBtn');
+  const alarmPolicyBtn = document.getElementById('headerAlarmPolicyBtn');
 
   if (user && user.username) {
     const name = user.display_name || user.username;
@@ -335,6 +342,10 @@ function updateUserUI(user) {
     if (dropdownRole) dropdownRole.textContent = user.role === 'owner' ? 'Owner' : user.role === 'admin' ? 'Administrator' : 'Read-Only Viewer';
     if (loginBtn) loginBtn.classList.add('hidden');
     if (logoutBtn) logoutBtn.classList.remove('hidden');
+    if (alarmPolicyBtn) {
+      if (isAdminLike(user)) alarmPolicyBtn.classList.remove('hidden');
+      else alarmPolicyBtn.classList.add('hidden');
+    }
     if (manageUsersBtn) {
       if (isAdminLike(user)) manageUsersBtn.classList.remove('hidden');
       else manageUsersBtn.classList.add('hidden');
@@ -354,6 +365,7 @@ function updateUserUI(user) {
     if (dropdownRole) dropdownRole.textContent = 'Read-Only Viewer';
     if (loginBtn) loginBtn.classList.remove('hidden');
     if (logoutBtn) logoutBtn.classList.add('hidden');
+    if (alarmPolicyBtn) alarmPolicyBtn.classList.add('hidden');
     if (manageUsersBtn) manageUsersBtn.classList.add('hidden');
     if (telegramBtn) telegramBtn.classList.add('hidden');
   }
@@ -364,7 +376,13 @@ function updateUserUI(user) {
 
 export function initAuth() {
   // apiFetch (net.js) dispatches this on a 401 instead of reaching in here.
-  window.addEventListener('iw:unauthorized', () => showLoginModal());
+  window.addEventListener('iw:unauthorized', () => {
+    if (!window.isSystemInitialized) {
+      showSetupModal();
+      return;
+    }
+    showLoginModal();
+  });
 
   // First-run Admin Setup Form
   const setupForm = document.getElementById('setupForm');

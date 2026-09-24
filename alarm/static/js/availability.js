@@ -48,10 +48,11 @@ class _AvailabilityMethods {
   }
 
   _getAvailCacheKey(minutes = this.periodMinutes, job = this.selectedJob, end = this.periodEnd) {
+    const epKey = this._activeEndpoint || (this.monitor && this.monitor._activeEndpoint) || 'default';
     const jobKey = (job && job !== 'all') ? job : 'all';
     const minKey = Math.round(minutes || 1440);
     const endKey = end ? String(end) : 'live';
-    return `${jobKey}:${minKey}:${endKey}`;
+    return `${epKey}:${jobKey}:${minKey}:${endKey}`;
   }
 
   // Minutes from 00:00 WIB on the 1st of the current (WIB) month to now. A
@@ -63,7 +64,9 @@ class _AvailabilityMethods {
     const wibNow = new Date(Date.now() + WIB_OFFSET_SEC * 1000);
     const monthStartWib = Date.UTC(wibNow.getUTCFullYear(), wibNow.getUTCMonth(), 1);
     const monthStart = monthStartWib - WIB_OFFSET_SEC * 1000;
-    return Math.max(1, Math.round((Date.now() - monthStart) / 60000));
+    // floor, not round: rounding up starts the window up to 30s before the
+    // 1st, adding a spurious previous-month day to the Calendar.
+    return Math.max(1, Math.floor((Date.now() - monthStart) / 60000));
   }
 
   _updateAvailLoadingUI(isLoading) {
@@ -197,6 +200,19 @@ class _AvailabilityMethods {
       this._applyAvailabilityData(cached.data, 'cache_hit');
       this._displayedAvailKey = cacheKey;
       if (!force && hasFreshCache) {
+        // A previous selection's request can still be in flight (e.g. job A's
+        // fetch hasn't resolved yet when the user switches to job B and B is
+        // a cache hit) — this early return must invalidate it too, or A's
+        // response lands later, passes the network path's now-stale-by-seq
+        // check trivially (seq was never bumped here), and overwrites B's
+        // freshly-rendered cache-hit data.
+        if (this._availAbortController && this._availInFlightKey !== cacheKey) {
+          this._availAbortController.abort();
+          this._availAbortController = null;
+          this._availInFlightKey = null;
+          this._availLoading = false;
+          ++this._availRequestSeq;
+        }
         this._updateAvailLoadingUI(false);
         return;
       }
@@ -238,6 +254,18 @@ class _AvailabilityMethods {
     const drawerSparklineRangeEl = document.getElementById('drawerSparklineRange');
     if (drawerSparklineRangeEl) drawerSparklineRangeEl.textContent = `(${rangeText})`;
 
+    // Must outlast the backend's slowest honest answer: the hybrid path
+    // (MTD/30d while SQLite history is still being backfilled) runs ~30s
+    // Prometheus queries plus daily reconstruction — measured ~40s live. A
+    // 35s abort here killed every MTD load and left the previous range's
+    // Trend on screen. A timeout is a failure (retry + unavailable), never a
+    // silent "superseded" abort.
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      try { controller.abort(); } catch (_) {}
+    }, 90000);
+
     try {
       let url = `/api/availability?minutes=${Math.round(this.periodMinutes)}`;
       if (this.selectedJob && this.selectedJob !== 'all') {
@@ -266,7 +294,7 @@ class _AvailabilityMethods {
       this._applyAvailabilityData(data, 'network_response');
       this._displayedAvailKey = cacheKey;
     } catch (e) {
-      if (e.name === 'AbortError' || isStale()) {
+      if ((e.name === 'AbortError' && !timedOut) || isStale()) {
         return;
       }
       console.warn('[InfraWatch] Availability fetch failed:', e);
@@ -274,9 +302,13 @@ class _AvailabilityMethods {
       this._markAvailabilityUnavailable(cacheKey);
       this._scheduleRetry('availability');
     } finally {
+      clearTimeout(timeoutId);
       if (this._availAbortController === controller) {
         this._availAbortController = null;
         this._availInFlightKey = null;
+        this._availLoading = false;
+        this._updateAvailLoadingUI(false);
+      } else if (!this._availAbortController) {
         this._availLoading = false;
         this._updateAvailLoadingUI(false);
       }
@@ -1066,7 +1098,7 @@ class _AvailabilityMethods {
       return `${pad(hh)}:${pad(mm)} WIB`;
     }
     const mon = d.toLocaleString(undefined, { month: 'short', timeZone: 'UTC' });
-    return `${mon} ${d.getUTCDate()}, ${pad(d.getUTCHours())}:00 WIB`;
+    return `${mon} ${d.getUTCDate()}, ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} WIB`;
   }
 
   /* ── Availability Trend chart (hourly fleet availability) ──
@@ -1108,12 +1140,19 @@ class _AvailabilityMethods {
       ? data.trend.filter(p => p && typeof p.ts === 'number' && typeof p.availability_pct === 'number')
       : [];
     allPts.sort((a, b) => a.ts - b.ts);
+    // availability_pct === null = too few hosts reported that slot to price the
+    // fleet (see _build_fleet_trend). Drawn as a gray band that breaks the line,
+    // never as a value on it.
+    const allPartial = Array.isArray(data && data.trend)
+      ? data.trend.filter(p => p && typeof p.ts === 'number' && p.availability_pct === null)
+      : [];
 
     const startTs = (typeof zoom.lo === 'number') ? Math.max(fullStart, zoom.lo) : fullStart;
     const endTs = (typeof zoom.hi === 'number') ? Math.min(fullEnd, zoom.hi) : fullEnd;
     const windowSec = Math.max(1, endTs - startTs);
     const isZoomed = startTs > fullStart + 1 || endTs < fullEnd - 1;
     const pts = allPts.filter(p => p.ts >= startTs && (p.ts <= endTs || (p.ts - bucketSec < endTs && Math.abs(endTs - fullEnd) < 60)));
+    const partialPts = allPartial.filter(p => p.ts > startTs && p.ts - bucketSec < endTs);
 
     const resetBtn = document.getElementById('avbTrendZoomReset');
     if (resetBtn) resetBtn.classList.toggle('hidden', !isZoomed);
@@ -1146,7 +1185,7 @@ class _AvailabilityMethods {
       }
     };
 
-    if (pts.length < 2) {
+    if (pts.length < 1) {
       if (wrap) wrap.remove();
       if (hover) { hover.remove(); }
       if (emptyEl) emptyEl.classList.remove('hidden');
@@ -1175,34 +1214,120 @@ class _AvailabilityMethods {
     const yOf = v => clamp(((yMax - v) / (yMax - yMin)) * 100, 0, 100);
     const coords = pts.map(p => [xOf(p.ts), yOf(p.availability_pct)]);
 
-    // The drawn line/area extends flat from the last real sample to the
-    // visible right edge (x=100) when that sample doesn't already reach it —
-    // e.g. a zoom whose end falls between two bucket boundaries, or the
-    // in-progress bucket sitting slightly before `endTs`. This is a display-
-    // only extension of the last KNOWN value (nothing changed since that
-    // sample), never a new coordinate: `coords`/`pts` (hover crosshair, click
-    // event-detail lookup) are untouched, so the drawn edge still hover/
-    // click-resolves to the real last point behind it.
-    const drawCoords = coords[coords.length - 1][0] < 99.95
-      ? [...coords, [100, coords[coords.length - 1][1]]]
-      : coords;
-    const lineD = drawCoords.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`).join(' ');
-    const areaD = `${lineD} L${drawCoords[drawCoords.length - 1][0].toFixed(2)} 100 L${drawCoords[0][0].toFixed(2)} 100 Z`;
+    // ── Missing telemetry / gap detection ──
+    // Points separated by more than gapThreshold represent an unknown / no-data
+    // period (e.g. unreachable Prometheus or missing buckets). We split points
+    // into contiguous valid segments and render gaps as neutral, non-availability
+    // visual markers. Never draw continuous availability across telemetry gaps.
+    const gapThreshold = Math.max(bucketSec * 1.8, 7200);
+
+    const segments = [];
+    const partialBreak = [];  // partialBreak[i]: segments i and i+1 are split by partial-data slots
+    let currentSeg = [];
+    let pi = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      if (currentSeg.length === 0) {
+        currentSeg.push(p);
+      } else {
+        const prevP = currentSeg[currentSeg.length - 1];
+        let partialBetween = false;
+        while (pi < partialPts.length && partialPts[pi].ts < p.ts) {
+          if (partialPts[pi].ts > prevP.ts) partialBetween = true;
+          pi++;
+        }
+        if (p.ts - prevP.ts <= gapThreshold && !partialBetween) {
+          currentSeg.push(p);
+        } else {
+          segments.push(currentSeg);
+          partialBreak.push(partialBetween);
+          currentSeg = [p];
+        }
+      }
+    }
+    if (currentSeg.length > 0) {
+      segments.push(currentSeg);
+    }
+
+    let validLinesSvg = '';
+    let validAreasSvg = '';
+    let gapBandsSvg = '';
+    let gapConnectorsSvg = '';
+    // No per-point markers: SVG circles in this stretched (preserveAspectRatio
+    // none) viewBox render as wide ovals. The hover/pin dot marks a point.
+    let hasGaps = false;
+
+    // Leading gap (telemetry begins after startTs)
+    if (pts.length > 0 && (pts[0].ts - startTs) > gapThreshold) {
+      // Legend entry only if this stretch isn't already explained by partial-coverage bands.
+      if (!partialPts.some(q => q.ts <= pts[0].ts)) hasGaps = true;
+      const x1 = xOf(pts[0].ts);
+      gapBandsSvg += `<rect class="avb-trend-gap-band" x="0" y="0" width="${x1.toFixed(2)}" height="100"></rect>`;
+    }
+
+    // Render each contiguous valid segment and gaps between segments
+    for (let sIdx = 0; sIdx < segments.length; sIdx++) {
+      const seg = segments[sIdx];
+      const isLastSeg = (sIdx === segments.length - 1);
+
+      if (seg.length >= 2) {
+        const segCoords = seg.map(p => [xOf(p.ts), yOf(p.availability_pct)]);
+        // Only extend flat to visible right edge if this is the last segment AND
+        // it reaches within gapThreshold of endTs (in-progress bucket)
+        if (isLastSeg && (endTs - seg[seg.length - 1].ts) <= gapThreshold && segCoords[segCoords.length - 1][0] < 99.95) {
+          segCoords.push([100, segCoords[segCoords.length - 1][1]]);
+          seg._extendedRight = true;
+        }
+        const sLineD = segCoords.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`).join(' ');
+        const sAreaD = `${sLineD} L${segCoords[segCoords.length - 1][0].toFixed(2)} 100 L${segCoords[0][0].toFixed(2)} 100 Z`;
+        validAreasSvg += `<path class="avb-trend-area" d="${sAreaD}"></path>`;
+        validLinesSvg += `<path class="avb-trend-line" d="${sLineD}" vector-effect="non-scaling-stroke"></path>`;
+      } else if (seg.length === 1) {
+        // Isolated point (neighbours are gaps/partial): a flat stroke across
+        // the slot it summarizes, (ts - bucketSec, ts] — a line, not a marker.
+        const p = seg[0];
+        const x1 = xOf(p.ts - bucketSec).toFixed(2), x2 = xOf(p.ts).toFixed(2), y = yOf(p.availability_pct).toFixed(2);
+        validAreasSvg += `<path class="avb-trend-area" d="M${x1} ${y} L${x2} ${y} L${x2} 100 L${x1} 100 Z"></path>`;
+        validLinesSvg += `<path class="avb-trend-line" d="M${x1} ${y} L${x2} ${y}" vector-effect="non-scaling-stroke"></path>`;
+      }
+
+      // Gap between this segment and next segment
+      if (sIdx < segments.length - 1) {
+        if (!partialBreak[sIdx]) hasGaps = true;
+        const nextSeg = segments[sIdx + 1];
+        const pBefore = seg[seg.length - 1];
+        const pAfter = nextSeg[0];
+        const x1 = xOf(pBefore.ts), y1 = yOf(pBefore.availability_pct);
+        const x2 = xOf(pAfter.ts), y2 = yOf(pAfter.availability_pct);
+        gapBandsSvg += `<rect class="avb-trend-gap-band" x="${x1.toFixed(2)}" y="0" width="${Math.max(0, x2 - x1).toFixed(2)}" height="100"></rect>`;
+        // Partial-data breaks get their own band below — no dashed bridge implying a value.
+        if (!partialBreak[sIdx]) gapConnectorsSvg += `<line class="avb-trend-gap-connector" x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" vector-effect="non-scaling-stroke"></line>`;
+      }
+    }
+
+    // Trailing gap (telemetry ends before endTs)
+    if (pts.length > 0 && (endTs - pts[pts.length - 1].ts) > gapThreshold) {
+      const lastP = pts[pts.length - 1];
+      if (!partialPts.some(q => q.ts > lastP.ts)) hasGaps = true;
+      const xLast = xOf(lastP.ts);
+      gapBandsSvg += `<rect class="avb-trend-gap-band" x="${xLast.toFixed(2)}" y="0" width="${Math.max(0, 100 - xLast).toFixed(2)}" height="100"></rect>`;
+    }
+
+    // Partial-data slots: each covers (ts - bucketSec, ts].
+    let partialBandsSvg = '';
+    for (const p of partialPts) {
+      const x1 = xOf(p.ts - bucketSec), x2 = xOf(p.ts);
+      partialBandsSvg += `<rect class="avb-trend-partial-band" x="${x1.toFixed(2)}" y="0" width="${Math.max(0, x2 - x1).toFixed(2)}" height="100"></rect>`;
+    }
 
     if (!wrap) {
-      // Build the <svg> as a string inside an HTML <div> — same pattern as
-      // _renderSparkline; avoids relying on SVGElement.innerHTML. Appended
-      // after .avb-trend-grid so the line paints over the grid lines.
       wrap = document.createElement('div');
       wrap.id = 'avbTrendSvgWrap';
       wrap.className = 'avb-trend-svg-wrap';
       wrap.setAttribute('aria-hidden', 'true');
       plot.appendChild(wrap);
     }
-    // SLA target reference line. Without it the trend showed a flat line at
-    // ~73% with nothing to compare against, so "is this bad?" needed a trip to
-    // another tab (audit 4.6). Target comes from the API — it is configurable
-    // per deployment — and is only drawn when it falls inside the y-domain.
+    // SLA target reference line.
     const targetPct = typeof data.sla?.target_pct === 'number' ? data.sla.target_pct : null;
     let targetSvg = '';
     if (targetPct !== null && targetPct <= yMax && targetPct >= yMin) {
@@ -1211,16 +1336,10 @@ class _AvailabilityMethods {
         `<line class="avb-trend-target" x1="0" y1="${ty}" x2="100" y2="${ty}" vector-effect="non-scaling-stroke"></line>`;
     }
 
-    // Drop/recovery markers — explicit, so "the trend moved because a host
-    // went down/came back" never has to be inferred from the line's slope
-    // alone, and so there's an actual visual target for each: previously
-    // only recoveries got a tick, which meant a DOWN moment had nothing
-    // concrete on the chart to click. Reads the SAME fleet sweep as the
-    // tooltip/detail panel, so a tick's position and the panel's answer for
-    // clicking it can never disagree. Capped past a few dozen in one view —
-    // they'd be a smear, not a signal, and hover/click still answer
-    // precisely for any point regardless.
-    this._fleetSweep = this._buildFleetSweep(data.daily, fullStart, fullEnd);
+    const sweepSource = (Array.isArray(data.trend_incidents) && data.trend_incidents.length)
+      ? data.trend_incidents
+      : data.daily;
+    this._fleetSweep = this._buildFleetSweep(sweepSource, fullStart, fullEnd);
     const visibleRecoveries = this._fleetSweep.changes.filter(c => c.type === 'recovery' && c.ts >= startTs && c.ts <= endTs);
     const visibleDrops = this._fleetSweep.changes.filter(c => c.type === 'drop' && c.ts >= startTs && c.ts <= endTs);
     const recoverySvg = visibleRecoveries.length <= 40
@@ -1236,41 +1355,39 @@ class _AvailabilityMethods {
 
     wrap.innerHTML =
       `<svg class="avb-trend-svg" viewBox="0 0 100 100" preserveAspectRatio="none">` +
-      `<path class="avb-trend-area" d="${areaD}"></path>` +
+      gapBandsSvg +
+      partialBandsSvg +
+      validAreasSvg +
       dropSvg +
       recoverySvg +
-      `<path class="avb-trend-line" d="${lineD}" vector-effect="non-scaling-stroke"></path>` +
+      gapConnectorsSvg +
+      validLinesSvg +
       targetSvg +
       `</svg>`;
 
-    // Legend note for the reference line — an unexplained dashed line is just
-    // another unlabelled mark.
+    // Legend note for the reference line and telemetry gaps
     const targetNoteEl = document.getElementById('avbTrendTargetNote');
     if (targetNoteEl) {
-      if (targetPct === null) {
-        targetNoteEl.textContent = '';
-      } else if (targetPct < yMin) {
-        targetNoteEl.textContent = `SLA target ${targetPct}% — below this chart's range`;
-      } else {
-        targetNoteEl.textContent = `╌╌ SLA target ${targetPct}%${recoverySvg ? ' · │ green = a host recovered' : ''}`;
+      const noteParts = [];
+      if (targetPct !== null) {
+        if (targetPct < yMin) {
+          noteParts.push(`SLA target ${targetPct}% — below this chart's range`);
+        } else {
+          noteParts.push(`╌╌ SLA target ${targetPct}%`);
+        }
       }
+      if (recoverySvg) noteParts.push('│ green = a host recovered');
+      if (hasGaps) noteParts.push('┈┈ gray dashed = no telemetry / unknown');
+      if (partialPts.length) noteParts.push('▮ gray band = insufficient host coverage');
+      targetNoteEl.textContent = noteParts.join(' · ');
     }
 
-    // ── Interactive overlay: hover for a crosshair readout, drag to zoom,
-    // plain click to pin an exact event detail panel below. `sweep`/
-    // `entriesByHost` let the tooltip and detail panel answer "why did it
-    // move here" from the SAME daily/events data already in this payload —
-    // no extra fetch, and it always agrees with the Downtime Calendar /
-    // Outage Today chart since all three read the same fleet sweep
-    // (_buildFleetSweep).
     this._entriesByHost = new Map((data.entries || []).map(e => [e.id || e.name, e]));
     this._trendHoverState = {
-      coords, pts, windowSec, bucketSec, startTs, endTs,
+      coords, pts, partialPts, segments, yMin, yMax, ySpan: (yMax - yMin) || 1,
+      minReportingPct: data.trend_min_reporting_pct, windowSec, bucketSec, startTs, endTs, gapThreshold,
       sweep: this._fleetSweep,
     };
-    // Persistent pin, separate from the transient hover crosshair — set by
-    // clicking Outage Today so the operator can see, without guessing,
-    // which point on this chart that event actually moved.
     this._renderTrendPin(plot);
     if (!hover) {
       hover = document.createElement('div');
@@ -1284,29 +1401,105 @@ class _AvailabilityMethods {
 
       const move = e => {
         const st = this._trendHoverState;
-        if (!st || st.coords.length < 2) return;
+        if (!st || st.coords.length === 0) return;
         const rect = hover.getBoundingClientRect();
         if (!rect.width) return;
         const xp = clamp(((e.clientX - rect.left) / rect.width) * 100, 0, 100);
+        const hoverTs = st.startTs + (xp / 100) * st.windowSec;
+
         let best = 0, bd = Infinity;
-        for (let i = 0; i < st.coords.length; i++) {
-          const d = Math.abs(st.coords[i][0] - xp);
+        for (let i = 0; i < st.pts.length; i++) {
+          const d = Math.abs(st.pts[i].ts - hoverTs);
           if (d < bd) { bd = d; best = i; }
         }
-        const [cx, cy] = st.coords[best];
         const p = st.pts[best];
         const cross = hover.querySelector('.avb-trend-cross');
         const dot = hover.querySelector('.avb-trend-dot');
         const tip = hover.querySelector('.avb-trend-tip');
-        cross.style.left = `${cx}%`;
-        dot.style.left = `${cx}%`;
-        dot.style.top = `${cy}%`;
-        tip.textContent = `${this._trendTsLabel(Math.min(p.ts, st.endTs), st.windowSec)} · ${p.availability_pct.toFixed(2)}%${this._trendWhyText(p, st)}`;
-        tip.style.left = `${cx}%`;
-        tip.style.top = `${cy}%`;
-        tip.classList.toggle('flip-x', cx > 62);
-        tip.classList.toggle('edge-left', cx < 38);
-        tip.classList.toggle('flip-y', cy < 22);
+        cross.style.left = `${xp}%`;
+
+        // Check if cursor is over a telemetry gap (partial coverage or no data)
+        const partial = (st.partialPts || []).find(q => hoverTs > q.ts - st.bucketSec && hoverTs <= q.ts);
+        const isLeadingGap = st.pts.length > 0 && hoverTs < (st.pts[0].ts - st.bucketSec * 0.8) && (st.pts[0].ts - st.startTs) > st.gapThreshold;
+        const isTrailingGap = st.pts.length > 0 && hoverTs > (st.pts[st.pts.length - 1].ts + st.gapThreshold);
+        let isBetweenGap = false;
+        if (!isLeadingGap && !isTrailingGap && st.segments && st.segments.length > 1) {
+          for (let sIdx = 0; sIdx < st.segments.length - 1; sIdx++) {
+            const segA = st.segments[sIdx], segB = st.segments[sIdx + 1];
+            const endA = segA[segA.length - 1].ts;
+            const startB = segB[0].ts;
+            if (hoverTs > endA && hoverTs < startB && (startB - endA) > st.gapThreshold) {
+              isBetweenGap = true;
+              break;
+            }
+          }
+        }
+        const isOverGap = partial || isLeadingGap || isTrailingGap || isBetweenGap;
+        if (isOverGap) {
+          dot.style.display = 'none';
+          tip.textContent = partial
+            ? `${this._trendTsLabel(partial.ts, st.windowSec)} · Partial Telemetry: ${partial.hosts_reporting}/${partial.hosts_expected} hosts reporting` +
+              (typeof st.minReportingPct === 'number' ? ` (below ${st.minReportingPct}% coverage threshold)` : '')
+            : `${this._trendTsLabel(hoverTs, st.windowSec)} · Telemetry Gap: No scrape data (Prometheus unreachable or scrape stopped during this window)`;
+          tip.style.left = `${xp}%`;
+          tip.style.top = `50%`;
+          tip.classList.toggle('flip-x', xp > 62);
+          tip.classList.toggle('edge-left', xp < 38);
+          tip.classList.remove('flip-y');
+        } else {
+          // Continuous interpolation along the active SVG segment
+          let interpPct = null;
+          if (st.segments && st.segments.length) {
+            for (let sIdx = 0; sIdx < st.segments.length; sIdx++) {
+              const seg = st.segments[sIdx];
+              const isLastSeg = (sIdx === st.segments.length - 1);
+              if (seg.length >= 2) {
+                const segStart = seg[0].ts;
+                const segEnd = (isLastSeg && seg._extendedRight) ? st.endTs : seg[seg.length - 1].ts;
+                if (hoverTs >= segStart - (st.bucketSec * 0.2) && hoverTs <= segEnd + 0.1) {
+                  if (hoverTs >= seg[seg.length - 1].ts) {
+                    interpPct = seg[seg.length - 1].availability_pct;
+                  } else if (hoverTs <= seg[0].ts) {
+                    interpPct = seg[0].availability_pct;
+                  } else {
+                    for (let k = 0; k < seg.length - 1; k++) {
+                      if (hoverTs >= seg[k].ts && hoverTs <= seg[k + 1].ts) {
+                        const tSpan = seg[k + 1].ts - seg[k].ts;
+                        const r = tSpan > 0 ? (hoverTs - seg[k].ts) / tSpan : 0;
+                        interpPct = seg[k].availability_pct + r * (seg[k + 1].availability_pct - seg[k].availability_pct);
+                        break;
+                      }
+                    }
+                  }
+                  break;
+                }
+              } else if (seg.length === 1) {
+                const p0 = seg[0];
+                if (hoverTs >= p0.ts - st.bucketSec && hoverTs <= p0.ts + (st.bucketSec * 0.5)) {
+                  interpPct = p0.availability_pct;
+                  break;
+                }
+              }
+            }
+          }
+          if (interpPct === null && p) {
+            interpPct = p.availability_pct;
+          }
+          if (typeof interpPct !== 'number' || isNaN(interpPct)) {
+            interpPct = 100.0;
+          }
+
+          const cy = clamp(((st.yMax - interpPct) / (st.ySpan || 1)) * 100, 0, 100);
+          dot.style.display = '';
+          dot.style.left = `${xp}%`;
+          dot.style.top = `${cy}%`;
+          tip.textContent = `${this._trendTsLabel(hoverTs, st.windowSec)} · ${interpPct.toFixed(2)}%${this._trendWhyText(hoverTs, st, p)}`;
+          tip.style.left = `${xp}%`;
+          tip.style.top = `${cy}%`;
+          tip.classList.toggle('flip-x', xp > 62);
+          tip.classList.toggle('edge-left', xp < 38);
+          tip.classList.toggle('flip-y', cy < 22);
+        }
         hover.classList.add('active');
       };
       hover.addEventListener('pointermove', move);
@@ -1395,18 +1588,19 @@ class _AvailabilityMethods {
       }
     }
     if (best === -1 || !st.coords[best] || !st.pts[best]) { this._clearTrendHighlight(); return; }
-    const [cx, cy] = st.coords[best];
+    const [, cy] = st.coords[best];
     const p = st.pts[best];
-    pin.querySelector('.avb-trend-cross').style.left = `${cx}%`;
+    const px = Math.max(0, Math.min(100, ((ts - st.startTs) / st.windowSec) * 100));
+    pin.querySelector('.avb-trend-cross').style.left = `${px}%`;
     const dot = pin.querySelector('.avb-trend-dot');
-    dot.style.left = `${cx}%`;
+    dot.style.left = `${px}%`;
     dot.style.top = `${cy}%`;
     const tip = pin.querySelector('.avb-trend-tip');
-    tip.textContent = `${this._trendTsLabel(Math.min(p.ts, st.endTs), st.windowSec)} · ${p.availability_pct.toFixed(2)}%${this._trendWhyText(p, st)}`;
-    tip.style.left = `${cx}%`;
+    tip.textContent = `${this._trendTsLabel(ts, st.windowSec)} · ${p.availability_pct.toFixed(2)}%${this._trendWhyText(ts, st, p)}`;
+    tip.style.left = `${px}%`;
     tip.style.top = `${cy}%`;
-    tip.classList.toggle('flip-x', cx > 62);
-    tip.classList.toggle('edge-left', cx < 38);
+    tip.classList.toggle('flip-x', px > 62);
+    tip.classList.toggle('edge-left', px < 38);
     tip.classList.toggle('flip-y', cy < 22);
     pin.classList.remove('hidden');
   }
@@ -1687,8 +1881,43 @@ class _AvailabilityMethods {
 
     if (!nearby.length) {
       const evalTs = point ? point.ts : ts;
-      const hostsDown = sweep.hostsDownAt(evalTs);
+      let hostsDown = sweep.hostsDownAt(evalTs);
+      let isBucketLookup = false;
+      if (!hostsDown.length && point && point.ts) {
+        const bucketSec = st?.bucketSec || 3600;
+        const bucketStart = point.ts - bucketSec;
+        const bucketEnd = point.ts;
+        const during = (sweep.intervals || []).filter(iv => iv.s < bucketEnd && iv.e > bucketStart);
+        if (during.length > 0) {
+          const seen = new Set();
+          hostsDown = during.filter(iv => {
+            if (seen.has(iv.host)) return false;
+            seen.add(iv.host);
+            return true;
+          });
+          isBucketLookup = true;
+        }
+      }
+
       if (!hostsDown.length) {
+        const day = this._dayWithoutIntervals(evalTs);
+        const wibDate = day && day.date;
+        if (day) {
+          return `
+            <div class="avb-evd-head">
+              <span class="avb-evd-time">${timeStr}</span>
+              <span class="avb-evd-state is-down">${day.hosts_down} down</span>
+            </div>
+            <p class="avb-evd-sub">${day.hosts_down} host${day.hosts_down === 1 ? '' : 's'} had downtime on ${wibDate} — per-host outage intervals not available yet (history not materialized; backfill pending)</p>`;
+        }
+        if (point && point.availability_pct < 99.995) {
+          return `
+            <div class="avb-evd-head">
+              <span class="avb-evd-time">${timeStr}</span>
+              <span class="avb-evd-state is-down">${point.availability_pct.toFixed(2)}%</span>
+            </div>
+            <p class="avb-evd-sub">Downtime in this period, but per-host outage intervals are not materialized for it yet (history backfill pending)</p>`;
+        }
         return `
           <div class="avb-evd-head">
             <span class="avb-evd-time">${timeStr}</span>
@@ -1696,13 +1925,19 @@ class _AvailabilityMethods {
           </div>
           <p class="avb-evd-sub">All monitored hosts up — no drop or recovery in this period</p>`;
       }
-      const rows = hostsDown.map(iv => this._evdHostRowHtml({
-        host: iv.host, name: iv.name, job: iv.job, id: iv.id,
-        startTs: iv.s, isOngoing: true, durationOverride: evalTs - iv.s,
-        laterRecoveryTs: iv.isRecovery ? iv.e : null,
-        openStart: iv.openStart,
-        entries,
-      })).join('');
+      const rows = hostsDown.map(iv => {
+        const isPastRecovery = isBucketLookup && iv.e <= evalTs && !iv.openEnd;
+        return this._evdHostRowHtml({
+          host: iv.host, name: iv.name, job: iv.job, id: iv.id,
+          startTs: iv.s,
+          endTs: iv.e,
+          isOngoing: !isPastRecovery,
+          durationOverride: isPastRecovery ? Math.max(0, iv.e - iv.s) : (evalTs - iv.s),
+          laterRecoveryTs: isPastRecovery ? iv.e : (iv.isRecovery ? iv.e : null),
+          openStart: iv.openStart,
+          entries,
+        });
+      }).join('');
       const incidentTag = hostsDown.length > 1
         ? `<span class="avb-evd-incident-badge" title="Multiple hosts down during this period">INCIDENT</span>` : '';
       return `
@@ -1939,35 +2174,41 @@ class _AvailabilityMethods {
   //   steps     — [{ts, down}], a step function of fleet down-count over
   //               [lo, hi]; down-count is constant between consecutive ts
   //   downAt(ts), hostsDownAt(ts) — O(n) lookups against `intervals`
-  _buildFleetSweep(daily, lo, hi) {
+  _buildFleetSweep(sourceData, lo, hi) {
     lo = typeof lo === 'number' ? lo : -Infinity;
     hi = typeof hi === 'number' ? hi : Infinity;
 
     const perHost = new Map();
-    (daily || []).forEach(day => {
-      (day.events || []).forEach(e => {
-        const ivs = (Array.isArray(e.intervals) && e.intervals.length)
-          ? e.intervals
-          : (e.start_ts ? [{ start_ts: e.start_ts, end_ts: e.end_ts, carried_in: false, still_down: false }] : []);
-        const list = perHost.get(e.instance) || [];
-        ivs.forEach(iv => {
-          if (!iv.start_ts) return;
-          const s = iv.start_ts, en = iv.end_ts || iv.start_ts;
-          const openStart = !!iv.carried_in;
-          const openEnd = !!iv.still_down;
-          const last = list[list.length - 1];
-          if (last && last.openEnd && openStart && s - last.e <= 3600) {
-            // Same host, touching across a day seam (yesterday's last bucket
-            // was still down, today's first bucket opened already down) —
-            // one interval, not two.
-            last.e = Math.max(last.e, en);
-            last.openEnd = openEnd;
-            return;
-          }
-          list.push({ s, e: en, openStart, openEnd, host: e.instance, name: e.name || e.instance, job: e.job });
-        });
-        perHost.set(e.instance, list);
+    const eventList = [];
+    if (Array.isArray(sourceData)) {
+      sourceData.forEach(item => {
+        if (item && Array.isArray(item.events)) {
+          item.events.forEach(e => eventList.push(e));
+        } else if (item && (item.instance || item.start_ts || item.intervals)) {
+          eventList.push(item);
+        }
       });
+    }
+
+    eventList.forEach(e => {
+      const ivs = (Array.isArray(e.intervals) && e.intervals.length)
+        ? e.intervals
+        : (e.start_ts ? [{ start_ts: e.start_ts, end_ts: e.end_ts, carried_in: !!e.carried_in, still_down: !!e.still_down }] : []);
+      const list = perHost.get(e.instance) || [];
+      ivs.forEach(iv => {
+        if (!iv.start_ts) return;
+        const s = iv.start_ts, en = iv.end_ts || iv.start_ts;
+        const openStart = !!iv.carried_in;
+        const openEnd = !!iv.still_down;
+        const last = list[list.length - 1];
+        if (last && last.openEnd && openStart && s - last.e <= 3600) {
+          last.e = Math.max(last.e, en);
+          last.openEnd = openEnd;
+          return;
+        }
+        list.push({ s, e: en, openStart, openEnd, host: e.instance, name: e.name || e.instance, job: e.job });
+      });
+      perHost.set(e.instance, list);
     });
 
     const intervals = [];
@@ -2063,21 +2304,80 @@ class _AvailabilityMethods {
   // set of events for the same moment — exact drops/recoveries within
   // [p.ts, p.ts+bucket), whatever the trend's bucket width happens to be
   // (hourly for 24h/7d, a few hours for 30d).
-  _trendWhyText(p, st) {
-    const bucketStart = p.ts - st.bucketSec;
-    const bucketEnd = p.ts;
-    const changesHere = st.sweep.changes.filter(c => c.ts >= bucketStart && c.ts <= bucketEnd);
-    const downCount = Math.max(st.sweep.downAt(p.ts), st.sweep.downAt(bucketStart));
-    if (downCount === 0 && !changesHere.length) return '';
-    const drops = changesHere.filter(c => c.type === 'drop').length;
-    const recs = changesHere.filter(c => c.type === 'recovery').length;
-    if (drops || recs) {
-      const parts = [];
-      if (drops) parts.push(`${drops} dropped`);
-      if (recs) parts.push(`${recs} recovered`);
-      return ` — ${parts.join(', ')}`;
+  // The `daily` entry for ts's WIB day when the backend had downtime but no
+  // per-host intervals for it (priced from Prometheus aggregates, not yet
+  // materialized) — null otherwise.
+  _dayWithoutIntervals(ts) {
+    const wibDate = new Date((ts + WIB_OFFSET_SEC) * 1000).toISOString().slice(0, 10);
+    const day = ((this._lastAvailabilityData && this._lastAvailabilityData.daily) || []).find(d => d.date === wibDate);
+    return day && day.events_unavailable && day.hosts_down > 0 ? day : null;
+  }
+
+  _trendWhyText(timeOrPoint, st, pointOpt) {
+    if (!st || !st.sweep) return '';
+    const hoverTs = typeof timeOrPoint === 'number' ? timeOrPoint : (timeOrPoint && timeOrPoint.ts ? timeOrPoint.ts : 0);
+    const p = typeof timeOrPoint === 'object' ? timeOrPoint : (pointOpt || null);
+
+    // 1. Boundary proximity check: is cursor near an exact drop or recovery transition?
+    // Tolerance: 1% of visible window, between 30s and 300s
+    const TOL = Math.max(30, Math.min(300, (st.windowSec || 86400) * 0.01));
+    const nearbyChanges = (st.sweep.changes || []).filter(c => Math.abs(c.ts - hoverTs) <= TOL);
+
+    if (nearbyChanges.length > 0) {
+      nearbyChanges.sort((a, b) => Math.abs(a.ts - hoverTs) - Math.abs(b.ts - hoverTs));
+      const primary = nearbyChanges[0];
+      const timeStr = this._calendarFormatTime(primary.ts);
+      if (primary.type === 'drop') {
+        const dropCount = nearbyChanges.filter(c => c.type === 'drop').length;
+        if (dropCount <= 1) {
+          return ` — ${timeStr} · 1 host down (${primary.name || primary.host})`;
+        }
+        return ` — ${timeStr} · ${dropCount} hosts down`;
+      } else if (primary.type === 'recovery') {
+        const recCount = nearbyChanges.filter(c => c.type === 'recovery').length;
+        if (recCount <= 1) {
+          return ` — ${timeStr} · 1 host recovered (${primary.name || primary.host})`;
+        }
+        return ` — ${timeStr} · ${recCount} hosts recovered`;
+      }
     }
-    if (downCount > 0) return ` — ${downCount} host${downCount === 1 ? '' : 's'} down, steady`;
+
+    // 2. Ongoing outage at hoverTs: which hosts are currently down?
+    const hostsDown = st.sweep.hostsDownAt ? st.sweep.hostsDownAt(hoverTs) : [];
+    if (hostsDown.length > 0) {
+      if (hostsDown.length === 1) {
+        return ` — 1 host down (${hostsDown[0].name || hostsDown[0].host})`;
+      }
+      return ` — ${hostsDown.length} hosts down`;
+    }
+
+    // 3. Check bucket if point was provided
+    if (p && typeof p.ts === 'number') {
+      const bucketSec = st.bucketSec || 3600;
+      const bucketStart = p.ts - bucketSec;
+      const bucketEnd = p.ts;
+      const bChanges = (st.sweep.changes || []).filter(c => c.ts >= bucketStart && c.ts <= bucketEnd);
+      const bDown = Math.max(st.sweep.downAt(p.ts), st.sweep.downAt(bucketStart));
+      const drops = bChanges.filter(c => c.type === 'drop').length;
+      const recs = bChanges.filter(c => c.type === 'recovery').length;
+      if (drops || recs) {
+        const parts = [];
+        if (drops) parts.push(`${drops} host${drops === 1 ? '' : 's'} down`);
+        if (recs) parts.push(`${recs} host${recs === 1 ? '' : 's'} recovered`);
+        return ` — ${parts.join(', ')}`;
+      }
+      if (bDown > 0) return ` — ${bDown} host${bDown === 1 ? '' : 's'} down`;
+      const ivHosts = (st.sweep.intervals || []).filter(iv => iv.s < bucketEnd && iv.e > bucketStart);
+      if (ivHosts.length > 0) {
+        const uniqueHosts = [...new Set(ivHosts.map(iv => iv.host))];
+        if (uniqueHosts.length === 1) {
+          const h = ivHosts[0];
+          return ` — 1 host down (${h.name || h.host})`;
+        }
+        return ` — ${uniqueHosts.length} hosts down`;
+      }
+    }
+
     return '';
   }
 
@@ -2106,7 +2406,7 @@ class _AvailabilityMethods {
       gridEl.innerHTML = '<div class="de-empty">Loading downtime calendar...</div>';
       return;
     }
-    if (daily.length === 0) {
+    if (daily.length === 0 && !(data && typeof data.trend_start_ts === 'number')) {
       gridEl.innerHTML = '<div class="de-empty">No calendar data for this range yet.</div>';
       return;
     }
@@ -2122,10 +2422,32 @@ class _AvailabilityMethods {
     // Calendar weekday offset (Monday-first grid: 0=Mon, ..., 6=Sun)
     let emptyCellsHtml = '';
     let dayCellsHtml = '';
-    if (daily.length > 0) {
+
+    // Anchor calendar range to the requested period (data.trend_start_ts .. data.trend_end_ts)
+    // rather than daily[0].date, so missing days at the beginning don't collapse or shift the grid.
+    let startDateStr = null;
+    let endDateStr = null;
+    if (data && typeof data.trend_start_ts === 'number' && typeof data.trend_end_ts === 'number' && data.trend_start_ts < data.trend_end_ts) {
+      const startDateWib = new Date((data.trend_start_ts + WIB_OFFSET_SEC) * 1000);
+      const yStart = startDateWib.getUTCFullYear();
+      const mStart = String(startDateWib.getUTCMonth() + 1).padStart(2, '0');
+      const dStart = String(startDateWib.getUTCDate()).padStart(2, '0');
+      startDateStr = `${yStart}-${mStart}-${dStart}`;
+
+      const endDateWib = new Date((Math.max(data.trend_start_ts, data.trend_end_ts - 1) + WIB_OFFSET_SEC) * 1000);
+      const yEnd = endDateWib.getUTCFullYear();
+      const mEnd = String(endDateWib.getUTCMonth() + 1).padStart(2, '0');
+      const dEnd = String(endDateWib.getUTCDate()).padStart(2, '0');
+      endDateStr = `${yEnd}-${mEnd}-${dEnd}`;
+    } else if (daily.length > 0) {
+      startDateStr = daily[0].date;
+      endDateStr = daily[daily.length - 1].date;
+    }
+
+    if (startDateStr && endDateStr) {
       const dailyMap = new Map(daily.map(d => [d.date, d]));
-      const firstDate = new Date(`${daily[0].date}T00:00:00Z`);
-      const lastDate = new Date(`${daily[daily.length - 1].date}T00:00:00Z`);
+      const firstDate = new Date(`${startDateStr}T00:00:00Z`);
+      const lastDate = new Date(`${endDateStr}T00:00:00Z`);
       const firstDow = firstDate.getUTCDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
       const leadingOffset = (firstDow + 6) % 7;
       if (leadingOffset > 0) {
@@ -2144,12 +2466,12 @@ class _AvailabilityMethods {
         const dayNum = cur.getUTCDate();
         const d = dailyMap.get(dateStr);
 
-        if (d) {
+        if (d && typeof d.availability_pct === 'number') {
           const sevClass = this._calendarSevClass(d.availability_pct);
           const isSelected = d.date === this._calendarOpenDate;
           const isWorst = worstOn && worstDates && worstDates.has(d.date);
-          const availPctTxt = typeof d.availability_pct === 'number' ? `${d.availability_pct.toFixed(1)}%` : '—';
-          const availPctPrecise = typeof d.availability_pct === 'number' ? `${d.availability_pct.toFixed(2)}%` : '—';
+          const availPctTxt = `${d.availability_pct.toFixed(1)}%`;
+          const availPctPrecise = `${d.availability_pct.toFixed(2)}%`;
           const tooltip = `${d.date}: ${availPctPrecise} availability${d.hosts_down ? `, ${d.hosts_down} host${d.hosts_down === 1 ? '' : 's'} down` : ''}`;
           cells.push(`
             <button type="button" class="avb-calendar-cell ${sevClass}${isSelected ? ' is-selected' : ''}${isWorst ? ' is-worst' : ''}"
@@ -2240,7 +2562,8 @@ class _AvailabilityMethods {
   // so this is exactly the Hosts Requiring Attention row lookup, unchanged.
   _openHostFromInstance(inst) {
     if (!inst) return;
-    const target = this.data.find(t => t.instance === inst) || { instance: inst, job: 'blackbox' };
+    const targetsList = Array.isArray(this.data) ? this.data : [];
+    const target = targetsList.find(t => t.instance === inst) || { instance: inst, job: 'blackbox' };
     this._closeAvailabilityBreakdown();
     this._openDrawer(target);
   }
@@ -2258,10 +2581,16 @@ class _AvailabilityMethods {
     const modalSubtitleEl = document.getElementById('availModalSubtitle');
     if (modalSubtitleEl) {
       const jobName = (this.selectedJob && this.selectedJob !== 'all') ? this.selectedJob : null;
+      // Every figure is scoped to ONE Prometheus server (+ target whitelist) — say which.
+      const scope = data.scope || {};
+      const server = scope.source
+        ? ` · server <span class="avb-job-scope-pill">${this._esc(scope.source.replace(/^https?:\/\//, ''))}</span>` +
+          (scope.whitelist_enforced ? ` · ${scope.instances} whitelisted targets` : ` · ${scope.instances} monitored targets`)
+        : '';
       if (jobName) {
-        modalSubtitleEl.innerHTML = `Historical availability for job: <span class="avb-job-scope-pill">${this._esc(jobName)}</span>`;
+        modalSubtitleEl.innerHTML = `Historical availability for job: <span class="avb-job-scope-pill">${this._esc(jobName)}</span>${server}`;
       } else {
-        modalSubtitleEl.textContent = 'Historical availability across all infrastructure.';
+        modalSubtitleEl.innerHTML = `Historical availability${server}`;
       }
     }
 
@@ -2573,7 +2902,8 @@ class _AvailabilityMethods {
     }
 
     // O(1) lookup instead of an O(N) find() per host
-    const dataByInstance = new Map(this.data.map(t => [t.instance, t]));
+    const targetsList = Array.isArray(this.data) ? this.data : [];
+    const dataByInstance = new Map(targetsList.map(t => [t.instance, t]));
     const rowsHtml = displayList.map(h => {
       const target = dataByInstance.get(h.id) || dataByInstance.get(h.name);
       const roleLabel = this._getHostRoleLabel(target, h);

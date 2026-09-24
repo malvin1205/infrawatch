@@ -24,6 +24,7 @@ try:
     from storage import (
         IncidentRepository,
         SlowThresholdRepository,
+        EndpointRepository,
         json_store,
     )
     from core.monitoring import classify_scrape_failure, _outage_past_grace
@@ -57,6 +58,7 @@ except (ImportError, ValueError):
     from alarm.storage import (
         IncidentRepository,
         SlowThresholdRepository,
+        EndpointRepository,
         json_store,
     )
     from alarm.core.monitoring import classify_scrape_failure, _outage_past_grace
@@ -282,7 +284,7 @@ class TargetPoller:
         except Exception:
             logger.exception("TargetPoller: failed to seed state from active incidents")
 
-    def reconcile_orphaned_alerts(self, monitored_instances: List[str]) -> None:
+    def reconcile_orphaned_alerts(self, monitored_instances: List[str], source: Optional[str] = None) -> None:
         """Auto-resolves poller-owned alerts (TargetDown, SlowResponse) whose
         instance no longer exists in the monitored set at all.
 
@@ -293,16 +295,28 @@ class TargetPoller:
         forever, re-injected into /instances as phantom "Alertmanager" hosts.
         """
         known = set(monitored_instances)
+        if source is None:
+            try:
+                active_ep = EndpointRepository.get_active_endpoint()
+                source = (active_ep["url"] if active_ep else "").rstrip("/")
+            except Exception:
+                source = ""
         try:
             orphaned = [
                 a for a in self.active_incident_provider()
                 if a.get('name') in (ALERTNAME_TARGET_DOWN, ALERTNAME_SLOW_RESPONSE)
+                and (not source or not a.get('source') or a.get('source', '').rstrip('/') == source.rstrip('/'))
                 and a.get('instance') not in known
             ]
             for a in orphaned:
                 inst = a.get('instance')
                 if inst:
                     self._slow_poller_state.pop(inst, None)
+                    # Forget its up/down state too: if the instance comes back
+                    # (endpoint switched back) still down, it must re-fire as a
+                    # cold-start outage — a remembered 'down' means "no
+                    # transition", so the real outage would never alert again.
+                    self._poller_state.pop(inst, None)
                 self.alert_sink(
                     name=a.get('name'),
                     severity=a.get('severity', 'critical'),
@@ -313,6 +327,7 @@ class TargetPoller:
                     is_now_firing=False,
                     receiver="prometheus-poller-reconcile",
                     key=a.get('key') or f"{a.get('name')}|{inst}",
+                    source=a.get('source') or source,
                 )
         except Exception:
             logger.exception("TargetPoller: reconcile orphaned alerts failed")
@@ -336,13 +351,19 @@ class TargetPoller:
         if not instances:
             return
 
+        try:
+            active_ep = EndpointRepository.get_active_endpoint()
+            active_source = (active_ep["url"] if active_ep else "").rstrip("/")
+        except Exception:
+            active_source = ""
+
         # Scraped-only set on purpose — see MonitoringStateAdapter.get_scraped_instances.
         try:
             scraped = self.state_adapter.get_scraped_instances()
         except Exception:
             scraped = instances
         if scraped:
-            self.reconcile_orphaned_alerts(scraped)
+            self.reconcile_orphaned_alerts(scraped, source=active_source)
 
         try:
             success_map, duration_map, status_code_map = self.query_adapter.fetch_all_probe_metrics()
@@ -361,7 +382,7 @@ class TargetPoller:
             try:
                 slow_firing_instances = {
                     a['instance']
-                    for a in self.incident_repo.get_active_incidents()
+                    for a in self.incident_repo.get_active_incidents(source=active_source)
                     if a.get('name') == ALERTNAME_SLOW_RESPONSE
                 }
             except Exception:
@@ -386,6 +407,7 @@ class TargetPoller:
                         is_now_firing=False,
                         receiver="prometheus-poller",
                         key=f"{ALERTNAME_TARGET_DOWN}|{inst}",
+                        source=active_source,
                     )
 
         self._maintenance_active_prev.clear()
@@ -439,6 +461,7 @@ class TargetPoller:
                 latency_ms=latency_ms,
                 http_status_code=http_status_code,
                 last_error=last_error,
+                source=active_source,
             )
 
         # SlowResponse evaluation
@@ -480,6 +503,7 @@ class TargetPoller:
                 receiver="prometheus-poller",
                 key=f"{ALERTNAME_SLOW_RESPONSE}|{inst}",
                 latency_ms=rt_ms,
+                source=active_source,
             )
 
     def get_health(self, now: Optional[float] = None) -> Dict[str, Any]:

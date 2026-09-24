@@ -4,11 +4,11 @@ import time
 from typing import List, Dict, Any, Optional
 
 try:
-    from ..connection import db_read, db_transaction
-    from .inventory import MaintenanceRepository
-except (ImportError, ValueError):
     from alarm.storage.connection import db_read, db_transaction
     from alarm.storage.repositories.inventory import MaintenanceRepository
+except (ImportError, ValueError):
+    from storage.connection import db_read, db_transaction
+    from storage.repositories.inventory import MaintenanceRepository
 
 # How many resolved incidents the `incidents` table itself keeps (see the
 # retention DELETE in record_alert_event below) — and therefore the natural
@@ -27,14 +27,20 @@ INCIDENT_RETENTION_LIMIT = 5000
 
 class IncidentRepository:
     @staticmethod
-    def get_active_incidents(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_active_incidents(source: Optional[str] = None, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
         with db_read(db_path) as conn:
-            rows = conn.execute("""
-                SELECT * FROM incidents WHERE status = 'firing' ORDER BY started_at DESC
-            """).fetchall()
+            if source:
+                rows = conn.execute("""
+                    SELECT * FROM incidents WHERE status = 'firing' AND source = ? ORDER BY started_at DESC
+                """, (source.rstrip("/"),)).fetchall()
+            else:
+                rows = conn.execute("""
+                    SELECT * FROM incidents WHERE status = 'firing' ORDER BY started_at DESC
+                """).fetchall()
             return [
                 {
                     "key": r["key"],
+                    "source": r["source"] if "source" in r.keys() else "",
                     "fingerprint": r["fingerprint"],
                     "name": r["name"],
                     "severity": r["severity"],
@@ -58,17 +64,26 @@ class IncidentRepository:
             ]
 
     @staticmethod
-    def get_history(limit: int = INCIDENT_RETENTION_LIMIT, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_history(limit: int = INCIDENT_RETENTION_LIMIT, source: Optional[str] = None, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
         with db_read(db_path) as conn:
-            firing_rows = conn.execute("""
-                SELECT * FROM incidents WHERE status = 'firing' ORDER BY updated_at DESC
-            """).fetchall()
-            resolved_rows = conn.execute("""
-                SELECT * FROM incidents WHERE status = 'resolved' ORDER BY updated_at DESC LIMIT ?
-            """, (limit,)).fetchall()
+            if source:
+                firing_rows = conn.execute("""
+                    SELECT * FROM incidents WHERE status = 'firing' AND source = ? ORDER BY updated_at DESC
+                """, (source.rstrip("/"),)).fetchall()
+                resolved_rows = conn.execute("""
+                    SELECT * FROM incidents WHERE status = 'resolved' AND source = ? ORDER BY updated_at DESC LIMIT ?
+                """, (source.rstrip("/"), limit)).fetchall()
+            else:
+                firing_rows = conn.execute("""
+                    SELECT * FROM incidents WHERE status = 'firing' ORDER BY updated_at DESC
+                """).fetchall()
+                resolved_rows = conn.execute("""
+                    SELECT * FROM incidents WHERE status = 'resolved' ORDER BY updated_at DESC LIMIT ?
+                """, (limit,)).fetchall()
             return [
                 {
                     "key": r["key"],
+                    "source": r["source"] if "source" in r.keys() else "",
                     "name": r["name"],
                     "severity": r["severity"],
                     "instance": r["instance"],
@@ -107,15 +122,29 @@ class IncidentRepository:
         latency_ms: Optional[float] = None,
         http_status_code: Optional[int] = None,
         last_error: Optional[str] = None,
+        source: Optional[str] = None,
         db_path: Optional[str] = None
     ) -> bool:
         key = key or f"{name}|{instance}"
         with db_transaction(db_path) as conn:
+            if source is None:
+                try:
+                    ep = conn.execute("SELECT url FROM endpoints WHERE is_active = 1 LIMIT 1").fetchone()
+                    source = (ep["url"] if ep else "").rstrip("/")
+                except Exception:
+                    source = ""
+            else:
+                source = source.rstrip("/")
+
             # Check maintenance suppression
             if is_now_firing and MaintenanceRepository.get_active_maintenance(instance, job, now=event_time, db_path=db_path):
                 return False
 
-            row = conn.execute("SELECT * FROM incidents WHERE key = ?", (key,)).fetchone()
+            row = conn.execute("SELECT * FROM incidents WHERE source = ? AND key = ?", (source, key)).fetchone()
+            if row is None and source:
+                row = conn.execute("SELECT * FROM incidents WHERE source = '' AND key = ?", (key,)).fetchone()
+                if row is not None:
+                    conn.execute("UPDATE incidents SET source = ? WHERE id = ?", (source, row["id"]))
             was_firing = (row is not None and row["status"] == "firing")
 
             if was_firing == is_now_firing:
@@ -125,12 +154,12 @@ class IncidentRepository:
             if is_now_firing:
                 conn.execute("""
                     INSERT INTO incidents (
-                        key, fingerprint, name, severity, instance, summary, job,
+                        source, key, fingerprint, name, severity, instance, summary, job,
                         receiver, generator_url, status, started_at, first_seen, occurrences,
                         resolved_at, duration_seconds, updated_at, latency_ms, http_status_code, last_error
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'firing', ?, ?, 1, NULL, NULL, ?, ?, ?, ?)
-                    ON CONFLICT(key) DO UPDATE SET
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'firing', ?, ?, 1, NULL, NULL, ?, ?, ?, ?)
+                    ON CONFLICT(source, key) DO UPDATE SET
                         status = 'firing',
                         severity = excluded.severity,
                         summary = excluded.summary,
@@ -145,7 +174,7 @@ class IncidentRepository:
                         last_error = excluded.last_error,
                         acknowledged_by = NULL,
                         acknowledged_at = NULL
-                """, (key, key, name, severity, instance, summary, job, receiver, generatorURL,
+                """, (source, key, key, name, severity, instance, summary, job, receiver, generatorURL,
                       event_time, event_time, event_time, latency_ms, http_status_code, last_error))
 
                 conn.execute("""
@@ -158,8 +187,8 @@ class IncidentRepository:
                 conn.execute("""
                     UPDATE incidents SET status = 'resolved', resolved_at = ?, duration_seconds = ?,
                         total_down_seconds = COALESCE(total_down_seconds, 0) + ?, updated_at = ?
-                    WHERE key = ?
-                """, (event_time, duration_seconds, duration_seconds, event_time, key))
+                    WHERE source = ? AND key = ?
+                """, (event_time, duration_seconds, duration_seconds, event_time, source, key))
 
                 conn.execute("""
                     INSERT INTO event_logs (event, name, severity, instance, summary, job, time, duration_seconds, latency_ms, fingerprint)
@@ -295,14 +324,23 @@ class AcknowledgmentRepository:
     @staticmethod
     def clear_resolved(active_down_instances: set, db_path: Optional[str] = None):
         """Clean up acknowledgments for targets that are no longer down.
-        Single DELETE with a NOT IN filter rather than SELECT + per-row DELETE."""
+        Single DELETE with a NOT IN filter rather than SELECT + per-row DELETE.
+        Guarantees that acknowledgments for any instance with an active firing incident
+        are preserved across servers and unfiltered sweeps."""
         instances = list(active_down_instances)
         with db_transaction(db_path) as conn:
             if instances:
                 placeholders = ",".join("?" for _ in instances)
                 conn.execute(
-                    f"DELETE FROM alert_acknowledgments WHERE instance NOT IN ({placeholders})",
+                    f"""
+                    DELETE FROM alert_acknowledgments
+                    WHERE instance NOT IN ({placeholders})
+                      AND instance NOT IN (SELECT instance FROM incidents WHERE status = 'firing')
+                    """,
                     instances,
                 )
             else:
-                conn.execute("DELETE FROM alert_acknowledgments")
+                conn.execute("""
+                    DELETE FROM alert_acknowledgments
+                    WHERE instance NOT IN (SELECT instance FROM incidents WHERE status = 'firing')
+                """)

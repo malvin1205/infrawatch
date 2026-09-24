@@ -24,12 +24,12 @@ class FakeRepo:
     def __init__(self, coverage):
         self.coverage = dict(coverage)
 
-    def get_instance_bucket_coverage(self, instances=None):
+    def get_instance_bucket_coverage(self, instances=None, source=None):
         if not instances:
             return dict(self.coverage)
         return {k: v for k, v in self.coverage.items() if k in set(instances)}
 
-    def get_latest_bucket_end(self, job="all"):
+    def get_latest_bucket_end(self, job="all", source=None):
         return None
 
 
@@ -48,7 +48,7 @@ def _walk(eng, insts, now, limit=500):
     """Drive the cursor to exhaustion, returning every window it emitted."""
     out = []
     for _ in range(limit):
-        w = eng._next_depth_backfill_window(insts, now)
+        w = eng._next_depth_backfill_window(insts, now, "http://prom-a:9090")
         if w is None:
             return out
         out.append(w)
@@ -106,7 +106,7 @@ def test_hole_in_the_middle_is_swept():
 
     # The same fleet with no hole does nothing at all.
     quiet = _engine({"host-a": complete, "host-b": complete})
-    assert quiet._next_depth_backfill_window(["host-a", "host-b"], now) is None
+    assert quiet._next_depth_backfill_window(["host-a", "host-b"], now, "http://prom-a:9090") is None
 
 
 def test_fleet_churn_does_not_restart_a_sweep_in_flight():
@@ -122,7 +122,7 @@ def test_fleet_churn_does_not_restart_a_sweep_in_flight():
     for cycle in range(6):
         # Fleet membership churns every single cycle.
         insts = ["host-a"] + ([f"flap-{cycle}"] if cycle % 2 else [])
-        w = eng._next_depth_backfill_window(insts, now)
+        w = eng._next_depth_backfill_window(insts, now, "http://prom-a:9090")
         assert w is not None, "sweep must keep going while churn happens"
         ends.append(w[1])
 
@@ -140,8 +140,8 @@ def test_permanently_stale_instance_does_not_loop_forever():
     eng = _engine({"ghost": (hour_end - HOUR, 1)})  # 1 hour of buckets, nothing else
 
     _walk(eng, insts, now)  # drive the sweep to the floor
-    assert eng._next_depth_backfill_window(insts, now) is None
-    assert eng._next_depth_backfill_window(insts, now) is None
+    assert eng._next_depth_backfill_window(insts, now, "http://prom-a:9090") is None
+    assert eng._next_depth_backfill_window(insts, now, "http://prom-a:9090") is None
 
 
 def test_same_size_target_swap_restarts_the_walk():
@@ -152,8 +152,8 @@ def test_same_size_target_swap_restarts_the_walk():
     deep = _full(hour_end - DEPTH - DAY, now)
     eng = _engine({"host-a": deep, "host-b": deep, "host-new": _full(hour_end - HOUR, now)})
 
-    assert eng._next_depth_backfill_window(["host-a", "host-b"], now) is None
-    swapped = eng._next_depth_backfill_window(["host-a", "host-new"], now)
+    assert eng._next_depth_backfill_window(["host-a", "host-b"], now, "http://prom-a:9090") is None
+    swapped = eng._next_depth_backfill_window(["host-a", "host-new"], now, "http://prom-a:9090")
     assert swapped is not None, "a same-size swap must restart the walk"
 
 
@@ -163,7 +163,7 @@ def test_depth_walk_is_one_chunk_per_cycle():
     insts = ["host-a"]
     eng = _engine({"host-a": _full(hour_end - 3 * HOUR, now)})
 
-    first = eng._next_depth_backfill_window(insts, now)
+    first = eng._next_depth_backfill_window(insts, now, "http://prom-a:9090")
     assert first is not None
     assert first[1] - first[0] <= AVAIL_BACKFILL_CHUNK_SECONDS + 1.0
 
@@ -176,8 +176,8 @@ def test_depth_walk_terminates_and_stays_quiet():
     eng = _engine({"host-a": _full(hour_end - 3 * HOUR, now)})
 
     _walk(eng, insts, now)
-    assert eng._next_depth_backfill_window(insts, now) is None
-    assert eng._next_depth_backfill_window(insts, now + 60.0) is None
+    assert eng._next_depth_backfill_window(insts, now, "http://prom-a:9090") is None
+    assert eng._next_depth_backfill_window(insts, now + 60.0, "http://prom-a:9090") is None
 
 
 def test_already_deep_fleet_does_no_work():
@@ -185,7 +185,7 @@ def test_already_deep_fleet_does_no_work():
     hour_end = math.floor(now / HOUR) * HOUR
     insts = ["host-a", "host-b"]
     eng = _engine({i: _full(hour_end - DEPTH - DAY, now) for i in insts})
-    assert eng._next_depth_backfill_window(insts, now) is None
+    assert eng._next_depth_backfill_window(insts, now, "http://prom-a:9090") is None
 
 
 def test_new_target_restarts_the_walk():
@@ -194,9 +194,9 @@ def test_new_target_restarts_the_walk():
     hour_end = math.floor(now / HOUR) * HOUR
     eng = _engine({"host-a": _full(hour_end - DEPTH - DAY, now)})
 
-    assert eng._next_depth_backfill_window(["host-a"], now) is None
+    assert eng._next_depth_backfill_window(["host-a"], now, "http://prom-a:9090") is None
     # host-new is monitored but has no buckets yet.
-    w = eng._next_depth_backfill_window(["host-a", "host-new"], now)
+    w = eng._next_depth_backfill_window(["host-a", "host-new"], now, "http://prom-a:9090")
     assert w is not None, "a newly monitored target must retrigger the depth walk"
 
 
@@ -223,6 +223,24 @@ def test_head_cold_start_is_bounded():
     now = time.time()
     wins = AvailabilityEngine._availability_aggregation_windows(now, None)
     assert now - wins[0][0] <= AVAIL_HEAD_REPAIR_SECONDS + HOUR
+
+
+def test_sweep_skips_already_materialized_chunks():
+    """Restart with the last 6 days stored, older history missing: the first
+    window must be the newest MISSING chunk, not a re-write of stored ones."""
+    now = time.time()
+    hour_end = math.floor(now / HOUR) * HOUR
+    have_from = hour_end - 6 * DAY
+
+    class Repo(FakeRepo):
+        def get_bucket_records(self, job, start, end, instances=None, source=None):
+            hours = [h for h in range(int(start), int(end), int(HOUR)) if h >= have_from]
+            return [{"instance": i, "bucket_start": h} for i in instances for h in hours]
+
+    eng = AvailabilityEngine(bucket_repo=Repo({"a": (have_from, 144)}))
+    lo, hi = eng._next_depth_backfill_window(["a"], now, "http://prom-a:9090")
+    assert hi == have_from, (hi, have_from)
+    assert hi - lo == AVAIL_BACKFILL_CHUNK_SECONDS
 
 
 def demo():

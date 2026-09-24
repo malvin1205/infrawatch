@@ -29,14 +29,16 @@ def build_canonical_monitoring_state(job_param: Optional[str] = None) -> Dict:
     return fleet_state_engine.get_fleet_state(query).to_dict()
 
 
-def get_instance_job_map(job_filter: Optional[str] = None, include_alert_only: bool = True) -> Dict[str, str]:
-    """Instance -> real Prometheus job name for every monitored target matching job_filter."""
-    return fleet_state_engine.get_instance_job_map(job_filter, include_alert_only)
+def get_instance_job_map(job_filter: Optional[str] = None, include_alert_only: bool = True,
+                         source: Optional[str] = None) -> Dict[str, str]:
+    """Instance -> real Prometheus job name for every monitored target matching job_filter.
+    `source`: read that Prometheus server's targets only (no failover)."""
+    return fleet_state_engine.get_instance_job_map(job_filter, include_alert_only, source=source)
 
 
-def get_instance_cadence_map(job_filter: Optional[str] = None) -> Dict[str, float]:
+def get_instance_cadence_map(job_filter: Optional[str] = None, source: Optional[str] = None) -> Dict[str, float]:
     """Instance -> real per-target scrape interval (seconds)."""
-    return fleet_state_engine.get_instance_cadence_map(job_filter)
+    return fleet_state_engine.get_instance_cadence_map(job_filter, source=source)
 
 
 def get_monitored_instances(job_filter: Optional[str] = None, include_alert_only: bool = True) -> List[str]:

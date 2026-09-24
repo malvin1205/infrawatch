@@ -12,9 +12,27 @@ class AvailabilityQuery:
     sla_days: int = 30
     debug: bool = False
 
+    def __post_init__(self):
+        if isinstance(self.minutes, str):
+            if self.minutes.strip().lower() == "mtd":
+                import time, math, datetime
+                now_ts = time.time()
+                wib_now = datetime.datetime.fromtimestamp(now_ts + 25200, tz=datetime.timezone.utc)
+                month_start_wib = datetime.datetime(wib_now.year, wib_now.month, 1, tzinfo=datetime.timezone.utc).timestamp() - 25200
+                computed = max(1.0, math.floor((now_ts - month_start_wib) / 60.0))
+                object.__setattr__(self, "minutes", computed)
+            else:
+                try:
+                    object.__setattr__(self, "minutes", float(self.minutes))
+                except (ValueError, TypeError):
+                    object.__setattr__(self, "minutes", 1440.0)
+
     @property
     def minutes_int(self) -> int:
-        return int(round(self.minutes))
+        try:
+            return int(round(float(self.minutes)))
+        except (ValueError, TypeError):
+            return 1440
 
     @classmethod
     def from_request(
@@ -36,10 +54,18 @@ class AvailabilityQuery:
         # Extract minutes or days
         minutes_param = args.get("minutes") if hasattr(args, "get") else None
         if minutes_param is not None:
-            try:
-                minutes = float(minutes_param)
-            except (TypeError, ValueError):
-                minutes = 1440.0
+            if str(minutes_param).strip().lower() == "mtd":
+                import time, math, datetime
+                now_ts = time.time()
+                # WIB calendar month start (+7 hours = 25200s)
+                wib_now = datetime.datetime.fromtimestamp(now_ts + 25200, tz=datetime.timezone.utc)
+                month_start_wib = datetime.datetime(wib_now.year, wib_now.month, 1, tzinfo=datetime.timezone.utc).timestamp() - 25200
+                minutes = max(1.0, math.floor((now_ts - month_start_wib) / 60.0))
+            else:
+                try:
+                    minutes = float(minutes_param)
+                except (TypeError, ValueError):
+                    minutes = 1440.0
         else:
             try:
                 days = float(args.get("days", 1)) if hasattr(args, "get") else 1.0

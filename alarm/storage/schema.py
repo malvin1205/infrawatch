@@ -12,43 +12,84 @@ except (ImportError, ValueError):
     from alarm.storage.connection import _connect_raw, _INITIALIZED_DBS, DB_DIR, DEFAULT_DB_PATH
 
 
+# `source` = the Prometheus base URL (endpoint) that actually produced the row.
+# Part of the unique key: the same instance probed by two servers is two rows,
+# never one row both servers overwrite. '' = legacy row of unknown origin —
+# never matches a real server, so it can't leak into any server's numbers.
+_AVAIL_BUCKETS_DDL = """
+    CREATE TABLE IF NOT EXISTS {name} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source TEXT NOT NULL DEFAULT '',
+        instance TEXT NOT NULL,
+        job TEXT NOT NULL,
+        bucket_start REAL NOT NULL,
+        bucket_end REAL NOT NULL,
+        uptime_seconds REAL NOT NULL DEFAULT 0.0,
+        downtime_seconds REAL NOT NULL DEFAULT 0.0,
+        unknown_seconds REAL NOT NULL DEFAULT 0.0,
+        coverage_seconds REAL NOT NULL DEFAULT 0.0,
+        sample_count INTEGER NOT NULL DEFAULT 0,
+        availability_pct REAL,
+        incident_count INTEGER NOT NULL DEFAULT 0,
+        avg_latency_ms REAL NOT NULL DEFAULT 0.0,
+        updated_at REAL NOT NULL,
+        outage_json TEXT,
+        UNIQUE(source, job, instance, bucket_start)
+    );
+"""
+_AVAIL_BUCKETS_INDEXES = """
+    CREATE INDEX IF NOT EXISTS idx_avail_src_lookup ON availability_buckets(source, instance, bucket_start);
+    CREATE INDEX IF NOT EXISTS idx_avail_src_range ON availability_buckets(source, bucket_start, bucket_end);
+    CREATE INDEX IF NOT EXISTS idx_avail_src_end_start ON availability_buckets(source, bucket_end, bucket_start);
+    CREATE INDEX IF NOT EXISTS idx_avail_src_job_end_start ON availability_buckets(source, job, bucket_end, bucket_start);
+"""
+
+_INCIDENTS_DDL = """
+    CREATE TABLE IF NOT EXISTS {name} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source TEXT NOT NULL DEFAULT '',
+        key TEXT NOT NULL,
+        fingerprint TEXT,
+        name TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        instance TEXT NOT NULL,
+        summary TEXT,
+        job TEXT,
+        receiver TEXT DEFAULT '',
+        generator_url TEXT DEFAULT '',
+        status TEXT NOT NULL, -- 'firing' or 'resolved'
+        started_at REAL NOT NULL,
+        resolved_at REAL,
+        duration_seconds REAL,
+        latency_ms REAL,
+        updated_at REAL NOT NULL,
+        occurrences INTEGER NOT NULL DEFAULT 1,
+        first_seen REAL,
+        http_status_code INTEGER,
+        last_error TEXT,
+        total_down_seconds REAL NOT NULL DEFAULT 0,
+        acknowledged_by TEXT,
+        acknowledged_at REAL,
+        UNIQUE(source, key)
+    );
+"""
+_INCIDENTS_INDEXES = """
+    CREATE INDEX IF NOT EXISTS idx_incidents_source_status ON incidents(source, status);
+    CREATE INDEX IF NOT EXISTS idx_incidents_source_instance ON incidents(source, instance);
+    CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
+    CREATE INDEX IF NOT EXISTS idx_incidents_instance ON incidents(instance);
+    CREATE INDEX IF NOT EXISTS idx_incidents_started_at ON incidents(started_at);
+    CREATE INDEX IF NOT EXISTS idx_incidents_updated_at ON incidents(updated_at DESC);
+"""
+
+
 def init_db(db_path: Optional[str] = None):
     path = db_path or os.environ.get("INFRAWATCH_DB_PATH", DEFAULT_DB_PATH)
     conn = _connect_raw(path, set_wal=True)
     try:
         with conn:
+            conn.executescript(_INCIDENTS_DDL.format(name="incidents"))
             conn.executescript("""
-            CREATE TABLE IF NOT EXISTS incidents (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                key TEXT UNIQUE NOT NULL,
-                fingerprint TEXT,
-                name TEXT NOT NULL,
-                severity TEXT NOT NULL,
-                instance TEXT NOT NULL,
-                summary TEXT,
-                job TEXT,
-                receiver TEXT DEFAULT '',
-                generator_url TEXT DEFAULT '',
-                status TEXT NOT NULL, -- 'firing' or 'resolved'
-                started_at REAL NOT NULL,
-                resolved_at REAL,
-                duration_seconds REAL,
-                latency_ms REAL,
-                updated_at REAL NOT NULL,
-                occurrences INTEGER NOT NULL DEFAULT 1,
-                first_seen REAL,
-                http_status_code INTEGER,
-                last_error TEXT,
-                total_down_seconds REAL NOT NULL DEFAULT 0,
-                acknowledged_by TEXT,
-                acknowledged_at REAL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
-            CREATE INDEX IF NOT EXISTS idx_incidents_instance ON incidents(instance);
-            CREATE INDEX IF NOT EXISTS idx_incidents_started_at ON incidents(started_at);
-            CREATE INDEX IF NOT EXISTS idx_incidents_updated_at ON incidents(updated_at DESC);
-
             CREATE TABLE IF NOT EXISTS event_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event TEXT NOT NULL, -- 'firing' or 'resolved'
@@ -118,27 +159,6 @@ def init_db(db_path: Optional[str] = None):
                 updated_at REAL NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS availability_buckets (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                instance TEXT NOT NULL,
-                job TEXT NOT NULL,
-                bucket_start REAL NOT NULL,
-                bucket_end REAL NOT NULL,
-                uptime_seconds REAL NOT NULL DEFAULT 0.0,
-                downtime_seconds REAL NOT NULL DEFAULT 0.0,
-                unknown_seconds REAL NOT NULL DEFAULT 0.0,
-                coverage_seconds REAL NOT NULL DEFAULT 0.0,
-                sample_count INTEGER NOT NULL DEFAULT 0,
-                availability_pct REAL,
-                incident_count INTEGER NOT NULL DEFAULT 0,
-                avg_latency_ms REAL NOT NULL DEFAULT 0.0,
-                updated_at REAL NOT NULL,
-                UNIQUE(job, instance, bucket_start)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_avail_lookup ON availability_buckets(job, instance, bucket_start);
-            CREATE INDEX IF NOT EXISTS idx_avail_range ON availability_buckets(job, bucket_start, bucket_end);
-            CREATE INDEX IF NOT EXISTS idx_avail_time ON availability_buckets(bucket_start, bucket_end);
 
             CREATE TABLE IF NOT EXISTS aggregation_leases (
                 lease_name TEXT PRIMARY KEY,
@@ -184,10 +204,35 @@ def init_db(db_path: Optional[str] = None):
             );
 
             CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS alarm_sounds (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                source TEXT NOT NULL, -- 'builtin', 'upload', 'youtube'
+                filename TEXT NOT NULL,
+                duration REAL,
+                file_size INTEGER,
+                mime_type TEXT,
+                created_at REAL NOT NULL,
+                created_by TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_alarm_sounds_source ON alarm_sounds(source);
         """)
-        # Sanitize any legacy corrupted buckets (e.g. down hosts marked with positive uptime)
-        conn.execute("DELETE FROM availability_buckets WHERE uptime_seconds > 0 AND availability_pct = 0.0")
-        conn.execute("DELETE FROM availability_buckets WHERE coverage_seconds = 0.0 AND (uptime_seconds > 0 OR downtime_seconds > 0)")
+        conn.execute("""
+            INSERT OR IGNORE INTO alarm_sounds (id, name, source, filename, duration, file_size, mime_type, created_at, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, ("alarm-default", "InfraWatch Default", "builtin", "alarm.mp3", 3.0, 0, "audio/mpeg", 0.0, "system"))
+        conn.executescript(_AVAIL_BUCKETS_DDL.format(name="availability_buckets"))
+        # Sanitize legacy corrupted buckets only on initial migration, not on every connection
+        cur_version = 0
+        try:
+            cur_version = int(conn.execute("PRAGMA user_version").fetchone()[0] or 0)
+        except Exception:
+            cur_version = 0
+        if cur_version < 1:
+            conn.execute("DELETE FROM availability_buckets WHERE uptime_seconds > 0 AND availability_pct = 0.0")
+            conn.execute("DELETE FROM availability_buckets WHERE coverage_seconds = 0.0 AND (uptime_seconds > 0 OR downtime_seconds > 0)")
 
         # outage_json (added in the "one engine" pass): per-hour outage durations
         # + ongoing-at-hour-end flag, written by the reconstruction-based
@@ -197,6 +242,38 @@ def init_db(db_path: Optional[str] = None):
         cols = {r[1] for r in conn.execute("PRAGMA table_info(availability_buckets)").fetchall()}
         if "outage_json" not in cols:
             conn.execute("ALTER TABLE availability_buckets ADD COLUMN outage_json TEXT")
+        # Per-server scoping: rebuild (SQLite can't alter a UNIQUE constraint)
+        # with `source` in the key. Existing rows get source='' (origin
+        # unknown) and are therefore excluded from every server's view.
+        if "source" not in cols:
+            conn.executescript(
+                _AVAIL_BUCKETS_DDL.format(name="availability_buckets_v2")
+                + """
+                INSERT INTO availability_buckets_v2 (id, source, instance, job, bucket_start, bucket_end,
+                    uptime_seconds, downtime_seconds, unknown_seconds, coverage_seconds, sample_count,
+                    availability_pct, incident_count, avg_latency_ms, updated_at, outage_json)
+                SELECT id, '', instance, job, bucket_start, bucket_end,
+                    uptime_seconds, downtime_seconds, unknown_seconds, coverage_seconds, sample_count,
+                    availability_pct, incident_count, avg_latency_ms, updated_at, outage_json
+                FROM availability_buckets;
+                DROP TABLE availability_buckets;
+                ALTER TABLE availability_buckets_v2 RENAME TO availability_buckets;
+                """)
+        conn.executescript(_AVAIL_BUCKETS_INDEXES)
+        if cur_version < 1:
+            try:
+                conn.execute("""
+                    UPDATE OR IGNORE availability_buckets
+                    SET source = 'http://192.168.9.16:9090'
+                    WHERE source = ''
+                      AND (job = 'blackbox-ping-internal' OR instance LIKE '192.168.9.%')
+                """)
+            except Exception:
+                pass
+            try:
+                conn.execute("PRAGMA user_version = 1")
+            except Exception:
+                pass
 
         # occurrences/first_seen/http_status_code/last_error (Incident History
         # revamp): older DBs pre-date these columns. occurrences/first_seen
@@ -237,6 +314,60 @@ def init_db(db_path: Optional[str] = None):
             conn.execute("ALTER TABLE incidents ADD COLUMN acknowledged_by TEXT")
         if "acknowledged_at" not in inc_cols:
             conn.execute("ALTER TABLE incidents ADD COLUMN acknowledged_at REAL")
+
+        # incidents.source scoping & unique key rebuild (MAJ-02):
+        # Rebuild table with source in UNIQUE(source, key).
+        # Evidence-based backfill: attribute instances present in scoped availability buckets
+        # to the active endpoint URL; legacy/unknown instances get source=''.
+        # Auto-resolve un-attributable zombie incidents from deleted endpoints (BLK-02).
+        if "source" not in inc_cols:
+            conn.executescript(
+                _INCIDENTS_DDL.format(name="incidents_v2")
+                + """
+                INSERT INTO incidents_v2 (id, source, key, fingerprint, name, severity, instance, summary, job,
+                    receiver, generator_url, status, started_at, resolved_at, duration_seconds, latency_ms,
+                    updated_at, occurrences, first_seen, http_status_code, last_error, total_down_seconds,
+                    acknowledged_by, acknowledged_at)
+                SELECT id, '', key, fingerprint, name, severity, instance, summary, job,
+                    receiver, generator_url, status, started_at, resolved_at, duration_seconds, latency_ms,
+                    updated_at, COALESCE(occurrences, 1), COALESCE(first_seen, started_at), http_status_code, last_error,
+                    COALESCE(total_down_seconds, 0), acknowledged_by, acknowledged_at
+                FROM incidents;
+                DROP TABLE incidents;
+                ALTER TABLE incidents_v2 RENAME TO incidents;
+                """
+            )
+            active_ep = conn.execute("SELECT url FROM endpoints WHERE is_active = 1 LIMIT 1").fetchone()
+            if active_ep and active_ep[0]:
+                active_url = active_ep[0].rstrip("/")
+                conn.execute("""
+                    UPDATE incidents
+                    SET source = ?
+                    WHERE source = '' AND instance IN (
+                        SELECT DISTINCT instance FROM availability_buckets WHERE source != ''
+                    )
+                """, (active_url,))
+
+        conn.executescript(_INCIDENTS_INDEXES)
+
+        # BLK-02 cleanup: ensure any orphaned firing incidents with unknown/deleted source
+        # (source='') are resolved, and their stale alert acknowledgments purged.
+        now_ts = time.time()
+        conn.execute("""
+            UPDATE incidents
+            SET status = 'resolved',
+                resolved_at = COALESCE(resolved_at, ?),
+                duration_seconds = COALESCE(duration_seconds, round(? - started_at, 1)),
+                total_down_seconds = COALESCE(total_down_seconds, 0) + COALESCE(duration_seconds, round(? - started_at, 1)),
+                updated_at = ?
+            WHERE source = '' AND status = 'firing'
+        """, (now_ts, now_ts, now_ts, now_ts))
+        conn.execute("""
+            DELETE FROM alert_acknowledgments
+            WHERE instance NOT IN (
+                SELECT instance FROM incidents WHERE status = 'firing' AND source != ''
+            )
+        """)
 
         # endpoints.url uniqueness: load_endpoints_state's seed-if-empty path
         # used to check-then-insert across two separate transactions, so
@@ -296,6 +427,8 @@ def _maybe_import_from_json(conn: sqlite3.Connection):
         # legacy JSON files were copied in) must not skip importing endpoints/
         # maintenance/dependencies too.
         if _empty("incidents"):
+            active_ep = conn.execute("SELECT url FROM endpoints WHERE is_active = 1 LIMIT 1").fetchone()
+            imp_source = active_ep[0].rstrip("/") if active_ep and active_ep[0] else ""
             status_file = os.path.join(DB_DIR, "status.json")
             if os.path.exists(status_file):
                 with open(status_file, "r", encoding="utf-8") as f:
@@ -305,9 +438,9 @@ def _maybe_import_from_json(conn: sqlite3.Connection):
                         k = a.get("key") or f"{a.get('name')}|{a.get('instance')}"
                         t = float(a.get("time", time.time()))
                         conn.execute("""
-                            INSERT OR IGNORE INTO incidents (key, fingerprint, name, severity, instance, summary, job, status, started_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, 'firing', ?, ?)
-                        """, (k, k, a.get("name", "Unknown"), a.get("severity", "critical"), a.get("instance", "-"), a.get("summary", ""), a.get("job", ""), t, t))
+                            INSERT OR IGNORE INTO incidents (source, key, fingerprint, name, severity, instance, summary, job, status, started_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'firing', ?, ?)
+                        """, (imp_source, k, k, a.get("name", "Unknown"), a.get("severity", "critical"), a.get("instance", "-"), a.get("summary", ""), a.get("job", ""), t, t))
 
             history_file = os.path.join(DB_DIR, "history.json")
             if os.path.exists(history_file):
@@ -319,10 +452,10 @@ def _maybe_import_from_json(conn: sqlite3.Connection):
                         st = float(h.get("time", time.time()))
                         dur = h.get("duration_seconds")
                         conn.execute("""
-                            INSERT OR IGNORE INTO incidents (key, fingerprint, name, severity, instance, summary, job, status, started_at, resolved_at, duration_seconds, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, 'resolved', ?, ?, ?, ?)
+                            INSERT OR IGNORE INTO incidents (source, key, fingerprint, name, severity, instance, summary, job, status, started_at, resolved_at, duration_seconds, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'resolved', ?, ?, ?, ?)
                         """, (
-                            k, k, h.get("name", "Alert"), h.get("severity", "critical"),
+                            imp_source, k, k, h.get("name", "Alert"), h.get("severity", "critical"),
                             h.get("instance", "-"), h.get("summary", ""), h.get("job", ""),
                             st, st + (dur or 0), dur, st + (dur or 0)
                         ))

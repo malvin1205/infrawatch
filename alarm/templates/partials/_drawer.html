@@ -10,10 +10,15 @@
           <h3 class="drawer-ip" id="drawerTargetTitle">—</h3>
           <span class="drawer-job-text" id="drawerJobBadge">—</span>
           <span class="drawer-status-pill" id="drawerStatusPill">—</span>
+          <span class="drawer-status-pill drawer-alarm-pill hidden" id="drawerAlarmPill">—</span>
         </div>
       </div>
 
       <div class="drawer-actions-top">
+        <button class="btn btn-sm btn-secondary hidden" id="drawerAckBtn" type="button" title="Acknowledge this outage">
+          <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+          <span id="drawerAckBtnLabel">Acknowledge</span>
+        </button>
         <button class="btn btn-sm btn-secondary" id="drawerRefreshBtn" type="button" title="Refresh Target Data">
           <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
           <span>Refresh</span>

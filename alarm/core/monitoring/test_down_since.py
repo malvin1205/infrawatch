@@ -33,3 +33,26 @@ def test_never_up_target_falls_back_to_first_down():
 
     with mock.patch.object(queries._pc, "fetch_prometheus_json", side_effect=fake):
         assert queries.fetch_down_since_prom_map(cache_ttl=0)["h"] == 1000.0
+
+
+def test_up_since_recovers_after_down():
+    def fake(path, **_kw):
+        q = __import__("urllib.parse").parse.unquote(path)
+        if "== 0)[1d:1m]" in q:
+            return _resp("h", 8000), None   # last down timestamp
+        return {"status": "success", "data": {"result": []}}, None
+
+    with mock.patch.object(queries._pc, "fetch_prometheus_json", side_effect=fake):
+        assert queries.fetch_up_since_prom_map(cache_ttl=0)["h"] == 8000.0
+
+
+def test_up_since_continuous_up_falls_back_to_earliest():
+    def fake(path, **_kw):
+        q = __import__("urllib.parse").parse.unquote(path)
+        if "== 1)[32d:1h]" in q:
+            return _resp("h", 2000), None   # earliest up
+        return {"status": "success", "data": {"result": []}}, None
+
+    with mock.patch.object(queries._pc, "fetch_prometheus_json", side_effect=fake):
+        assert queries.fetch_up_since_prom_map(cache_ttl=0)["h"] == 2000.0
+

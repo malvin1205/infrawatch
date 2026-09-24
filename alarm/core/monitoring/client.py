@@ -64,6 +64,10 @@ def load_endpoints():
 
     try:
         data = EndpointRepository.load_endpoints_state(_DEFAULT_PROM_URL)
+        if _DEFAULT_PROM_URL:
+            data["active"] = _DEFAULT_PROM_URL
+            if _DEFAULT_PROM_URL not in data.get("endpoints", []):
+                data.setdefault("endpoints", []).append(_DEFAULT_PROM_URL)
     except Exception:
         data = ({"active": _DEFAULT_PROM_URL, "endpoints": [_DEFAULT_PROM_URL]}
                 if _DEFAULT_PROM_URL else {"active": None, "endpoints": []})
@@ -231,12 +235,42 @@ def fetch_url(url, timeout=1.5):
         pass
     return None
 
-def fetch_prometheus_json(path, use_cache=True, cache_ttl=None, timeout=None):
+def _fetch_from_source(path, source, use_cache, cache_ttl, timeout):
+    """Strict single-server fetch: `source` or nothing — no failover. Anything
+    that ends up in a server's availability numbers must come from that server."""
+    base = (source or "").rstrip("/")
+    if not base or not _filter_safe_candidates([base]):
+        return None, None
+    cache_key = f"{base}:{path}"
+    if use_cache:
+        with PROMETHEUS_CACHE_LOCK:
+            hit = PROMETHEUS_CACHE.get(cache_key)
+        if hit and time.time() - hit[0] < cache_ttl:
+            return hit[1], hit[2]
+    raw = fetch_url(f"{base}{path}", timeout=6.0 if timeout is None else timeout)
+    if not raw:
+        return None, None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None, None
+    if use_cache and (data.get('status') == 'success' or 'data' in data):
+        with PROMETHEUS_CACHE_LOCK:
+            PROMETHEUS_CACHE[cache_key] = (time.time(), data, base)
+    return data, base
+
+
+def fetch_prometheus_json(path, use_cache=True, cache_ttl=None, timeout=None, source=None):
+    """`source` given: query exactly that server (no failover) — required for
+    anything feeding per-server availability. Omitted: active endpoint with
+    failover, for the live grid."""
     global LAST_WORKING_PROMETHEUS_URL, PROMETHEUS_CACHE
     if cache_ttl is None:
         cache_ttl = PROMETHEUS_CACHE_TTL_DEFAULT
     now = time.time()
     _maybe_prune_cache(now)
+    if source is not None:
+        return _fetch_from_source(path, source, use_cache, cache_ttl, timeout)
 
     endpoints_data = load_endpoints()
     active_url = endpoints_data.get("active")

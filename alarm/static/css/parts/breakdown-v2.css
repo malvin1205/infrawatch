@@ -374,6 +374,20 @@
   stroke-linejoin: round;
   stroke-linecap: round;
 }
+/* Neutral gap representation for missing/unknown telemetry (audit item 11) */
+.avb .avb-trend-gap-band {
+  fill: var(--text-low, #8b949e);
+  opacity: 0.08;
+  stroke: none;
+}
+.avb .avb-trend-gap-connector {
+  fill: none;
+  stroke: var(--text-low, #8b949e);
+  stroke-width: 1px;
+  stroke-dasharray: 2 3;
+  opacity: 0.45;
+}
+
 /* SLA target reference line (audit 4.6) — dashed and in the critical colour so
    it reads as the threshold being missed, never as another data series. */
 .avb .avb-trend-target {
@@ -1153,3 +1167,9 @@
   .avb .avail-updating-spinner { animation-duration: 1.4s; }
 }
 
+/* Trend slot where too few hosts reported to price the fleet (availability_pct null). */
+.avb .avb-trend-partial-band {
+  fill: var(--text-low, #8b949e);
+  opacity: 0.14;
+  stroke: none;
+}

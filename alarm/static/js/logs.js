@@ -1,5 +1,5 @@
 /* Alert Logs / Incident History list page. */
-import { escapeHtml } from './ui/format.js';
+import { escapeHtml, formatDuration } from './ui/format.js';
 
 export class LogsPage {
   // One place the feed's cap is defined, so the fetch and the "newest N only"
@@ -45,6 +45,8 @@ export class LogsPage {
   }
 
   _bindEvents() {
+    window.addEventListener('iw:duration-format-changed', () => this._render());
+
     document.querySelectorAll('[data-log-filter]').forEach(btn => {
       btn.addEventListener('click', () => {
         this.filter = btn.dataset.logFilter;
@@ -241,9 +243,7 @@ export class LogsPage {
 
   _fmtDur(s) {
     if (typeof s !== 'number' || isNaN(s)) return '—';
-    if (s < 60) return `${Math.round(s)}s`;
-    if (s < 3600) return `${Math.round(s / 60)}m`;
-    return `${(s / 3600).toFixed(1)}h`;
+    return formatDuration(s * 1000, { compact: true });
   }
 
   _esc(s) { return escapeHtml(s); }

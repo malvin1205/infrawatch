@@ -5,9 +5,9 @@ import sqlite3
 from typing import List, Dict, Any, Optional
 
 try:
-    from ..connection import db_read, db_transaction
-except (ImportError, ValueError):
     from alarm.storage.connection import db_read, db_transaction
+except (ImportError, ValueError):
+    from storage.connection import db_read, db_transaction
 
 
 class UserRepository:

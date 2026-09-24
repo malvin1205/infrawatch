@@ -1,8 +1,11 @@
 /* History page — incident timeline + per-incident detail. */
-import { escapeHtml } from './ui/format.js';
+import { escapeHtml, formatDuration } from './ui/format.js';
 import { apiFetch } from './net.js';
 import { isAdminLike } from './auth.js';
 import { LogsPage } from './logs.js';
+
+// Fixed UTC+7 offset for Asia/Jakarta (WIB) — 25200 seconds.
+export const WIB_OFFSET_SEC = 25200;
 
 export class HistoryPage {
   constructor(monitor) {
@@ -40,6 +43,8 @@ export class HistoryPage {
   }
 
   _bindEvents() {
+    window.addEventListener('iw:duration-format-changed', () => this._render());
+
     document.querySelectorAll('[data-hist-filter]').forEach(btn => {
       btn.addEventListener('click', () => {
         this.severityFilter = btn.dataset.histFilter;
@@ -213,11 +218,13 @@ export class HistoryPage {
   }
 
   _rangeStartEpoch() {
-    const now = new Date();
     if (this.dateRange === '7d') return Date.now() / 1000 - 7 * 86400;
     if (this.dateRange === '30d') return Date.now() / 1000 - 30 * 86400;
     if (this.dateRange === 'all') return 0;
-    return new Date(now.getFullYear(), now.getMonth(), 1).getTime() / 1000; // 'month' (default)
+    // 'month' (default): 00:00 WIB on the 1st of the current WIB month
+    const wibNow = new Date(Date.now() + WIB_OFFSET_SEC * 1000);
+    const monthStartWib = Date.UTC(wibNow.getUTCFullYear(), wibNow.getUTCMonth(), 1);
+    return (monthStartWib - WIB_OFFSET_SEC * 1000) / 1000;
   }
 
   // Incidents still in view after "Clear" — a real, undoable cut-off shared
@@ -247,15 +254,13 @@ export class HistoryPage {
 
   _updateStats() {
     const base = this._rangedData();
-    const now = new Date();
     // "This Month" = incidents whose ACTIVITY falls in the current calendar
     // month, judged the same way _rangedData() judges its range (activity end,
-    // so a still-ongoing incident counts) and against the same local
-    // month-start anchor _rangeStartEpoch() uses — previously this bucketed on
-    // the incident's START time via getMonth(), a second, differently-defined
-    // filter that disagreed with the range filter near month boundaries and
-    // shifted by the viewer's UTC offset (audit m7).
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime() / 1000;
+    // so a still-ongoing incident counts) and against the same WIB
+    // month-start anchor _rangeStartEpoch() uses.
+    const wibNow = new Date(Date.now() + WIB_OFFSET_SEC * 1000);
+    const monthStartWib = Date.UTC(wibNow.getUTCFullYear(), wibNow.getUTCMonth(), 1);
+    const monthStart = (monthStartWib - WIB_OFFSET_SEC * 1000) / 1000;
     const nowSec = Date.now() / 1000;
     const month = base.filter(i => {
       const activityEnd = this._isOngoing(i) ? nowSec : (i.resolved_time || i.time || 0);
@@ -510,19 +515,17 @@ export class HistoryPage {
 
   _fmt(ts) {
     if (!ts) return '—';
-    const d = new Date(ts * 1000);
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const d = new Date((ts + WIB_OFFSET_SEC) * 1000);
+    const hh = String(d.getUTCHours()).padStart(2, '0');
+    const mm = String(d.getUTCMinutes()).padStart(2, '0');
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
     return `${hh}:${mm} · ${dd}/${mo}`;
   }
 
   _fmtDur(s) {
     if (typeof s !== 'number' || isNaN(s)) return '—';
-    if (s < 60) return `${Math.round(s)}s`;
-    if (s < 3600) return `${Math.round(s / 60)}m`;
-    return `${(s / 3600).toFixed(1)}h`;
+    return formatDuration(s * 1000, { compact: true });
   }
 
   _exportCSV() {

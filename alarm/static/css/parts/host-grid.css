@@ -447,27 +447,68 @@
 }
 
 /* Add Target Button */
-.add-target-btn {
+/* Minimalist Icon-Only Action Buttons */
+.icon-only-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  width: 28px;
   height: 26px;
-  padding: 0 10px;
+  padding: 0;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+  outline: none;
+  flex-shrink: 0;
+}
+
+.add-target-btn {
   background: #2563EB;
   color: #ffffff;
-  border: none;
-  border-radius: var(--r-sm);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background var(--t-fast), transform var(--t-fast);
-  outline: none;
-  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.4);
+  border: 1px solid #3b82f6;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.35);
 }
 
 .add-target-btn:hover {
   background: #1d4ed8;
+  border-color: #60a5fa;
   transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.45);
+}
+
+.add-target-btn:active {
+  transform: translateY(0);
+}
+
+.select-mode-btn {
+  background: #2563EB;
+  color: #ffffff;
+  border: 1px solid #3b82f6;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.35);
+}
+
+.select-mode-btn:hover {
+  background: #1d4ed8;
+  border-color: #60a5fa;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.45);
+}
+
+.select-mode-btn:active {
+  transform: translateY(0);
+}
+
+.select-mode-btn.is-active,
+.select-mode-btn[aria-pressed="true"] {
+  background: #7c3aed;
+  border-color: #a855f7;
+  color: #ffffff;
+  box-shadow: 0 1px 4px rgba(124, 58, 237, 0.45);
+}
+
+.select-mode-btn.is-active:hover {
+  background: #6d28d9;
+  border-color: #c084fc;
 }
 
 /* Delete Target Button in Drawer Header */
@@ -643,8 +684,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 8px 6px;
+  gap: 2px;
+  padding: 6px 5px;
   border-radius: var(--r-sm, 6px);
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
@@ -749,11 +790,6 @@
 }
 
 /* ── Bulk selection (Select + Remove) ─────────────────────────────────── */
-.select-mode-btn.is-active {
-  background: var(--accent);
-  color: #ffffff;
-  border-color: var(--accent);
-}
 
 .selection-bar {
   display: flex;
@@ -849,6 +885,20 @@
   text-overflow: ellipsis;
   max-width: 100%;
   flex-shrink: 0;
+}
+
+.hc-uptime {
+  font-family: var(--font-mono);
+  font-size: clamp(9px, 0.4vw + 5px, 10.5px);
+  color: rgba(255, 255, 255, 0.76) !important;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  flex-shrink: 0;
+  margin-top: 1px;
 }
 
 /* Modal Backdrop & Overlay & Card */

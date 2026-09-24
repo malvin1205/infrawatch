@@ -64,6 +64,7 @@ from .queries import (
     fetch_prom_query_map,
     fetch_prom_range_map,
     fetch_down_since_prom_map,
+    fetch_up_since_prom_map,
     fetch_all_probe_metrics,
 )
 
@@ -92,6 +93,7 @@ __all__ = [
     "fetch_prom_query_map",
     "fetch_prom_range_map",
     "fetch_down_since_prom_map",
+    "fetch_up_since_prom_map",
     "fetch_all_probe_metrics",
     "fetch_url",
     "fetch_prometheus_json",

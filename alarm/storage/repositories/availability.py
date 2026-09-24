@@ -6,9 +6,60 @@ import sqlite3
 from typing import List, Dict, Any, Optional, Tuple
 
 try:
-    from ..connection import db_read, db_transaction
-except (ImportError, ValueError):
     from alarm.storage.connection import db_read, db_transaction
+except (ImportError, ValueError):
+    from storage.connection import db_read, db_transaction
+try:
+    from config import AVAIL_TARGET_WHITELIST
+except ImportError:
+    from alarm.config import AVAIL_TARGET_WHITELIST
+
+import logging
+logger = logging.getLogger("infrawatch")
+
+
+def norm_source(url: Optional[str]) -> str:
+    """Canonical server identity for availability rows: the Prometheus base URL."""
+    return (url or "").strip().rstrip("/")
+
+
+_SOURCE_NON_MATCHING_CACHE: Dict[str, Tuple[float, bool]] = {}
+
+
+def _source_allows_non_matching(source: Optional[str], wl) -> bool:
+    norm = norm_source(source)
+    if not norm:
+        return False
+    now = time.time()
+    cached = _SOURCE_NON_MATCHING_CACHE.get(norm)
+    if cached and (now - cached[0]) < 15.0:
+        return cached[1]
+    allows = False
+    try:
+        try:
+            from core.monitoring.state import get_instance_job_map
+        except (ImportError, ValueError):
+            from alarm.core.monitoring.state import get_instance_job_map
+        job_map = get_instance_job_map(None, include_alert_only=False, source=norm) or {}
+        live_targets = list(job_map.keys())
+        if live_targets and wl and not any(t in wl for t in live_targets):
+            allows = True
+    except Exception:
+        allows = False
+    _SOURCE_NON_MATCHING_CACHE[norm] = (now, allows)
+    return allows
+
+
+def _whitelisted(instance: Optional[str], whitelist=None, source: Optional[str] = None, allow_non_matching_source: bool = True) -> bool:
+    wl = AVAIL_TARGET_WHITELIST if whitelist is None else whitelist
+    if wl is None:
+        return True
+    if instance in wl:
+        return True
+    if allow_non_matching_source and source:
+        if _source_allows_non_matching(source, wl):
+            return True
+    return False
 
 
 class SlaTargetRepository:
@@ -97,25 +148,61 @@ class SlowThresholdRepository:
 
 class AvailabilityBucketRepository:
     @staticmethod
-    def save_buckets(buckets: List[Dict[str, Any]], db_path: Optional[str] = None):
+    def save_buckets(buckets: List[Dict[str, Any]], source: str, db_path: Optional[str] = None):
+        """Upsert hourly rows produced by Prometheus server `source`.
+        Non-whitelisted instances are dropped here — they never reach disk."""
+        source = norm_source(source)
+        if not source:
+            raise ValueError("save_buckets: source (Prometheus server) is required")
+        wl = AVAIL_TARGET_WHITELIST
+        allows_all = (wl is None) or _source_allows_non_matching(source, wl)
+        if not allows_all:
+            wl_set = set(wl)
+            rogue = sorted({b["instance"] for b in buckets if b.get("instance") not in wl_set})
+            if rogue:
+                logger.error("availability: refusing to store %d non-whitelisted instance(s) from %s: %s",
+                             len(rogue), source, rogue[:20])
+                buckets = [b for b in buckets if b.get("instance") in wl_set]
         if not buckets:
             return
         now = time.time()
         with db_transaction(db_path) as conn:
             conn.executemany("""
-                INSERT OR REPLACE INTO availability_buckets (
-                    instance, job, bucket_start, bucket_end,
+                INSERT INTO availability_buckets (
+                    source, instance, job, bucket_start, bucket_end,
                     uptime_seconds, downtime_seconds, unknown_seconds, coverage_seconds,
                     sample_count, availability_pct, incident_count, avg_latency_ms, updated_at,
                     outage_json
                 ) VALUES (
-                    :instance, :job, :bucket_start, :bucket_end,
+                    :source, :instance, :job, :bucket_start, :bucket_end,
                     :uptime_seconds, :downtime_seconds, :unknown_seconds, :coverage_seconds,
                     :sample_count, :availability_pct, :incident_count, :avg_latency_ms, :updated_at,
                     :outage_json
                 )
+                ON CONFLICT(source, job, instance, bucket_start) DO UPDATE SET
+                    bucket_end = excluded.bucket_end,
+                    uptime_seconds = excluded.uptime_seconds,
+                    downtime_seconds = excluded.downtime_seconds,
+                    unknown_seconds = excluded.unknown_seconds,
+                    coverage_seconds = excluded.coverage_seconds,
+                    sample_count = excluded.sample_count,
+                    availability_pct = excluded.availability_pct,
+                    incident_count = excluded.incident_count,
+                    avg_latency_ms = excluded.avg_latency_ms,
+                    updated_at = excluded.updated_at,
+                    outage_json = CASE
+                        WHEN excluded.outage_json IS NOT NULL AND excluded.outage_json != ''
+                        THEN excluded.outage_json
+                        ELSE availability_buckets.outage_json
+                    END
+                -- A zero-coverage re-aggregation (source Prometheus unreachable,
+                -- failed over, or past its retention) means "no data now", not
+                -- "this hour was never observed" — it must not erase an hour
+                -- that was already materialized from real telemetry.
+                WHERE excluded.coverage_seconds > 0 OR availability_buckets.coverage_seconds <= 0
             """, [
                 {
+                    "source": source,
                     "instance": b["instance"],
                     "job": b.get("job", "blackbox"),
                     "bucket_start": float(b["bucket_start"]),
@@ -137,53 +224,23 @@ class AvailabilityBucketRepository:
             ])
 
     @staticmethod
-    def get_aggregated_availability(
-        job: str,
-        start_time: float,
-        end_time: float,
-        instances: Optional[List[str]] = None,
-        db_path: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        with db_read(db_path) as conn:
-            query = """
-                SELECT 
-                    instance,
-                    job,
-                    SUM(uptime_seconds) as total_uptime_sec,
-                    SUM(downtime_seconds) as total_downtime_sec,
-                    SUM(unknown_seconds) as total_unknown_sec,
-                    SUM(coverage_seconds) as total_coverage_sec,
-                    SUM(sample_count) as total_samples,
-                    SUM(incident_count) as total_incidents,
-                    AVG(avg_latency_ms) as mean_latency_ms,
-                    MIN(bucket_start) as earliest_bucket_start,
-                    MAX(bucket_end) as latest_bucket_end,
-                    COUNT(*) as bucket_count
-                FROM availability_buckets
-                WHERE (job = ? OR ? = 'all')
-                  AND bucket_end > ?
-                  AND bucket_start < ?
-            """
-            params: List[Any] = [job, job, start_time, end_time]
-            if instances:
-                placeholders = ",".join("?" for _ in instances)
-                query += f" AND instance IN ({placeholders})"
-                params.extend(instances)
-            query += " GROUP BY instance, job ORDER BY instance ASC"
-            rows = conn.execute(query, params).fetchall()
-            return [dict(r) for r in rows]
-
-    @staticmethod
     def get_bucket_records(
         job: str,
         start_time: float,
         end_time: float,
         instances: Optional[List[str]] = None,
-        db_path: Optional[str] = None
+        db_path: Optional[str] = None,
+        *,
+        source: str,
     ) -> List[Dict[str, Any]]:
+        """Rows of ONE Prometheus server (`source`, required) for whitelisted
+        instances only. There is deliberately no cross-server form."""
+        source = norm_source(source)
+        if not source:
+            raise ValueError("get_bucket_records: source (Prometheus server) is required")
         with db_read(db_path) as conn:
             query = """
-                SELECT id, instance, job, bucket_start, bucket_end,
+                SELECT id, source, instance, job, bucket_start, bucket_end,
                        uptime_seconds, downtime_seconds, unknown_seconds, coverage_seconds,
                        sample_count, availability_pct, incident_count, avg_latency_ms, updated_at,
                        outage_json
@@ -191,14 +248,23 @@ class AvailabilityBucketRepository:
                     SELECT *,
                         ROW_NUMBER() OVER (
                             PARTITION BY instance, bucket_start
-                            ORDER BY updated_at DESC, id DESC
+                            -- Real coverage first: a newer zero-coverage row
+                            -- (another job label written while telemetry was
+                            -- unreachable) must not shadow observed history.
+                            ORDER BY (coverage_seconds > 0) DESC, updated_at DESC, id DESC
                         ) AS rn
                     FROM availability_buckets
-                    WHERE (job = ? OR ? = 'all')
+                    WHERE source = ?
+                      AND (
+                          job = ?
+                          OR ? = 'all'
+                          OR (? = 'blackbox' AND (job LIKE 'blackbox%' OR job = 'blackbox_icmp' OR job LIKE 'blackbox-ping%'))
+                          OR (? = 'node' AND (job LIKE 'node%' OR job = 'node_exporter' OR job = 'nodeexporter'))
+                      )
                       AND bucket_end > ?
                       AND bucket_start < ?
             """
-            params: List[Any] = [job, job, start_time, end_time]
+            params: List[Any] = [source, job, job, job, job, start_time, end_time]
             if instances:
                 placeholders = ",".join("?" for _ in instances)
                 query += f" AND instance IN ({placeholders})"
@@ -208,21 +274,35 @@ class AvailabilityBucketRepository:
                 WHERE rn = 1
                 ORDER BY instance ASC, bucket_start ASC
             """
-            rows = conn.execute(query, params).fetchall()
-            return [dict(r) for r in rows]
+            rows = [dict(r) for r in conn.execute(query, params).fetchall()]
+        # Hard guard: a result set for one server must never carry another's rows.
+        foreign = {r["source"] for r in rows} - {source}
+        if foreign:
+            raise AssertionError(f"get_bucket_records({source!r}) returned rows from {sorted(foreign)}")
+        wl = AVAIL_TARGET_WHITELIST
+        if wl is None or _source_allows_non_matching(source, wl):
+            return rows
+        wl_set = set(wl)
+        return [r for r in rows if r.get("instance") in wl_set]
 
     @staticmethod
-    def get_latest_bucket_end(job: str = 'all', db_path: Optional[str] = None) -> Optional[float]:
+    def get_latest_bucket_end(job: str = 'all', db_path: Optional[str] = None, *, source: str) -> Optional[float]:
         with db_read(db_path) as conn:
             row = conn.execute(
-                "SELECT MAX(bucket_end) as max_end FROM availability_buckets WHERE (job = ? OR ? = 'all')",
-                (job, job)
+                """SELECT MAX(bucket_end) as max_end FROM availability_buckets
+                   WHERE source = ? AND (
+                       job = ?
+                       OR ? = 'all'
+                       OR (? = 'blackbox' AND (job LIKE 'blackbox%' OR job = 'blackbox_icmp' OR job LIKE 'blackbox-ping%'))
+                       OR (? = 'node' AND (job LIKE 'node%' OR job = 'node_exporter' OR job = 'nodeexporter'))
+                   )""",
+                (norm_source(source), job, job, job, job)
             ).fetchone()
             return float(row["max_end"]) if row and row["max_end"] is not None else None
 
     @staticmethod
     def get_instance_bucket_coverage(
-        instances: Optional[List[str]] = None, db_path: Optional[str] = None
+        instances: Optional[List[str]] = None, db_path: Optional[str] = None, *, source: str
     ) -> Dict[str, Tuple[float, int]]:
         """`{instance: (earliest_bucket_start, distinct_hours_materialized)}`.
 
@@ -242,11 +322,11 @@ class AvailabilityBucketRepository:
         with db_read(db_path) as conn:
             query = (
                 "SELECT instance, MIN(bucket_start) AS min_start, "
-                "COUNT(DISTINCT bucket_start) AS hours FROM availability_buckets"
+                "COUNT(DISTINCT bucket_start) AS hours FROM availability_buckets WHERE source = ?"
             )
-            params: List[Any] = []
+            params: List[Any] = [norm_source(source)]
             if inline:
-                query += " WHERE instance IN (%s)" % ",".join("?" for _ in instances)
+                query += " AND instance IN (%s)" % ",".join("?" for _ in instances)
                 params.extend(instances)
             query += " GROUP BY instance"
             rows = conn.execute(query, params).fetchall()
@@ -257,21 +337,6 @@ class AvailabilityBucketRepository:
             for r in rows
             if r["min_start"] is not None and (wanted is None or r["instance"] in wanted)
         }
-
-    @staticmethod
-    def get_bucket_count_in_range(job: str, start_time: float, end_time: float, db_path: Optional[str] = None) -> int:
-        with db_read(db_path) as conn:
-            if job == 'all':
-                row = conn.execute(
-                    "SELECT COUNT(DISTINCT instance || ':' || bucket_start) as c FROM availability_buckets WHERE bucket_end > ? AND bucket_start < ?",
-                    (start_time, end_time)
-                ).fetchone()
-            else:
-                row = conn.execute(
-                    "SELECT COUNT(*) as c FROM availability_buckets WHERE job = ? AND bucket_end > ? AND bucket_start < ?",
-                    (job, start_time, end_time)
-                ).fetchone()
-            return int(row["c"]) if row and row["c"] is not None else 0
 
     @staticmethod
     def prune_old_buckets(retention_seconds: float = 35 * 86400, db_path: Optional[str] = None) -> int:

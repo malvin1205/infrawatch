@@ -11,3 +11,8 @@ from .telegram import (
     get_telegram_config, save_telegram_config, test_telegram_connection,
     dispatch_alert_async,
 )
+from .alarm_policy import (
+    DEFAULT_ALARM_POLICY, ALARM_PRESETS,
+    get_alarm_policy, save_alarm_policy, validate_alarm_policy,
+)
+

@@ -49,7 +49,22 @@ def test_non_poller_owned_alert_is_never_touched():
     assert resolved == [], resolved
 
 
+def test_orphaned_down_host_refires_when_it_returns_still_down():
+    """Endpoint A -> B -> A: A's down host is auto-resolved while B is active;
+    back on A it is still down and must alert again (cold start), not be
+    remembered as 'down already' and stay silent."""
+    from core.workers.poller import compute_state_transitions
+    incidents = [{"name": "TargetDown", "instance": "10.0.0.1", "severity": "critical", "key": "TargetDown|10.0.0.1"}]
+    resolved = []
+    p = _poller(incidents, resolved)
+    p._poller_state["10.0.0.1"] = "down"
+    p.reconcile_orphaned_alerts(["10.0.0.2"])
+    transitions, _ = compute_state_transitions({"10.0.0.1": "0"}, p._poller_state)
+    assert transitions == [("10.0.0.1", False)], transitions
+
+
 if __name__ == "__main__":
+    test_orphaned_down_host_refires_when_it_returns_still_down()
     test_orphan_resolved_when_absent_from_scraped_set()
     test_scraped_instance_is_left_firing()
     test_non_poller_owned_alert_is_never_touched()

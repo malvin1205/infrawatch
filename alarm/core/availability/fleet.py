@@ -666,6 +666,8 @@ def merge_hybrid_target_availability(
         eff_cadence = expected_interval_sec if expected_interval_sec > 0 else DEFAULT_SCRAPE_INTERVAL_SEC
 
         # Calculate Prometheus coverage seconds
+        head_window_sec = prom_metrics.get("window_sec")
+        eff_window_sec = min(float(head_window_sec), window_sec) if head_window_sec is not None else window_sec
         full_window_from_avail = False
         if s_count is not None and s_count >= 2 and l_ts > f_ts and f_ts > 0:
             span_sec = l_ts - f_ts
@@ -673,16 +675,20 @@ def merge_hybrid_target_availability(
             if cadence_est <= gap_tolerance * eff_cadence:
                 lead_in = min(cadence_est, max(0.0, f_ts - req_start)) if (f_ts - req_start) <= gap_tolerance * eff_cadence else 0.0
                 lead_out = min(cadence_est, max(0.0, req_end - l_ts)) if (req_end - l_ts) <= gap_tolerance * eff_cadence else 0.0
-                prom_cov_sec = min(span_sec + lead_in + lead_out, window_sec)
+                prom_cov_sec = min(span_sec + lead_in + lead_out, eff_window_sec)
             else:
-                prom_cov_sec = min(float(s_count) * eff_cadence, window_sec)
+                prom_cov_sec = min(float(s_count) * eff_cadence, eff_window_sec)
         elif s_count is not None and s_count == 1:
-            prom_cov_sec = min(eff_cadence, window_sec)
+            prom_cov_sec = min(eff_cadence, eff_window_sec)
         elif s_count is not None and s_count > 0:
-            prom_cov_sec = min(float(s_count) * eff_cadence, window_sec)
+            prom_cov_sec = min(float(s_count) * eff_cadence, eff_window_sec)
         elif raw_avail is not None:
-            prom_cov_sec = window_sec
-            full_window_from_avail = True
+            if head_window_sec is not None:
+                prom_cov_sec = eff_window_sec
+                full_window_from_avail = False
+            else:
+                prom_cov_sec = window_sec
+                full_window_from_avail = True
         elif f_ts > 0 and l_ts > 0 and l_ts >= f_ts:
             prom_cov_sec = max(0.0, min(req_end, l_ts) - max(req_start, f_ts))
         else:
@@ -1185,6 +1191,7 @@ def merge_hybrid_fleet_availability(
             "avail": prom_results_map.get("avail", {}).get(inst),
             "incidents": prom_results_map.get("incidents", {}).get(inst),
             "duration": prom_results_map.get("duration", {}).get(inst),
+            "window_sec": prom_results_map.get("window_sec"),
         }
         inst_buckets = buckets_by_instance.get(inst, [])
         if isinstance(expected_interval_sec, dict):

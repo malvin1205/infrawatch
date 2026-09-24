@@ -56,3 +56,59 @@ export function latencyColor(ms, thresholdMs) {
 // timestamp and log row. 'id-ID' renders 24h "HH.MM" and "DD Mmm"; switch to
 // e.g. 'en-GB' for "HH:MM" if the wallboard audience is non-Indonesian.
 export const DATE_LOCALE = 'id-ID';
+
+export function getDurationFormatPreference() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem('infrawatch_duration_format') || 'days';
+    }
+  } catch {}
+  return 'days';
+}
+
+export function setDurationFormatPreference(format) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('infrawatch_duration_format', format);
+    }
+  } catch {}
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('iw:duration-format-changed', { detail: { format } }));
+  }
+}
+
+/**
+ * Universal duration formatter respecting operator's 'days' vs 'hours' preference.
+ * - When pref is 'days' and sec >= 86400 (24+ hours):
+ *     compact: `${d}d ${h}h` (e.g. "31d 23h")
+ *     full: `${d}d ${h}h ${m}m` (or `${d}d ${h}h` if m === 0)
+ * - When pref is 'hours' or sec < 86400:
+ *     sec < 60: `${sec}s`
+ *     sec < 3600: `${m}m ${s}s`
+ *     sec >= 3600: `${totalH}h ${remM}m`
+ */
+export function formatDuration(ms, { compact = false, mode = null } = {}) {
+  if (ms == null || isNaN(ms) || ms <= 0) return '0s';
+  const pref = mode || getDurationFormatPreference();
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}m ${s}s`;
+  }
+  const totalH = Math.floor(sec / 3600);
+  const remM = Math.floor((sec % 3600) / 60);
+
+  if (pref === 'hours' || totalH < 24) {
+    return `${totalH}h ${remM}m`;
+  }
+
+  // Days format (totalH >= 24)
+  const d = Math.floor(totalH / 24);
+  const h = totalH % 24;
+  if (compact) {
+    return `${d}d ${h}h`;
+  }
+  return remM > 0 ? `${d}d ${h}h ${remM}m` : `${d}d ${h}h`;
+}

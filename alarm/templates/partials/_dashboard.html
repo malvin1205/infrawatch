@@ -194,20 +194,20 @@
             <button class="chip chip-active" data-status="all" id="filterAll">All</button>
             <button class="chip" data-status="up" id="filterOnline">Online</button>
             <button class="chip" data-status="down" id="filterOffline">Offline</button>
-            <button class="chip" data-status="slow" id="filterSlow">Slow (>500ms)</button>
+            <button class="chip" data-status="unacked" id="filterUnacked">Unacknowledged</button>
+            <button class="chip" data-status="maint" id="filterMaint">Maintenance</button>
+            <button class="chip" data-status="slow" id="filterSlow">Slow (&gt;500ms)</button>
           </div>
 
-          <button id="openAddTargetModalBtn" class="add-target-btn" type="button">
+          <button id="openAddTargetModalBtn" class="add-target-btn icon-only-btn" type="button" title="Add Target" aria-label="Add Target">
             <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            <span>Add Target</span>
           </button>
 
           <!-- Bulk actions: "Select" toggles checkbox mode on the grid below
                instead of the old click-tile → drawer → tab path, for both
                removal and scheduling maintenance across many hosts at once. -->
-          <button id="selectModeBtn" class="add-target-btn select-mode-btn" type="button" aria-pressed="false" title="Select hosts for bulk maintenance or removal">
-            <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 8.5 16.5 20 5"/></svg>
-            <span>Select</span>
+          <button id="selectModeBtn" class="select-mode-btn icon-only-btn" type="button" aria-pressed="false" title="Select multiple hosts" aria-label="Select multiple hosts">
+            <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><polyline points="8 12 11 15 16 9"/></svg>
           </button>
 
           <span class="host-count-badge" id="instanceCount">—</span>

@@ -1,0 +1,229 @@
+  <!-- Alarm Policy Settings Modal -->
+  <div id="alarmPolicyModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="alarmPolicyModalTitle">
+    <div class="modal-card ap-modal-card">
+      <div class="modal-header ap-modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge" style="background: rgba(56, 189, 248, 0.12); color: var(--accent);">
+            <svg aria-hidden="true" focusable="false" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+          </div>
+          <div>
+            <h3 class="modal-title" id="alarmPolicyModalTitle">Alarm Policy</h3>
+            <div class="modal-subtitle">Audible Outage Timing, Delays &amp; Acknowledgment Rules</div>
+          </div>
+        </div>
+        <button id="closeAlarmPolicyModalBtn" class="modal-close" type="button" aria-label="Close modal">&times;</button>
+      </div>
+
+      <form id="alarmPolicyForm" class="ap-modal-form">
+        <div class="ap-modal-body">
+
+          <!-- Presets segmented control -->
+          <div class="ap-presets-container">
+            <div class="ap-presets-label">Operating Preset</div>
+            <div class="ap-segmented-bar" id="alarmPresetsChips" role="group" aria-label="Alarm Policy Presets">
+              <button type="button" class="chip ap-preset-tab" data-preset="immediate" id="presetImmediateBtn">
+                <span class="ap-preset-name">Immediate</span>
+                <span class="ap-preset-sub">0s Delay</span>
+              </button>
+              <button type="button" class="chip ap-preset-tab chip-active" data-preset="short_transient" id="presetShortTransientBtn">
+                <span class="ap-preset-name">Transient Filter</span>
+                <span class="ap-preset-sub">15s Delay</span>
+              </button>
+              <button type="button" class="chip ap-preset-tab" data-preset="standard" id="presetStandardBtn">
+                <span class="ap-preset-name">Standard</span>
+                <span class="ap-preset-sub">30s Delay</span>
+              </button>
+              <button type="button" class="chip ap-preset-tab" data-preset="custom" id="presetCustomBtn">
+                <span class="ap-preset-name">Custom</span>
+                <span class="ap-preset-sub">Manual</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Visual Lifecycle Pipeline -->
+          <div class="ap-flow-card">
+            <div class="ap-flow-card-header">
+              <span class="ap-flow-card-title">Audible Alert Lifecycle</span>
+              <span id="apPreviewMode" class="ap-flow-card-badge">Active Policy</span>
+            </div>
+            <div id="apTimelineTrack" class="ap-pipeline-track">
+              <!-- Dynamically populated with SVG nodes -->
+            </div>
+          </div>
+
+          <!-- 1. Trigger Delay Card -->
+          <div class="ap-card">
+            <div class="ap-card-header">
+              <div class="ap-card-title-wrap">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="ap-card-icon"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                <div>
+                  <div class="ap-card-title">Trigger Delay (Flap Suppression)</div>
+                  <div class="ap-card-sub">Wait time before sounding audible alarm (0s = immediate)</div>
+                </div>
+              </div>
+              <div class="ap-input-group">
+                <input type="number" id="apInitialDelayInput" min="0" max="3600" step="1" class="ap-input" value="15">
+                <span class="ap-unit">sec</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. Audible Alarm Sound Card -->
+          <div class="ap-card">
+            <div class="ap-card-header">
+              <div class="ap-card-title-wrap">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="ap-card-icon"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                <div>
+                  <div class="ap-card-title">Audible Alarm Sound</div>
+                  <div class="ap-card-sub">Select the audio played during outage alarms</div>
+                </div>
+              </div>
+              <div class="ap-sound-tabs" id="apSoundTabs" role="tablist">
+                <button type="button" class="ap-sound-tab-btn active" data-sound-tab="choose">Choose</button>
+                <button type="button" class="ap-sound-tab-btn" data-sound-tab="upload">+ Upload</button>
+                <button type="button" class="ap-sound-tab-btn" data-sound-tab="youtube">YouTube</button>
+              </div>
+            </div>
+
+            <!-- Panel A: Choose / Select -->
+            <div id="apSoundChoosePanel" class="ap-sound-panel">
+              <div class="ap-sound-select-row">
+                <select id="apSoundSelect" class="form-input ap-sound-select" aria-label="Select Alarm Sound">
+                  <!-- Dynamically populated -->
+                </select>
+                <button type="button" id="apSoundPreviewBtn" class="btn btn-secondary btn-sm ap-sound-action-btn" title="Preview sound without triggering an outage">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  <span id="apSoundPreviewText">Preview</span>
+                </button>
+                <button type="button" id="apSoundDeleteBtn" class="btn btn-danger-subtle btn-sm ap-sound-action-btn hidden" title="Delete custom sound">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+              </div>
+              <div id="apSoundMetaBar" class="ap-sound-meta-bar">
+                <span class="ap-sound-meta-pill" id="apSoundSourceBadge">Built-in</span>
+                <span class="ap-sound-meta-info" id="apSoundDurationInfo">~3.0s</span>
+              </div>
+            </div>
+
+            <!-- Panel B: Upload Audio -->
+            <div id="apSoundUploadPanel" class="ap-sound-panel hidden">
+              <div class="ap-sound-input-row">
+                <input type="file" id="apSoundFileInput" accept=".mp3,.wav,.ogg,audio/mpeg,audio/wav,audio/ogg" class="ap-file-input">
+                <input type="text" id="apSoundNameInput" class="form-input ap-sound-name-input" placeholder="Label (optional)" maxlength="50">
+                <button type="button" id="apSoundUploadSubmitBtn" class="btn btn-primary btn-sm ap-sound-submit-btn">Upload</button>
+              </div>
+              <div id="apSoundUploadStatus" class="ap-sound-status-msg hidden"></div>
+            </div>
+
+            <!-- Panel C: YouTube Import -->
+            <div id="apSoundYtPanel" class="ap-sound-panel hidden">
+              <div class="ap-sound-input-row">
+                <input type="url" id="apSoundYtUrlInput" class="form-input ap-yt-url-input" placeholder="YouTube URL (https://www.youtube.com/watch?v=...)">
+                <input type="text" id="apSoundYtNameInput" class="form-input ap-sound-name-input" placeholder="Label (optional)" maxlength="50">
+                <button type="button" id="apSoundYtImportBtn" class="btn btn-primary btn-sm ap-sound-submit-btn">Import</button>
+              </div>
+              <div id="apSoundYtStatus" class="ap-sound-status-msg hidden"></div>
+            </div>
+          </div>
+
+          <!-- 3. Active Outage Repeating Alerts Card -->
+          <div class="ap-card">
+            <div class="ap-card-header">
+              <div class="ap-card-title-wrap">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="ap-card-icon"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                <div>
+                  <div class="ap-card-title">Active Outage Alerts</div>
+                  <div class="ap-card-sub">Audible alert duration and repeat cooldown</div>
+                </div>
+              </div>
+              <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: var(--text-secondary); user-select: none;">
+                <input type="checkbox" id="apRepeatEnabledCheckbox" checked style="accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer;">
+                <span>Repeating Alerts</span>
+              </label>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 2px;">
+              <div class="ap-input-row">
+                <label for="apRingDurationInput" class="ap-input-label">Ring Duration</label>
+                <div class="ap-input-group">
+                  <input type="number" id="apRingDurationInput" min="1" max="300" step="1" class="ap-input" value="10">
+                  <span class="ap-unit">sec</span>
+                </div>
+              </div>
+              <div id="apRepeatIntervalGroup" class="ap-input-row">
+                <label for="apRepeatIntervalInput" class="ap-input-label">Cooldown Repeat</label>
+                <div class="ap-input-group">
+                  <input type="number" id="apRepeatIntervalInput" min="5" max="86400" step="1" class="ap-input" value="120">
+                  <span class="ap-unit">sec</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. After Acknowledgment (ACK) Card -->
+          <div class="ap-card">
+            <div class="ap-card-header">
+              <div class="ap-card-title-wrap">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="ap-card-icon"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <div>
+                  <div class="ap-card-title">When Acknowledged (ACK)</div>
+                  <div class="ap-card-sub">Audible behavior once operator ACKs outage</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="ap-radio-cards-grid">
+              <label class="ap-radio-card" for="apAckSilenceRadio">
+                <div class="ap-radio-card-header">
+                  <input type="radio" name="apAckBehavior" value="silence" id="apAckSilenceRadio" style="accent-color: var(--accent); cursor: pointer;">
+                  <span class="ap-radio-card-title">Silence Completely</span>
+                </div>
+                <div class="ap-radio-card-desc">No further audible alerts until recovery</div>
+              </label>
+
+              <label class="ap-radio-card" for="apAckRemindRadio">
+                <div class="ap-radio-card-header">
+                  <input type="radio" name="apAckBehavior" value="remind" id="apAckRemindRadio" checked style="accent-color: var(--accent); cursor: pointer;">
+                  <span class="ap-radio-card-title">Periodic Reminders</span>
+                </div>
+                <div class="ap-radio-card-desc">Re-alerts if outage remains active</div>
+              </label>
+            </div>
+
+            <div id="apAckRemindControls" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border-top: 1px dashed var(--border); padding-top: 8px; margin-top: 2px;">
+              <div class="ap-input-row">
+                <label for="apAckReminderIntervalInput" class="ap-input-label">Reminder Interval</label>
+                <div class="ap-input-group">
+                  <input type="number" id="apAckReminderIntervalInput" min="5" max="86400" step="1" class="ap-input" value="300">
+                  <span class="ap-unit">sec</span>
+                </div>
+              </div>
+              <div class="ap-input-row">
+                <label for="apAckReminderRingInput" class="ap-input-label">Reminder Ring</label>
+                <div class="ap-input-group">
+                  <input type="number" id="apAckReminderRingInput" min="1" max="300" step="1" class="ap-input" value="10">
+                  <span class="ap-unit">sec</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="apError" class="form-error hidden" style="font-size: 11.5px; color: var(--critical);"></div>
+          <div id="apSuccess" style="color: var(--success); font-size: 12px; display: none;">Policy saved successfully.</div>
+        </div>
+
+        <div class="ap-modal-footer">
+          <button type="button" id="apResetDefaultsBtn" class="btn btn-secondary btn-sm" style="font-size: 11px;">
+            Reset to Defaults
+          </button>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" id="apCancelBtn" class="btn btn-secondary btn-sm">Cancel</button>
+            <button type="submit" id="apSubmitBtn" class="btn btn-primary btn-sm">Save Policy</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>

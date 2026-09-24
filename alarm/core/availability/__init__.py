@@ -23,6 +23,7 @@ from .helpers import (
     _build_fleet_trend,
     _FLEET_TREND_CACHE,
     _FLEET_TREND_CACHE_TTL,
+    clear_helpers_caches,
 )
 
 # 2. Models & cache
@@ -59,4 +60,5 @@ __all__ = [
     "_build_fleet_trend",
     "_FLEET_TREND_CACHE",
     "_FLEET_TREND_CACHE_TTL",
+    "clear_helpers_caches",
 ]

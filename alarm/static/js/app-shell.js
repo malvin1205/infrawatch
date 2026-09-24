@@ -1,26 +1,20 @@
-/* Application shell: owns audio/alarm state, tab switching, endpoint
- * management, and constructs + coordinates the three page objects. */
 import { apiFetch } from './net.js';
-import { escapeHtml, DATE_LOCALE } from './ui/format.js';
+import { escapeHtml, DATE_LOCALE, getDurationFormatPreference, setDurationFormatPreference } from './ui/format.js';
 import { InstancesPage } from './dashboard.js';
 import { LogsPage } from './logs.js';
 import { HistoryPage } from './history.js';
+import {
+  alarmPolicyManager,
+  evaluateAlarmState,
+  AlarmState,
+  formatDurationSeconds,
+  ALARM_PRESETS,
+  DEFAULT_ALARM_POLICY
+} from './alarm-policy.js';
 
 /* ════════════════════════════════════════════════════════════════════════════
    MAIN MONITOR (Dashboard + coordination)
    ════════════════════════════════════════════════════════════════════════════ */
-// Alarm lifecycle timings (seconds), driven entirely by server timestamps
-// (t.downSince, t.acknowledged_at) — see ServerMonitor._alarmPhaseFor(). No
-// client-local per-outage flags/timers: every tick recomputes phase fresh
-// from those two epoch values, so a refresh, a second tab, or a missed poll
-// all converge on the same answer instead of needing to be kept in sync.
-const ALARM_DELAY_S = 15;           // new outage: stay silent this long first...
-const ALARM_INITIAL_BURST_S = 30;   // ...then alarm for this long
-const ALARM_UNACKED_PERIOD_S = 120; // then, while unacked, re-alert every...
-const ALARM_UNACKED_BURST_S = 10;   // ...for this long
-const ALARM_ACK_COOLDOWN_S = 300;   // once acked: silence for this long...
-const ALARM_ACKED_PERIOD_S = 300;   // ...then re-alert every...
-const ALARM_ACKED_BURST_S = 10;     // ...for this long, repeating, while still down
 
 export class ServerMonitor {
   constructor() {
@@ -30,6 +24,18 @@ export class ServerMonitor {
 
     // ── DOM refs ──────────────────────────────────
     this.alarmAudio = document.getElementById('alarmAudio');
+    this._previewAudio = new Audio();
+    if (this.alarmAudio) {
+      this.alarmAudio.dataset.soundId = 'alarm-default';
+      this.alarmAudio.addEventListener('error', () => {
+        if (this.alarmAudio.dataset.soundId !== 'alarm-default') {
+          console.warn('[InfraWatch] Custom alarm sound failed to load, falling back to built-in sound');
+          this.alarmAudio.dataset.soundId = 'alarm-default';
+          this.alarmAudio.src = '/static/audio/alarm.mp3';
+          this.alarmAudio.load();
+        }
+      });
+    }
 
     // ── Sub-pages ─────────────────────────────────
     this.instancesPage = new InstancesPage(this);
@@ -38,7 +44,9 @@ export class ServerMonitor {
 
     this._bindLogsModal();
     this._bindSelfHealthModal();
+    this._bindAlarmPolicyModal();
     this._bindEvents();
+    alarmPolicyManager.onChange(() => this._syncAlarmAudio());
     this.initialize();
   }
 
@@ -130,6 +138,8 @@ export class ServerMonitor {
     }
 
     this.initEndpointManager();
+    alarmPolicyManager.load().then(() => this._syncAlarmAudio());
+    alarmPolicyManager.onChange(() => this._syncAlarmAudio());
     this.instancesPage.onActivate();
     this._startAlarmTicker();
 
@@ -217,6 +227,621 @@ export class ServerMonitor {
     btn.addEventListener('click', open);
     if (closeBtn) closeBtn.addEventListener('click', close);
     modal.addEventListener('click', e => { if (e.target === modal) close(); });
+  }
+
+  _bindAlarmPolicyModal() {
+    const modal = document.getElementById('alarmPolicyModal');
+    if (!modal) return;
+
+    const openBtns = [
+      document.getElementById('headerAlarmPolicyBtn'),
+      document.getElementById('alarmPolicyQuickBtn')
+    ].filter(Boolean);
+    const closeBtn = document.getElementById('closeAlarmPolicyModalBtn');
+    const cancelBtn = document.getElementById('apCancelBtn');
+    const resetBtn = document.getElementById('apResetDefaultsBtn');
+    const form = document.getElementById('alarmPolicyForm');
+
+    const initialDelayInput = document.getElementById('apInitialDelayInput');
+    const ringDurationInput = document.getElementById('apRingDurationInput');
+    const repeatIntervalInput = document.getElementById('apRepeatIntervalInput');
+    const repeatEnabledCheckbox = document.getElementById('apRepeatEnabledCheckbox');
+    const repeatIntervalGroup = document.getElementById('apRepeatIntervalGroup');
+    const ackSilenceRadio = document.getElementById('apAckSilenceRadio');
+    const ackRemindRadio = document.getElementById('apAckRemindRadio');
+    const ackRemindControls = document.getElementById('apAckRemindControls');
+    const ackReminderIntervalInput = document.getElementById('apAckReminderIntervalInput');
+    const ackReminderRingInput = document.getElementById('apAckReminderRingInput');
+    const presetChips = document.getElementById('alarmPresetsChips');
+    const timelineTrack = document.getElementById('apTimelineTrack');
+    const previewMode = document.getElementById('apPreviewMode');
+    const errorEl = document.getElementById('apError');
+    const successEl = document.getElementById('apSuccess');
+    const submitBtn = document.getElementById('apSubmitBtn');
+
+    // ── Audible Sound Controls ──
+    const soundSelect = document.getElementById('apSoundSelect');
+    const soundPreviewBtn = document.getElementById('apSoundPreviewBtn');
+    const soundPreviewText = document.getElementById('apSoundPreviewText');
+    const soundDeleteBtn = document.getElementById('apSoundDeleteBtn');
+    const soundSourceBadge = document.getElementById('apSoundSourceBadge');
+    const soundDurationInfo = document.getElementById('apSoundDurationInfo');
+    const soundTabs = document.getElementById('apSoundTabs');
+    const choosePanel = document.getElementById('apSoundChoosePanel');
+    const uploadPanel = document.getElementById('apSoundUploadPanel');
+    const ytPanel = document.getElementById('apSoundYtPanel');
+    const fileInput = document.getElementById('apSoundFileInput');
+    const uploadNameInput = document.getElementById('apSoundNameInput');
+    const uploadSubmitBtn = document.getElementById('apSoundUploadSubmitBtn');
+    const uploadStatus = document.getElementById('apSoundUploadStatus');
+    const ytUrlInput = document.getElementById('apSoundYtUrlInput');
+    const ytNameInput = document.getElementById('apSoundYtNameInput');
+    const ytImportBtn = document.getElementById('apSoundYtImportBtn');
+    const ytStatus = document.getElementById('apSoundYtStatus');
+
+    let availableSounds = [];
+    let isPreviewPlaying = false;
+
+    const stopPreview = () => {
+      if (this._previewAudio) {
+        this._previewAudio.pause();
+        this._previewAudio.currentTime = 0;
+      }
+      isPreviewPlaying = false;
+      if (soundPreviewBtn) {
+        soundPreviewBtn.classList.remove('btn-primary');
+        soundPreviewBtn.classList.add('btn-secondary');
+        soundPreviewBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg> <span id="apSoundPreviewText">Preview</span>';
+      }
+    };
+
+    if (this._previewAudio) {
+      this._previewAudio.addEventListener('ended', stopPreview);
+      this._previewAudio.addEventListener('error', () => {
+        console.warn('[AlarmSound] Preview error');
+        stopPreview();
+      });
+    }
+
+    const playPreview = (soundId) => {
+      stopPreview();
+      const sid = soundId || soundSelect?.value || 'alarm-default';
+      const url = sid === 'alarm-default'
+        ? '/static/audio/alarm.mp3'
+        : `/api/alarm-sounds/${encodeURIComponent(sid)}/audio`;
+
+      this._previewAudio.src = url;
+      isPreviewPlaying = true;
+      if (soundPreviewBtn) {
+        soundPreviewBtn.classList.remove('btn-secondary');
+        soundPreviewBtn.classList.add('btn-primary');
+        soundPreviewBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> <span id="apSoundPreviewText">Stop</span>';
+      }
+      this._previewAudio.play().catch(e => {
+        console.warn('[AlarmSound] Preview playback failed:', e);
+        stopPreview();
+      });
+    };
+
+    const updateSoundMeta = () => {
+      const selectedId = soundSelect?.value || 'alarm-default';
+      const s = availableSounds.find(item => item.id === selectedId);
+      if (s) {
+        if (soundSourceBadge) {
+          soundSourceBadge.textContent = s.source === 'builtin' ? 'Built-in' : (s.source === 'youtube' ? 'YouTube' : 'Custom');
+        }
+        if (soundDurationInfo) {
+          const durSec = s.duration || s.duration_s;
+          const dur = durSec ? `~${Number(durSec).toFixed(1)}s` : '';
+          const szBytes = s.file_size || s.file_size_bytes;
+          const sz = szBytes ? ` · ${(szBytes / 1024).toFixed(0)} KB` : '';
+          soundDurationInfo.textContent = `${dur}${sz}`.trim();
+        }
+        if (soundDeleteBtn) {
+          if (s.source === 'builtin') {
+            soundDeleteBtn.classList.add('hidden');
+          } else {
+            soundDeleteBtn.classList.remove('hidden');
+          }
+        }
+      } else {
+        if (soundDeleteBtn) soundDeleteBtn.classList.add('hidden');
+      }
+    };
+
+    const loadSoundsList = async (targetId) => {
+      try {
+        const res = await fetch('/api/alarm-sounds', {
+          headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          availableSounds = data.sounds || [];
+          if (soundSelect) {
+            const currentVal = targetId || soundSelect.value || 'alarm-default';
+            soundSelect.innerHTML = availableSounds.map(s => {
+              const ext = (s.format || s.filename?.split('.').pop() || '').toUpperCase();
+              const tag = s.source === 'builtin' ? ' (Default)' : (ext ? ` [${ext}]` : '');
+              const label = s.name + tag;
+              return `<option value="${this._esc(s.id)}">${this._esc(label)}</option>`;
+            }).join('');
+            soundSelect.value = currentVal;
+            if (!availableSounds.some(s => s.id === soundSelect.value) && availableSounds.length > 0) {
+              soundSelect.value = availableSounds[0].id;
+            }
+          }
+          updateSoundMeta();
+        }
+      } catch (err) {
+        console.warn('[AlarmSound] Failed to load alarm sounds:', err);
+      }
+    };
+
+    if (soundTabs) {
+      soundTabs.addEventListener('click', (e) => {
+        const btn = e.target.closest('.ap-sound-tab-btn');
+        if (!btn) return;
+        soundTabs.querySelectorAll('.ap-sound-tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.dataset.soundTab;
+        if (choosePanel) choosePanel.classList.toggle('hidden', tab !== 'choose');
+        if (uploadPanel) uploadPanel.classList.toggle('hidden', tab !== 'upload');
+        if (ytPanel) ytPanel.classList.toggle('hidden', tab !== 'youtube');
+      });
+    }
+
+    if (soundSelect) {
+      soundSelect.addEventListener('change', () => {
+        stopPreview();
+        updateSoundMeta();
+        onInputChange();
+      });
+    }
+
+    if (soundPreviewBtn) {
+      soundPreviewBtn.addEventListener('click', () => {
+        if (isPreviewPlaying) {
+          stopPreview();
+        } else {
+          playPreview(soundSelect?.value || 'alarm-default');
+        }
+      });
+    }
+
+    if (soundDeleteBtn) {
+      soundDeleteBtn.addEventListener('click', async () => {
+        const selectedId = soundSelect?.value;
+        if (!selectedId || selectedId === 'alarm-default') return;
+        const soundObj = availableSounds.find(s => s.id === selectedId);
+        const soundName = soundObj ? soundObj.name : selectedId;
+        if (!confirm(`Delete custom sound "${soundName}"?`)) return;
+
+        try {
+          soundDeleteBtn.disabled = true;
+          const res = await fetch(`/api/alarm-sounds/${encodeURIComponent(selectedId)}`, {
+            method: 'DELETE',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            alert(data.error || 'Failed to delete sound');
+          } else {
+            this.instancesPage?._triggerEventToast?.(`Deleted sound "${soundName}"`);
+            stopPreview();
+            await loadSoundsList('alarm-default');
+            onInputChange();
+          }
+        } catch (err) {
+          alert('Network error deleting sound');
+        } finally {
+          soundDeleteBtn.disabled = false;
+        }
+      });
+    }
+
+    if (uploadSubmitBtn) {
+      uploadSubmitBtn.addEventListener('click', async () => {
+        const file = fileInput?.files?.[0];
+        if (!file) {
+          if (uploadStatus) {
+            uploadStatus.textContent = 'Please choose an audio file (.mp3, .wav, .ogg).';
+            uploadStatus.style.color = 'var(--critical)';
+            uploadStatus.classList.remove('hidden');
+          }
+          return;
+        }
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('audio_file', file);
+        if (uploadNameInput?.value?.trim()) {
+          formData.append('name', uploadNameInput.value.trim());
+        }
+
+        uploadSubmitBtn.disabled = true;
+        uploadSubmitBtn.textContent = 'Uploading…';
+        if (uploadStatus) {
+          uploadStatus.textContent = 'Processing file…';
+          uploadStatus.style.color = 'var(--text-muted)';
+          uploadStatus.classList.remove('hidden');
+        }
+
+        try {
+          const res = await fetch('/api/alarm-sounds/upload', {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            if (uploadStatus) {
+              uploadStatus.textContent = data.error || 'Upload failed.';
+              uploadStatus.style.color = 'var(--critical)';
+              uploadStatus.classList.remove('hidden');
+            }
+          } else {
+            if (uploadStatus) {
+              uploadStatus.textContent = 'Upload successful!';
+              uploadStatus.style.color = 'var(--success)';
+              uploadStatus.classList.remove('hidden');
+            }
+            if (fileInput) fileInput.value = '';
+            if (uploadNameInput) uploadNameInput.value = '';
+
+            await loadSoundsList(data.sound.id);
+            const chooseTabBtn = soundTabs?.querySelector('[data-sound-tab="choose"]');
+            if (chooseTabBtn) chooseTabBtn.click();
+            onInputChange();
+            this.instancesPage?._triggerEventToast?.(`Uploaded sound "${data.sound.name}"`);
+          }
+        } catch (err) {
+          if (uploadStatus) {
+            uploadStatus.textContent = 'Network error during upload.';
+            uploadStatus.style.color = 'var(--critical)';
+            uploadStatus.classList.remove('hidden');
+          }
+        } finally {
+          uploadSubmitBtn.disabled = false;
+          uploadSubmitBtn.textContent = 'Upload';
+        }
+      });
+    }
+
+    if (ytImportBtn) {
+      ytImportBtn.addEventListener('click', async () => {
+        const url = ytUrlInput?.value?.trim();
+        if (!url) {
+          if (ytStatus) {
+            ytStatus.textContent = 'Please enter a valid YouTube URL.';
+            ytStatus.style.color = 'var(--critical)';
+            ytStatus.classList.remove('hidden');
+          }
+          return;
+        }
+        ytImportBtn.disabled = true;
+        ytImportBtn.textContent = 'Importing…';
+        if (ytStatus) {
+          ytStatus.textContent = 'Contacting server…';
+          ytStatus.style.color = 'var(--text-muted)';
+          ytStatus.classList.remove('hidden');
+        }
+
+        try {
+          const res = await fetch('/api/alarm-sounds/import', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({
+              url: url,
+              name: ytNameInput?.value?.trim() || ''
+            })
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            if (ytStatus) {
+              ytStatus.textContent = data.error || 'Import failed.';
+              ytStatus.style.color = 'var(--critical)';
+              ytStatus.classList.remove('hidden');
+            }
+          } else {
+            if (ytStatus) {
+              ytStatus.textContent = 'Import successful!';
+              ytStatus.style.color = 'var(--success)';
+              ytStatus.classList.remove('hidden');
+            }
+            if (ytUrlInput) ytUrlInput.value = '';
+            if (ytNameInput) ytNameInput.value = '';
+            await loadSoundsList(data.sound.id);
+            const chooseTabBtn = soundTabs?.querySelector('[data-sound-tab="choose"]');
+            if (chooseTabBtn) chooseTabBtn.click();
+            onInputChange();
+          }
+        } catch (err) {
+          if (ytStatus) {
+            ytStatus.textContent = 'Network error during import.';
+            ytStatus.style.color = 'var(--critical)';
+            ytStatus.classList.remove('hidden');
+          }
+        } finally {
+          ytImportBtn.disabled = false;
+          ytImportBtn.textContent = 'Import';
+        }
+      });
+    }
+
+    const getFormDraft = () => ({
+      initial_delay_s: Math.max(0, parseInt(initialDelayInput?.value, 10) || 0),
+      ring_duration_s: Math.max(1, parseInt(ringDurationInput?.value, 10) || 10),
+      repeat_interval_s: Math.max(5, parseInt(repeatIntervalInput?.value, 10) || 120),
+      repeat_enabled: Boolean(repeatEnabledCheckbox?.checked),
+      ack_behavior: ackSilenceRadio?.checked ? 'silence' : 'remind',
+      ack_reminder_interval_s: Math.max(5, parseInt(ackReminderIntervalInput?.value, 10) || 300),
+      ack_reminder_ring_duration_s: Math.max(1, parseInt(ackReminderRingInput?.value, 10) || 10),
+      sound_id: soundSelect?.value || 'alarm-default'
+    });
+
+    const renderTimeline = (p) => {
+      if (!timelineTrack) return;
+      const html = [];
+      const chevron = '<div class="ap-step-connector"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></div>';
+
+      // 1. Host DOWN
+      html.push(`
+        <div class="ap-step ap-step-down">
+          <div class="ap-step-icon">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          </div>
+          <div class="ap-step-title">Host DOWN</div>
+          <div class="ap-step-sub">${p.initial_delay_s > 0 ? p.initial_delay_s + 's delay' : 'Immediate'}</div>
+        </div>
+      `);
+
+      html.push(chevron);
+
+      // 2. Primary Alarm
+      html.push(`
+        <div class="ap-step ap-step-ring">
+          <div class="ap-step-icon">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          </div>
+          <div class="ap-step-title">Ring Alert</div>
+          <div class="ap-step-sub">${p.ring_duration_s}s sound</div>
+        </div>
+      `);
+
+      html.push(chevron);
+
+      // 3. Repeating / Silent
+      if (p.repeat_enabled) {
+        html.push(`
+          <div class="ap-step ap-step-repeat">
+            <div class="ap-step-icon">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+            </div>
+            <div class="ap-step-title">Repeating</div>
+            <div class="ap-step-sub">Every ${formatDurationSeconds(p.repeat_interval_s)}</div>
+          </div>
+        `);
+      } else {
+        html.push(`
+          <div class="ap-step ap-step-silent">
+            <div class="ap-step-icon">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+            </div>
+            <div class="ap-step-title">Single Alert</div>
+            <div class="ap-step-sub">Then silent</div>
+          </div>
+        `);
+      }
+
+      html.push(chevron);
+
+      // 4. On Acknowledgment (ACK)
+      if (p.ack_behavior === 'silence') {
+        html.push(`
+          <div class="ap-step ap-step-ack-silence">
+            <div class="ap-step-icon">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+            </div>
+            <div class="ap-step-title">ACK Muted</div>
+            <div class="ap-step-sub">Until UP</div>
+          </div>
+        `);
+      } else {
+        html.push(`
+          <div class="ap-step ap-step-ack-remind">
+            <div class="ap-step-icon">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div class="ap-step-title">ACK Remind</div>
+            <div class="ap-step-sub">Every ${formatDurationSeconds(p.ack_reminder_interval_s)}</div>
+          </div>
+        `);
+      }
+
+      html.push(chevron);
+
+      // 5. Recovery
+      html.push(`
+        <div class="ap-step ap-step-recovery">
+          <div class="ap-step-icon">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <div class="ap-step-title">Recovery</div>
+          <div class="ap-step-sub">Host UP</div>
+        </div>
+      `);
+
+      timelineTrack.innerHTML = html.join('');
+    };
+
+    const detectMatchingPreset = (p) => {
+      for (const [key, preset] of Object.entries(ALARM_PRESETS)) {
+        if (
+          p.initial_delay_s === preset.initial_delay_s &&
+          p.ring_duration_s === preset.ring_duration_s &&
+          p.repeat_interval_s === preset.repeat_interval_s &&
+          p.repeat_enabled === preset.repeat_enabled &&
+          p.ack_behavior === preset.ack_behavior &&
+          (p.sound_id || 'alarm-default') === (preset.sound_id || 'alarm-default') &&
+          (p.ack_behavior === 'silence' || (
+            p.ack_reminder_interval_s === preset.ack_reminder_interval_s &&
+            p.ack_reminder_ring_duration_s === preset.ack_reminder_ring_duration_s
+          ))
+        ) {
+          return key;
+        }
+      }
+      return 'custom';
+    };
+
+    const updatePresetChips = (activeKey) => {
+      if (!presetChips) return;
+      presetChips.querySelectorAll('.chip').forEach(chip => {
+        chip.classList.toggle('chip-active', chip.dataset.preset === activeKey);
+      });
+      if (previewMode) {
+        previewMode.textContent = activeKey === 'custom' ? 'Custom Policy' : `Preset: ${activeKey.replace('_', ' ').toUpperCase()}`;
+      }
+    };
+
+    const populateForm = (p) => {
+      if (initialDelayInput) initialDelayInput.value = p.initial_delay_s;
+      if (ringDurationInput) ringDurationInput.value = p.ring_duration_s;
+      if (repeatIntervalInput) repeatIntervalInput.value = p.repeat_interval_s;
+      if (repeatEnabledCheckbox) repeatEnabledCheckbox.checked = p.repeat_enabled;
+      if (p.ack_behavior === 'silence') {
+        if (ackSilenceRadio) ackSilenceRadio.checked = true;
+      } else {
+        if (ackRemindRadio) ackRemindRadio.checked = true;
+      }
+      if (ackReminderIntervalInput) ackReminderIntervalInput.value = p.ack_reminder_interval_s;
+      if (ackReminderRingInput) ackReminderRingInput.value = p.ack_reminder_ring_duration_s;
+
+      if (repeatIntervalGroup) repeatIntervalGroup.style.opacity = p.repeat_enabled ? '1' : '0.4';
+      if (ackRemindControls) ackRemindControls.style.display = p.ack_behavior === 'silence' ? 'none' : 'grid';
+
+      if (soundSelect && p.sound_id) {
+        soundSelect.value = p.sound_id;
+      }
+      updateSoundMeta();
+
+      renderTimeline(p);
+      updatePresetChips(detectMatchingPreset(p));
+    };
+
+    const openModal = async () => {
+      const current = alarmPolicyManager.getPolicy();
+      await loadSoundsList(current.sound_id || 'alarm-default');
+      populateForm(current);
+      if (errorEl) errorEl.classList.add('hidden');
+      if (successEl) successEl.style.display = 'none';
+      if (uploadStatus) uploadStatus.classList.add('hidden');
+      if (ytStatus) ytStatus.classList.add('hidden');
+      modal.classList.remove('hidden');
+      initialDelayInput?.focus();
+    };
+
+    const closeModal = () => {
+      stopPreview();
+      modal.classList.add('hidden');
+    };
+
+    openBtns.forEach(btn => btn.addEventListener('click', openModal));
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+        closeModal();
+      }
+    });
+
+    const onInputChange = () => {
+      const draft = getFormDraft();
+      if (repeatIntervalGroup) repeatIntervalGroup.style.opacity = draft.repeat_enabled ? '1' : '0.4';
+      if (ackRemindControls) ackRemindControls.style.display = draft.ack_behavior === 'silence' ? 'none' : 'grid';
+      renderTimeline(draft);
+      updatePresetChips(detectMatchingPreset(draft));
+    };
+
+    [
+      initialDelayInput, ringDurationInput, repeatIntervalInput,
+      repeatEnabledCheckbox, ackSilenceRadio, ackRemindRadio,
+      ackReminderIntervalInput, ackReminderRingInput
+    ].forEach(el => {
+      if (el) {
+        el.addEventListener('input', onInputChange);
+        el.addEventListener('change', onInputChange);
+      }
+    });
+
+    if (presetChips) {
+      presetChips.addEventListener('click', (e) => {
+        const chip = e.target.closest('.chip');
+        if (!chip || !chip.dataset.preset) return;
+        const key = chip.dataset.preset;
+        if (key === 'custom') {
+          updatePresetChips('custom');
+          return;
+        }
+        const preset = ALARM_PRESETS[key];
+        if (preset) {
+          populateForm({ ...alarmPolicyManager.getPolicy(), ...preset });
+        }
+      });
+    }
+
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        populateForm(DEFAULT_ALARM_POLICY);
+      });
+    }
+
+    if (form) {
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const draft = getFormDraft();
+        if (errorEl) errorEl.classList.add('hidden');
+        if (successEl) successEl.style.display = 'none';
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Saving…';
+        }
+
+        try {
+          const res = await alarmPolicyManager.save(draft);
+          if (res.ok) {
+            if (successEl) {
+              successEl.textContent = 'Alarm Policy saved successfully.';
+              successEl.style.display = 'block';
+            }
+            this.instancesPage?._triggerEventToast?.('Alarm Policy updated successfully');
+            renderTimeline(res.policy);
+            this._syncAlarmAudio();
+            setTimeout(() => closeModal(), 600);
+          } else {
+            if (errorEl) {
+              errorEl.textContent = res.error || 'Failed to save policy';
+              errorEl.classList.remove('hidden');
+            }
+          }
+        } catch (err) {
+          if (errorEl) {
+            errorEl.textContent = 'Network error saving policy';
+            errorEl.classList.remove('hidden');
+          }
+        } finally {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Save Policy';
+          }
+        }
+      });
+    }
   }
 
   _renderSelfHealthModal() {
@@ -498,9 +1123,26 @@ export class ServerMonitor {
       });
     }
 
+    // Duration display format preference
+    const durationPrefRadios = modal ? modal.querySelectorAll('input[name="durationDisplayFormat"]') : [];
+    const syncDurationPrefUI = () => {
+      const currentPref = getDurationFormatPreference();
+      durationPrefRadios.forEach(r => {
+        r.checked = (r.value === currentPref);
+      });
+    };
+    durationPrefRadios.forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        if (e.target.checked) {
+          setDurationFormatPreference(e.target.value);
+        }
+      });
+    });
+
     if (openBtn && modal) {
       openBtn.addEventListener('click', () => {
         modal.classList.remove('hidden');
+        syncDurationPrefUI();
         const readOnlyAlert = document.getElementById('endpointReadOnlyAlert');
         if (readOnlyAlert) readOnlyAlert.classList.toggle('hidden', !isReadOnlyUser());
         if (this._untrapEndpoint) this._untrapEndpoint();
@@ -614,51 +1256,24 @@ export class ServerMonitor {
       this.alarmAudio.muted = false;
       this.alarmAudio.volume = 1.0;
     }
+    if (this._previewAudio) {
+      this._previewAudio.muted = false;
+      this._previewAudio.volume = 1.0;
+    }
     try { localStorage.setItem('iw-audio-unlocked', 'true'); } catch (e) { }
     console.log('[InfraWatch] Audio context & element unlocked cleanly');
   }
 
   // ── Alarm lifecycle ───────────────────────────────
-  // Phase is a pure function of two server epoch timestamps per target
-  // (downSince, acknowledged_at) and the current time — never a client-side
-  // counter or "have I already played for this" flag. That is what makes a
-  // page refresh, a second tab, or a missed poll tick all agree: they all
-  // read the same server truth and run the same formula, so there is nothing
-  // to fall out of sync. See ALARM_* constants above the class for the timings.
-  //
-  //   unacked:  [0, 15s) after downSince            -> silent (debounce — see
-  //             below; the status tile is red the whole time, this only
-  //             holds back the SIREN, and t.downSince itself is untouched so
-  //             SLA/downtime math, which reads that same field, is not
-  //             delayed by a single tick)
-  //             [15s, 45s)                          -> burst (new-outage alarm)
-  //             then every 120s, for 10s            -> burst (unacked reminder)
-  //   acked:    [0, 300s) after acknowledged_at      -> silent (cooldown)
-  //             then every 300s, for 10s             -> burst (still-down reminder)
-  //   up / maintenance / suppressed / not alarmable   -> silent
+  // Evaluated pure-functionally per target via alarmPolicyManager.evaluate(t, nowMs).
+  // No volatile timers or scattered setTimeout() handles. Server epoch timestamps
+  // and configured policy drive the state machine deterministically across tabs.
   _alarmPhaseFor(t, nowMs) {
-    if (!t || !t.is_alarmable) return 'silent';
-    const downSinceMs = t.downSince > 0 ? t.downSince * 1000 : null;
-    if (downSinceMs == null) return 'silent';
-    const elapsedS = (nowMs - downSinceMs) / 1000;
-    if (elapsedS < 0) return 'silent';
-
-    if (!t.acknowledged) {
-      // Debounce: a target that recovers within ALARM_DELAY_S of going down
-      // never sounds at all (elapsedS never reaches this branch again once
-      // health flips — is_alarmable goes false the very next poll). Sustained
-      // outages just start their 30s initial burst ALARM_DELAY_S later than
-      // downSince, and every later reminder inherits that same offset.
-      const alarmElapsedS = elapsedS - ALARM_DELAY_S;
-      if (alarmElapsedS < 0) return 'silent';
-      if (alarmElapsedS < ALARM_INITIAL_BURST_S) return 'burst';
-      return (alarmElapsedS % ALARM_UNACKED_PERIOD_S) < ALARM_UNACKED_BURST_S ? 'burst' : 'silent';
-    }
-
-    const ackedAtMs = t.acknowledged_at > 0 ? t.acknowledged_at * 1000 : nowMs;
-    const ackedElapsedS = (nowMs - ackedAtMs) / 1000;
-    if (ackedElapsedS < ALARM_ACK_COOLDOWN_S) return 'silent';
-    return (ackedElapsedS % ALARM_ACKED_PERIOD_S) < ALARM_ACKED_BURST_S ? 'burst' : 'silent';
+    if (!t) return 'silent';
+    const isAcked = Boolean(this.instancesPage?.acknowledgedDownInstances?.has(t.instance) || t.acknowledged);
+    const targetWithAck = isAcked !== Boolean(t.acknowledged) ? { ...t, acknowledged: isAcked } : t;
+    const res = alarmPolicyManager.evaluate(targetWithAck, nowMs);
+    return res.isAudible ? 'burst' : 'silent';
   }
 
   // Single decision point for the shared <audio> element: recomputed from
@@ -666,11 +1281,35 @@ export class ServerMonitor {
   // .paused) rather than edge-triggered — nothing to double-fire or miss.
   _syncAlarmAudio() {
     if (!this.alarmAudio) return;
+
+    // Sync active sound source from policy
+    const policy = alarmPolicyManager.getPolicy();
+    const soundId = policy?.sound_id || 'alarm-default';
+    const expectedSrc = soundId === 'alarm-default'
+      ? '/static/audio/alarm.mp3'
+      : `/api/alarm-sounds/${encodeURIComponent(soundId)}/audio`;
+
+    if (this.alarmAudio.dataset.soundId !== soundId) {
+      this.alarmAudio.dataset.soundId = soundId;
+      const wasPlaying = !this.alarmAudio.paused;
+      this.alarmAudio.src = expectedSrc;
+      this.alarmAudio.load();
+      if (wasPlaying) {
+        this.alarmAudio.play().catch(e => this._reportAlarmAudioFailure(e));
+      }
+    }
+
     const targets = this.instancesPage?.data || [];
     const now = Date.now();
-    const shouldPlay = !this.isMuted && targets.some(t => this._alarmPhaseFor(t, now) === 'burst');
+    const canPlayTab = alarmPolicyManager.shouldPlayAudio();
+    const shouldPlay = !this.isMuted && canPlayTab && targets.some(t => this._alarmPhaseFor(t, now) === 'burst');
 
     if (shouldPlay) {
+      // Pause preview audio if an active outage alarm starts
+      if (this._previewAudio && !this._previewAudio.paused) {
+        this._previewAudio.pause();
+        this._previewAudio.currentTime = 0;
+      }
       if (this.alarmAudio.paused) {
         this.alarmAudio.loop = true;
         this.alarmAudio.muted = false;

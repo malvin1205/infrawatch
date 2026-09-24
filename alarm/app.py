@@ -30,6 +30,7 @@ try:
         DEFAULT_JOB_FILTER, ALERTNAME_TARGET_DOWN, ALERTNAME_SLOW_RESPONSE,
         DEFAULT_SLOW_RESPONSE_THRESHOLD_MS, SCRAPE_INTERVAL_SECONDS,
         _AVAIL_FRESHNESS_TOLERANCE_SEC, _AVAIL_STALE_BUCKET_TOLERANCE_SEC,
+        AVAIL_TARGET_WHITELIST,
     )
     import storage
     from storage import (
@@ -59,6 +60,14 @@ try:
     from core.alerts.telegram import (
         get_telegram_config, save_telegram_config, test_telegram_connection
     )
+    from core.alerts.alarm_policy import (
+        get_alarm_policy, save_alarm_policy, DEFAULT_ALARM_POLICY, ALARM_PRESETS
+    )
+    from core.alerts.alarm_sounds import (
+        save_uploaded_sound, resolve_sound_file_path, delete_custom_sound,
+        import_youtube_sound, get_sounds_dir, get_builtin_sound_path
+    )
+    from storage.repositories.alarm_sounds import AlarmSoundRepository
     import core.alerts.engine as alerts
     from core.alerts.engine import (
         _WEBHOOK_LOCK, _LAST_WEBHOOK_AT, active_incident_list,
@@ -80,6 +89,7 @@ try:
     from core.availability.helpers import (
         _attach_sla_budgets, _availability_status_counts, _build_fleet_trend,
         _FLEET_TREND_CACHE, _FLEET_TREND_CACHE_TTL,
+        _DAILY_PROMETHEUS_CACHE, clear_helpers_caches,
     )
     import core.monitoring.primitives as monitoring_primitives
     from core.monitoring.primitives import (
@@ -131,6 +141,7 @@ except ImportError:
         DEFAULT_JOB_FILTER, ALERTNAME_TARGET_DOWN, ALERTNAME_SLOW_RESPONSE,
         DEFAULT_SLOW_RESPONSE_THRESHOLD_MS, SCRAPE_INTERVAL_SECONDS,
         _AVAIL_FRESHNESS_TOLERANCE_SEC, _AVAIL_STALE_BUCKET_TOLERANCE_SEC,
+        AVAIL_TARGET_WHITELIST,
     )
     import alarm.storage as storage
     from alarm.storage import (
@@ -160,6 +171,14 @@ except ImportError:
     from alarm.core.alerts.telegram import (
         get_telegram_config, save_telegram_config, test_telegram_connection
     )
+    from alarm.core.alerts.alarm_policy import (
+        get_alarm_policy, save_alarm_policy, DEFAULT_ALARM_POLICY, ALARM_PRESETS
+    )
+    from alarm.core.alerts.alarm_sounds import (
+        save_uploaded_sound, resolve_sound_file_path, delete_custom_sound,
+        import_youtube_sound, get_sounds_dir, get_builtin_sound_path
+    )
+    from alarm.storage.repositories.alarm_sounds import AlarmSoundRepository
     import alarm.core.alerts.engine as alerts
     from alarm.core.alerts.engine import (
         _WEBHOOK_LOCK, _LAST_WEBHOOK_AT, active_incident_list,
@@ -181,6 +200,7 @@ except ImportError:
     from alarm.core.availability.helpers import (
         _attach_sla_budgets, _availability_status_counts, _build_fleet_trend,
         _FLEET_TREND_CACHE, _FLEET_TREND_CACHE_TTL,
+        _DAILY_PROMETHEUS_CACHE, clear_helpers_caches,
     )
     import alarm.core.monitoring.primitives as monitoring_primitives
     from alarm.core.monitoring.primitives import (
@@ -660,11 +680,12 @@ def resolve_alert_api():
     # firing in SQLite but absent from that cache — which is exactly this
     # endpoint's target. IncidentRepository gates on the DB row itself.
     now = time.time()
+    active_source = (load_endpoints().get("active") or "").rstrip("/") or None
     try:
         changed = IncidentRepository.record_alert_event(
             name=name or "Unknown", severity="critical", instance=instance or "-",
             summary=f"{instance or key} manually resolved by operator", job="",
-            event_time=now, is_now_firing=False, key=key,
+            event_time=now, is_now_firing=False, key=key, source=active_source,
         )
     except Exception:
         logger.exception("resolve_alert_api: SQLite resolve failed for %s", key)
@@ -699,6 +720,17 @@ def resolve_alert_api():
         details="Manually force-resolved incident" + ("" if changed else " (was not firing — no-op)"),
     )
     return jsonify({"ok": True, "key": key, "changed": bool(changed)})
+
+@app.route('/api/alerts/firing', methods=['GET'])
+def get_firing_alerts_api():
+    """Return currently-firing incidents, scoped by active endpoint (or optional ?source=)."""
+    active_source = (load_endpoints().get("active") or "").rstrip("/") or None
+    req_source = request.args.get("source")
+    target_source = req_source if req_source is not None else active_source
+    incidents = IncidentRepository.get_active_incidents(source=target_source)
+    if request.args.get("raw") or request.args.get("format") == "list":
+        return jsonify(incidents)
+    return jsonify({"ok": True, "incidents": incidents, "count": len(incidents)})
 
 # ── Audit Trail API ───────────────────────────────────────────────────────────
 @app.route('/api/audit/logs', methods=['GET'])
@@ -815,7 +847,10 @@ def history():
         # (INCIDENT_RETENTION_LIMIT, matching the DB's own row cap) — capping
         # it to the much smaller JSON-fallback limit instead silently dropped
         # real incidents from a 35+ day History view well before 35 days.
-        return jsonify(IncidentRepository.get_history(limit=INCIDENT_RETENTION_LIMIT))
+        source = request.args.get('source')
+        if source == 'all':
+            source = None
+        return jsonify(IncidentRepository.get_history(limit=INCIDENT_RETENTION_LIMIT, source=source))
     except Exception:
         logger.exception("history(): SQLite read failed, falling back to history.json")
     # Fallback also folds in history_archive.json so overflow rows past
@@ -956,6 +991,7 @@ def select_endpoint_api():
         # fires right after the switch was still answered with the previous
         # endpoint's whole fleet.
         fleet_state_engine.invalidate_state_cache(endpoint_changed=True)
+        availability_engine.invalidate_cache()
 
     AuditLogRepository.record_action(
         actor_username=g.current_user.get("username", "admin"),
@@ -997,6 +1033,7 @@ def delete_endpoint_api():
             with PROMETHEUS_CACHE_LOCK:
                 PROMETHEUS_CACHE.clear()
             fleet_state_engine.invalidate_state_cache(endpoint_changed=True)
+            availability_engine.invalidate_cache()
         _EP_STATUS_CACHE["data"] = None
 
     AuditLogRepository.record_action(
@@ -1116,18 +1153,47 @@ def add_target_api():
         resource=url,
         details="Restored target to monitoring" if drop else "Target verified in monitoring"
     )
+    # Check if target is in the SLA availability whitelist
+    is_whitelisted = True
+    if AVAIL_TARGET_WHITELIST is not None:
+        clean_url = url.rstrip('/')
+        clean_norm = norm.rstrip('/')
+        is_whitelisted = (
+            url in AVAIL_TARGET_WHITELIST
+            or clean_url in AVAIL_TARGET_WHITELIST
+            or norm in AVAIL_TARGET_WHITELIST
+            or clean_norm in AVAIL_TARGET_WHITELIST
+            or any(
+                normalize_target(w) in (clean_norm, norm)
+                for w in AVAIL_TARGET_WHITELIST
+            )
+        )
+
+    warning_msg = None
+    if not is_whitelisted:
+        warning_msg = "target added but not in SLA whitelist — will not appear in Trend/Calendar/SLA"
+
     if drop:
         availability_engine.invalidate_cache()
         fleet_state_engine.invalidate_state_cache()
-        return jsonify({"ok": True, "message": "Target restored to monitoring."})
+        resp = {"ok": True, "message": "Target restored to monitoring."}
+        if warning_msg:
+            resp["warning"] = warning_msg
+        return jsonify(resp)
 
     discovered = _prometheus_discovered_instances()
     if discovered and url not in discovered and norm not in {normalize_target(d) for d in discovered}:
+        scrape_warn = "Prometheus is not currently scraping this target — configure your Prometheus scrape config to probe it."
+        combined_warn = f"{warning_msg}; {scrape_warn}" if warning_msg else scrape_warn
         return jsonify({
             "ok": True,
-            "warning": "Prometheus is not currently scraping this target — configure your Prometheus scrape config to probe it."
+            "warning": combined_warn
         })
-    return jsonify({"ok": True, "message": "Target is active and monitored by Prometheus."})
+
+    resp = {"ok": True, "message": "Target is active and monitored by Prometheus."}
+    if warning_msg:
+        resp["warning"] = warning_msg
+    return jsonify(resp)
 
 @app.route('/api/targets', methods=['DELETE'])
 @rate_limit(20, 60)
@@ -1206,6 +1272,7 @@ def create_maintenance_api():
                 scope=scope, target=target, reason=reason, start=float(start), end=float(end)
             )
             _invalidate_maint_cache()
+            availability_engine.invalidate_cache()  # Trend + SLA carve out maintenance
         except Exception:
             logger.exception("create_maintenance_api: DB write failed")
             return jsonify({"ok": False, "error": "Failed to save maintenance window"}), 500
@@ -1269,6 +1336,7 @@ def create_maintenance_bulk_api():
                     scope='instance', target=target, reason=reason, start=float(start), end=float(end)
                 ))
             _invalidate_maint_cache()
+            availability_engine.invalidate_cache()  # Trend + SLA carve out maintenance
         except Exception:
             logger.exception("create_maintenance_bulk_api: DB write failed")
             return jsonify({"ok": False, "error": "Failed to save maintenance windows", "windows": windows}), 500
@@ -1290,6 +1358,7 @@ def delete_maintenance_api(window_id):
         try:
             deleted = MaintenanceRepository.delete_window(window_id)
             _invalidate_maint_cache()
+            availability_engine.invalidate_cache()  # Trend + SLA carve out maintenance
         except Exception:
             deleted = False
         if not deleted:
@@ -1610,6 +1679,191 @@ def save_availability_settings_api():
         return jsonify({"ok": True, "message": "Availability settings saved", "effective_sla_target_pct": get_sla_target_pct()})
     return jsonify({"ok": False, "error": "Failed to save settings"}), 500
 
+# ── Alarm Policy Settings API ────────────────────────────────────────────────
+@app.route('/api/settings/alarm-policy', methods=['GET'])
+@rate_limit(30, 60)
+@require_permission('alarm_policy.read')
+def get_alarm_policy_api():
+    """Retrieve the current active Alarm Policy and presets."""
+    policy = get_alarm_policy()
+    return jsonify({
+        "ok": True,
+        "policy": policy,
+        "presets": ALARM_PRESETS,
+        "defaults": DEFAULT_ALARM_POLICY,
+    })
+
+@app.route('/api/settings/alarm-policy', methods=['POST', 'PUT'])
+@rate_limit(30, 60)
+@require_permission('alarm_policy.write')
+def save_alarm_policy_api():
+    """Update and persist the Alarm Policy."""
+    data = request.json or {}
+    ok, err, saved = save_alarm_policy(data)
+    if not ok:
+        return jsonify({"ok": False, "error": err or "Invalid policy payload"}), 400
+
+    actor_username = g.current_user.get("username", "admin") if getattr(g, "current_user", None) else "admin"
+    actor_role = g.current_user.get("role", "admin") if getattr(g, "current_user", None) else "admin"
+
+    try:
+        AuditLogRepository.record_action(
+            actor_username=actor_username,
+            actor_role=actor_role,
+            action="ALARM_POLICY_UPDATE",
+            resource="alarm_policy",
+            details=(
+                f"delay={saved.get('initial_delay_s')}s, "
+                f"ring={saved.get('ring_duration_s')}s, "
+                f"repeat={saved.get('repeat_interval_s')}s (enabled={saved.get('repeat_enabled')}), "
+                f"ack={saved.get('ack_behavior')} (remind={saved.get('ack_reminder_interval_s')}s), "
+                f"sound={saved.get('sound_id', 'alarm-default')}"
+            )
+        )
+    except Exception:
+        logger.warning("Failed to record audit log for alarm policy update", exc_info=True)
+
+    return jsonify({
+        "ok": True,
+        "message": "Alarm policy updated successfully",
+        "policy": saved,
+    })
+
+
+# ── Alarm Sounds API ─────────────────────────────────────────────────────────
+@app.route('/api/alarm-sounds', methods=['GET'])
+@rate_limit(60, 60)
+@require_permission('alarm_policy.read')
+def list_alarm_sounds_api():
+    """List all available alarm sounds (built-in and custom)."""
+    sounds = AlarmSoundRepository.list_sounds()
+    active_policy = get_alarm_policy()
+    active_sound_id = active_policy.get("sound_id", "alarm-default")
+    for s in sounds:
+        s["is_active"] = (s["id"] == active_sound_id)
+    return jsonify({
+        "ok": True,
+        "sounds": sounds,
+        "active_sound_id": active_sound_id,
+    })
+
+
+@app.route('/api/alarm-sounds/upload', methods=['POST'])
+@rate_limit(20, 60)
+@require_permission('alarm_policy.write')
+def upload_alarm_sound_api():
+    """Upload a custom alarm sound file (MP3, WAV, OGG)."""
+    uploaded_file = request.files.get('file') or request.files.get('audio_file')
+    if not uploaded_file:
+        return jsonify({"ok": False, "error": "No file uploaded"}), 400
+
+    if not uploaded_file.filename:
+        return jsonify({"ok": False, "error": "Empty filename"}), 400
+
+    custom_name = request.form.get('name', '').strip()
+    file_bytes = uploaded_file.read()
+    username = g.current_user.get("username", "admin") if getattr(g, "current_user", None) else "admin"
+    actor_role = g.current_user.get("role", "admin") if getattr(g, "current_user", None) else "admin"
+
+    ok, err, sound_record = save_uploaded_sound(
+        file_bytes=file_bytes,
+        original_filename=uploaded_file.filename,
+        custom_name=custom_name,
+        created_by=username
+    )
+    if not ok:
+        return jsonify({"ok": False, "error": err}), 400
+
+    try:
+        AuditLogRepository.record_action(
+            actor_username=username,
+            actor_role=actor_role,
+            action="ALARM_SOUND_UPLOAD",
+            resource="alarm_sound",
+            details=f"id={sound_record['id']}, name='{sound_record['name']}', size={sound_record['file_size']}B"
+        )
+    except Exception:
+        logger.warning("Failed to record audit log for sound upload", exc_info=True)
+
+    return jsonify({"ok": True, "message": "Sound uploaded successfully", "sound": sound_record}), 201
+
+
+@app.route('/api/alarm-sounds/import', methods=['POST'])
+@rate_limit(10, 60)
+@require_permission('alarm_policy.write')
+def import_alarm_sound_api():
+    """Import an external audio source (e.g. YouTube URL)."""
+    data = request.json or {}
+    url = (data.get('url') or '').strip()
+    custom_name = (data.get('name') or '').strip()
+    username = g.current_user.get("username", "admin") if getattr(g, "current_user", None) else "admin"
+    actor_role = g.current_user.get("role", "admin") if getattr(g, "current_user", None) else "admin"
+
+    ok, err, sound_record = import_youtube_sound(
+        url=url,
+        custom_name=custom_name,
+        created_by=username
+    )
+    if not ok:
+        return jsonify({"ok": False, "error": err}), 400
+
+    try:
+        AuditLogRepository.record_action(
+            actor_username=username,
+            actor_role=actor_role,
+            action="ALARM_SOUND_IMPORT",
+            resource="alarm_sound",
+            details=f"id={sound_record['id']}, name='{sound_record['name']}', url={url}"
+        )
+    except Exception:
+        logger.warning("Failed to record audit log for sound import", exc_info=True)
+
+    return jsonify({"ok": True, "message": "Sound imported successfully", "sound": sound_record}), 201
+
+
+@app.route('/api/alarm-sounds/<sound_id>', methods=['DELETE'])
+@rate_limit(30, 60)
+@require_permission('alarm_policy.write')
+def delete_alarm_sound_api(sound_id):
+    """Delete a custom alarm sound. Active sound and built-in sound cannot be deleted."""
+    active_policy = get_alarm_policy()
+    active_sound_id = active_policy.get("sound_id", "alarm-default")
+
+    ok, err = delete_custom_sound(sound_id=sound_id, active_sound_id=active_sound_id)
+    if not ok:
+        return jsonify({"ok": False, "error": err}), 400
+
+    username = g.current_user.get("username", "admin") if getattr(g, "current_user", None) else "admin"
+    actor_role = g.current_user.get("role", "admin") if getattr(g, "current_user", None) else "admin"
+    try:
+        AuditLogRepository.record_action(
+            actor_username=username,
+            actor_role=actor_role,
+            action="ALARM_SOUND_DELETE",
+            resource="alarm_sound",
+            details=f"id={sound_id}"
+        )
+    except Exception:
+        logger.warning("Failed to record audit log for sound delete", exc_info=True)
+
+    return jsonify({"ok": True, "message": "Sound deleted successfully", "deleted_id": sound_id})
+
+
+@app.route('/api/alarm-sounds/<sound_id>/audio', methods=['GET'])
+@rate_limit(120, 60)
+@require_permission('alarm_policy.read')
+def get_alarm_sound_audio_api(sound_id):
+    """Serve audio stream for a given sound ID. Falls back cleanly to built-in sound if missing."""
+    file_path, mime_type = resolve_sound_file_path(sound_id)
+    if not os.path.isfile(file_path):
+        return jsonify({"ok": False, "error": "Audio file not found"}), 404
+
+    from flask import send_file
+    response = send_file(file_path, mimetype=mime_type, as_attachment=False)
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    return response
+
+
 # fetch_prom_query_map / fetch_prom_range_map / fetch_down_since_prom_map /
 # fetch_all_probe_metrics — Prometheus response adapters — live in
 # prom_queries.py (re-imported above; callers use bare names so
@@ -1648,6 +1902,12 @@ def api_availability():
     )
     report = availability_engine.get_availability(query)
     return jsonify(report.to_dict())
+
+@app.route('/api/availability/cache/invalidate', methods=['POST'])
+@rate_limit(20, 60)
+def invalidate_availability_cache_api():
+    cleared = availability_engine.invalidate_cache()
+    return jsonify({"ok": True, "cleared": cleared})
 
 @app.route('/api/target-history')
 @rate_limit(120, 60)
@@ -1694,9 +1954,11 @@ def target_history_api():
     ]
 
     values = []
+    # The active server's own series only — no failover to another server's copy of this target.
+    active_source = (load_endpoints().get("active") or "").rstrip("/") or None
     for q in candidate_queries:
         path = f"/api/v1/query_range?query={quote(q)}&start={start_ts}&end={end_ts}&step={step}"
-        raw, base = promclient.fetch_prometheus_json(path)
+        raw, base = promclient.fetch_prometheus_json(path, source=active_source)
         if raw and raw.get('status') == 'success':
             results = raw.get('data', {}).get('result', [])
             for r in results:
@@ -1765,7 +2027,7 @@ def target_history_api():
         if current_state is not None and state_start_ts is not None:
             is_ongoing = end_ts >= now_ts - 60
             if is_ongoing and current_state == 0:
-                down_map = fetch_down_since_prom_map()
+                down_map = fetch_down_since_prom_map(source=active_source)
                 down_ts = down_map.get(target_url)
                 if not down_ts:
                     for k, v in down_map.items():
@@ -1782,7 +2044,7 @@ def target_history_api():
                 # at the query lookback while Incident History shows the real
                 # age (audit M1).
                 try:
-                    for a in active_incident_list():
+                    for a in active_incident_list(source=active_source):
                         a_inst = a.get('instance') or ''
                         if a_inst == target_url or (clean_target and clean_target in a_inst):
                             a_ts = _sane_epoch(a.get('time'))
@@ -1889,7 +2151,7 @@ def target_history_api():
     ]
     for dq in dur_queries:
         dur_path = f"/api/v1/query_range?query={quote(dq)}&start={start_ts}&end={end_ts}&step={dur_step}"
-        raw_dur, _ = promclient.fetch_prometheus_json(dur_path)
+        raw_dur, _ = promclient.fetch_prometheus_json(dur_path, source=active_source)
         if raw_dur and raw_dur.get('status') == 'success':
             for r in raw_dur.get('data', {}).get('result', []):
                 metric = r.get('metric', {})
@@ -1936,7 +2198,7 @@ def target_history_api():
         ]
         for cq in code_queries:
             code_path = f"/api/v1/query_range?query={quote(cq)}&start={start_ts}&end={end_ts}&step={step}"
-            raw_code, _ = promclient.fetch_prometheus_json(code_path)
+            raw_code, _ = promclient.fetch_prometheus_json(code_path, source=active_source)
             if raw_code and raw_code.get('status') == 'success':
                 for r in raw_code.get('data', {}).get('result', []):
                     metric = r.get('metric', {})
