@@ -38,7 +38,7 @@
 }
 
 .brand-btn:hover .brand-name {
-  color: #ffffff;
+  color: var(--accent);
 }
 
 .brand-btn:focus-visible {

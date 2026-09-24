@@ -263,7 +263,7 @@ class _DrawerMethods {
       const agoStr = this._relTime(ev.start_ts * 1000);
 
       return `
-        <div style="display:flex; align-items:flex-start; justify-content:space-between; padding:6px 8px; background:rgba(15,23,42,0.6); border:1px solid var(--border); border-radius:6px; font-size:11px;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; padding:6px 8px; background:var(--surface-raised); border:1px solid var(--border); border-radius:6px; font-size:11px;">
           <div style="display:flex; align-items:center; gap:8px;">
             ${iconSvg}
             <div>
@@ -1292,7 +1292,7 @@ class _DrawerMethods {
         }
 
         return `
-          <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; background:rgba(15,23,42,0.6); border:1px solid var(--border); border-radius:4px; font-size:11px; font-family:var(--font-mono);">
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; background:var(--surface-raised); border:1px solid var(--border); border-radius:4px; font-size:11px; font-family:var(--font-mono);">
             <span style="color:var(--text-secondary);">${stamp}</span>
             <span style="font-weight:700; color:${latencyColor(r.ms, slowMs)};">${r.ms.toFixed(1)} ms</span>
           </div>`;

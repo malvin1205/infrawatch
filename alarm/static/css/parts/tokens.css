@@ -195,125 +195,295 @@
   outline-offset: 2px;
 }
 
-/* ── Light Theme — Colored Box Overrides ──────────────────
-   Summary cards & host grid tiles use hardcoded saturated
-   colors for dark mode; in light mode they switch to pastel
-   backgrounds with dark saturated text so contrast stays
-   readable against the bright page background. ──────────── */
+/* ── Light Theme — Component Overrides & Polish ────────────
+   Replaces raw saturated pastel blocks with a modern, harmonious,
+   and well-composed design system (Linear / Stripe / Vercel style).
+   Crisp surfaces, tinted icon badges, and high-contrast typography. */
 
-/* Summary cards */
+/* Topnav in Light Mode */
+[data-theme="light"] .topnav {
+  background: #ffffff;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.02);
+}
+[data-theme="light"] .brand-name {
+  color: #0f172a;
+  font-weight: 700;
+}
+[data-theme="light"] .brand-mark svg rect {
+  fill: #0284c7;
+}
+[data-theme="light"] .topnav-status {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.09);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+}
+[data-theme="light"] .topnav-status:has(.pill-healthy) {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  box-shadow: 0 1px 3px rgba(34, 197, 94, 0.12);
+}
+[data-theme="light"] .topnav-status:has(.pill-degraded) {
+  background: #fffbeb;
+  border-color: #fde68a;
+  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.12);
+}
+[data-theme="light"] .topnav-status:has(.pill-critical) {
+  background: #fef2f2;
+  border-color: #fecaca;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.15), 0 1px 3px rgba(239, 68, 68, 0.1);
+}
+[data-theme="light"] .ack-alarm-btn.ack-alert {
+  background: #dc2626;
+  color: #ffffff;
+  border: 1px solid #b91c1c;
+  box-shadow: 0 1px 2px rgba(220, 38, 38, 0.25);
+}
+
+/* Top 5 Summary Cards Light Mode */
+[data-theme="light"] .summary-card {
+  border-radius: 12px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+/* Card 1: Total Hosts */
 [data-theme="light"] .summary-card:nth-child(1) {
+  background: linear-gradient(160deg, #ffffff 0%, #f0f7ff 100%);
+  border: 1px solid #bfdbfe;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+[data-theme="light"] .summary-card:nth-child(1):hover {
+  border-color: #60a5fa;
+  box-shadow: 0 6px 18px -2px rgba(37, 99, 235, 0.15);
+}
+[data-theme="light"] .summary-card:nth-child(1) .sc-icon-box {
   background: #dbeafe;
-  border-color: #93c5fd;
-  box-shadow: 0 0 14px -6px rgba(37, 99, 235, 0.22);
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
 }
-[data-theme="light"] .summary-card:nth-child(1) .sc-value { color: #1d4ed8 !important; }
-[data-theme="light"] .summary-card:nth-child(1) .sc-label { color: rgba(29, 64, 175, 0.8) !important; }
+[data-theme="light"] .summary-card:nth-child(1) .sc-value {
+  color: #1e3a8a !important;
+}
+[data-theme="light"] .summary-card:nth-child(1) .sc-label {
+  color: #2563eb !important;
+  font-weight: 700 !important;
+}
 
+/* Card 2: Online */
 [data-theme="light"] .summary-card:nth-child(2) {
+  background: linear-gradient(160deg, #ffffff 0%, #f0fdf4 100%);
+  border: 1px solid #bbf7d0;
+  box-shadow: 0 1px 3px rgba(34, 197, 94, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+[data-theme="light"] .summary-card:nth-child(2):hover {
+  border-color: #4ade80;
+  box-shadow: 0 6px 18px -2px rgba(34, 197, 94, 0.15);
+}
+[data-theme="light"] .summary-card:nth-child(2) .sc-icon-box {
   background: #dcfce7;
-  border-color: #86efac;
-  box-shadow: 0 0 14px -6px rgba(34, 197, 94, 0.22);
+  color: #15803d;
+  border: 1px solid #bbf7d0;
 }
-[data-theme="light"] .summary-card:nth-child(2) .sc-value { color: var(--success) !important; }
-[data-theme="light"] .summary-card:nth-child(2) .sc-label { color: rgba(20, 83, 45, 0.8) !important; }
+[data-theme="light"] .summary-card:nth-child(2) .sc-value {
+  color: #14532d !important;
+}
+[data-theme="light"] .summary-card:nth-child(2) .sc-label {
+  color: #16a34a !important;
+  font-weight: 700 !important;
+}
 
+/* Card 3: Warning */
 [data-theme="light"] .summary-card:nth-child(3) {
+  background: linear-gradient(160deg, #ffffff 0%, #fffbeb 100%);
+  border: 1px solid #fde68a;
+  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+[data-theme="light"] .summary-card:nth-child(3):hover {
+  border-color: #facc15;
+  box-shadow: 0 6px 18px -2px rgba(245, 158, 11, 0.15);
+}
+[data-theme="light"] .summary-card:nth-child(3) .sc-icon-box {
   background: #fef3c7;
-  border-color: #fcd34d;
-  box-shadow: 0 0 14px -6px rgba(245, 158, 11, 0.22);
+  color: #b45309;
+  border: 1px solid #fde68a;
 }
-[data-theme="light"] .summary-card:nth-child(3) .sc-value { color: var(--warning) !important; }
-[data-theme="light"] .summary-card:nth-child(3) .sc-label { color: rgba(146, 64, 14, 0.8) !important; }
+[data-theme="light"] .summary-card:nth-child(3) .sc-value {
+  color: #78350f !important;
+}
+[data-theme="light"] .summary-card:nth-child(3) .sc-label {
+  color: #b45309 !important;
+  font-weight: 700 !important;
+}
 
+/* Card 4: Offline */
 [data-theme="light"] .summary-card:nth-child(4) {
+  background: linear-gradient(160deg, #ffffff 0%, #fef2f2 100%);
+  border: 1px solid #fecaca;
+  box-shadow: 0 1px 3px rgba(239, 68, 68, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+[data-theme="light"] .summary-card:nth-child(4):hover {
+  border-color: #f87171;
+  box-shadow: 0 6px 18px -2px rgba(239, 68, 68, 0.18);
+}
+[data-theme="light"] .summary-card:nth-child(4) .sc-icon-box {
   background: #fee2e2;
-  border-color: #fca5a5;
-  box-shadow: 0 0 14px -6px rgba(239, 68, 68, 0.22);
+  color: #b91c1c;
+  border: 1px solid #fecaca;
 }
-[data-theme="light"] .summary-card:nth-child(4) .sc-value { color: var(--critical) !important; }
-[data-theme="light"] .summary-card:nth-child(4) .sc-label { color: rgba(127, 29, 29, 0.8) !important; }
+[data-theme="light"] .summary-card:nth-child(4) .sc-value {
+  color: #7f1d1d !important;
+}
+[data-theme="light"] .summary-card:nth-child(4) .sc-label {
+  color: #dc2626 !important;
+  font-weight: 700 !important;
+}
+[data-theme="light"] .summary-card:nth-child(4) .sc-sub {
+  color: #991b1b !important;
+  font-weight: 600 !important;
+}
 
+/* Card 5: Availability */
 [data-theme="light"] .summary-card:nth-child(5) {
-  background: #e0f2fe;
-  border-color: #7dd3fc;
-  box-shadow: 0 0 14px -6px rgba(2, 132, 199, 0.22);
+  background: linear-gradient(160deg, #ffffff 0%, #f0f9ff 100%);
+  border: 1px solid #bae6fd;
+  box-shadow: 0 1px 3px rgba(2, 132, 199, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
-[data-theme="light"] .summary-card:nth-child(5) .sc-value { color: #0369a1 !important; }
-[data-theme="light"] .summary-card:nth-child(5) .sc-label { color: rgba(7, 89, 133, 0.8) !important; }
+[data-theme="light"] .summary-card:nth-child(5):hover {
+  border-color: #38bdf8;
+  box-shadow: 0 6px 18px -2px rgba(2, 132, 199, 0.15);
+}
+[data-theme="light"] .summary-card:nth-child(5) .sc-icon-box {
+  background: #e0f2fe;
+  color: #0284c7;
+  border: 1px solid #bae6fd;
+}
+[data-theme="light"] .summary-card:nth-child(5) .sc-value {
+  color: #075985 !important;
+}
+[data-theme="light"] .summary-card:nth-child(5) .sc-label {
+  color: #0284c7 !important;
+  font-weight: 700 !important;
+}
+[data-theme="light"] .summary-card:nth-child(5) .sc-sub {
+  color: #0369a1 !important;
+  font-weight: 600 !important;
+}
 [data-theme="light"] .summary-card:nth-child(5) .sc-detail-btn {
-  background: rgba(3, 105, 161, 0.12);
-  border-color: rgba(3, 105, 161, 0.35);
+  background: #ffffff;
+  border: 1px solid #bae6fd;
   color: #0369a1;
+  box-shadow: 0 1px 2px rgba(2, 132, 199, 0.08);
 }
 [data-theme="light"] .summary-card:nth-child(5) .sc-detail-btn:hover,
 [data-theme="light"] .summary-card:nth-child(5) .sc-detail-btn:focus-visible {
-  background: rgba(3, 105, 161, 0.22);
-  border-color: rgba(3, 105, 161, 0.6);
+  background: #e0f2fe;
+  border-color: #7dd3fc;
+  color: #0284c7;
 }
 
-/* Host grid tiles */
+/* Host Grid Light Mode Polish - Refined, Clean & High Contrast */
 [data-theme="light"] .host-card.hc-up {
-  background: linear-gradient(180deg, #bbf7d0 0%, #86efac 100%);
-  border-color: rgba(34, 197, 94, 0.5);
+  background: #ffffff;
+  border: 1px solid #bbf7d0;
+  box-shadow: 0 1px 2px rgba(34, 197, 94, 0.04);
 }
-[data-theme="light"] .host-card.hc-up .hc-ip { color: #14532d !important; }
-[data-theme="light"] .host-card.hc-up .hc-latency { color: rgba(20, 83, 45, 0.7) !important; }
-
-[data-theme="light"] .host-card.hc-slow {
-  background: linear-gradient(180deg, #fef08a 0%, #fcd34d 100%);
-  border-color: rgba(245, 158, 11, 0.5);
+[data-theme="light"] .host-card.hc-up:hover {
+  background: #f0fdf4;
+  border-color: #86efac;
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.12);
 }
-[data-theme="light"] .host-card.hc-slow .hc-ip { color: #78350f !important; }
-[data-theme="light"] .host-card.hc-slow .hc-latency { color: rgba(120, 53, 15, 0.7) !important; }
-
-[data-theme="light"] .host-card.hc-down {
-  background: linear-gradient(180deg, #fecaca 0%, #fca5a5 100%);
-  border-color: rgba(239, 68, 68, 0.5);
+[data-theme="light"] .host-card.hc-up .hc-ip {
+  color: #15803d !important;
+  font-weight: 700 !important;
 }
-[data-theme="light"] .host-card.hc-down .hc-ip { color: #7f1d1d !important; }
-[data-theme="light"] .host-card.hc-down .hc-latency { color: rgba(127, 29, 29, 0.7) !important; }
-
-/* hc-down combos (acked/suppressed) and the other status classes
-   (nodata/maintenance) had no light override at all, so they fell through
-   to the dark-theme gradient — dark bg with dark text, unreadable in light
-   mode. Same up/slow/down palette approach: light bg, dark text. */
-/* Acknowledged = still down, just claimed — keep it in the red family here too,
-   drained rather than greyed, matching the dark-theme treatment (audit 3.3). */
-[data-theme="light"] .host-card.hc-down.hc-acked {
-  background: linear-gradient(180deg, #f3dcdc 0%, #e7c5c5 100%);
-  border-color: rgba(153, 27, 27, 0.28);
-  box-shadow: none;
+[data-theme="light"] .host-card.hc-up .hc-latency {
+  color: #166534 !important;
+  font-weight: 500 !important;
 }
-[data-theme="light"] .host-card.hc-down.hc-acked .hc-ip { color: #7f1d1d !important; }
-[data-theme="light"] .host-card.hc-down.hc-acked .hc-latency { color: rgba(127, 29, 29, 0.72) !important; }
-[data-theme="light"] .host-card.hc-down.hc-acked .hc-ack-mark { color: rgba(127, 29, 29, 0.8); }
 
 [data-theme="light"] .host-card.hc-down:not(.hc-acked):not(.hc-suppressed) {
-  border-color: rgba(185, 28, 28, 0.85);
-  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.45), 0 2px 10px rgba(239, 68, 68, 0.28);
+  background: #fef2f2;
+  border: 1.5px solid #ef4444;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.25), 0 2px 8px rgba(239, 68, 68, 0.15);
+}
+[data-theme="light"] .host-card.hc-down:not(.hc-acked):not(.hc-suppressed) .hc-ip {
+  color: #991b1b !important;
+  font-weight: 700 !important;
+}
+[data-theme="light"] .host-card.hc-down:not(.hc-acked):not(.hc-suppressed) .hc-latency {
+  color: #b91c1c !important;
+  font-weight: 500 !important;
 }
 
-[data-theme="light"] .host-card.hc-down.hc-suppressed {
-  background: linear-gradient(180deg, #e9d5ff 0%, #d8b4fe 100%);
-  border-color: rgba(147, 51, 234, 0.5);
+[data-theme="light"] .host-card.hc-down.hc-acked {
+  background: #ffffff;
+  border: 1px solid #fca5a5;
+  box-shadow: 0 1px 2px rgba(239, 68, 68, 0.04);
 }
-[data-theme="light"] .host-card.hc-down.hc-suppressed .hc-ip { color: #581c87 !important; }
-[data-theme="light"] .host-card.hc-down.hc-suppressed .hc-latency { color: rgba(88, 28, 135, 0.7) !important; }
+[data-theme="light"] .host-card.hc-down.hc-acked .hc-ip {
+  color: #991b1b !important;
+  font-weight: 700 !important;
+}
+[data-theme="light"] .host-card.hc-down.hc-acked .hc-latency {
+  color: #b91c1c !important;
+  font-weight: 500 !important;
+}
+[data-theme="light"] .host-card.hc-down.hc-acked .hc-ack-mark {
+  color: #dc2626;
+}
+
+[data-theme="light"] .host-card.hc-slow {
+  background: #ffffff;
+  border: 1px solid #fde68a;
+  box-shadow: 0 1px 2px rgba(245, 158, 11, 0.04);
+}
+[data-theme="light"] .host-card.hc-slow:hover {
+  background: #fffbeb;
+  border-color: #facc15;
+}
+[data-theme="light"] .host-card.hc-slow .hc-ip {
+  color: #b45309 !important;
+  font-weight: 700 !important;
+}
+[data-theme="light"] .host-card.hc-slow .hc-latency {
+  color: #78350f !important;
+  font-weight: 500 !important;
+}
 
 [data-theme="light"] .host-card.hc-nodata {
-  background: linear-gradient(180deg, #e2e8f0 0%, #cbd5e1 100%);
-  border-color: rgba(100, 116, 139, 0.4);
+  background: #ffffff;
+  border: 1px dashed #cbd5e1;
 }
-[data-theme="light"] .host-card.hc-nodata .hc-ip { color: #334155 !important; }
-[data-theme="light"] .host-card.hc-nodata .hc-latency { color: rgba(51, 65, 85, 0.7) !important; }
+[data-theme="light"] .host-card.hc-nodata .hc-ip {
+  color: #475569 !important;
+  font-weight: 700 !important;
+}
+[data-theme="light"] .host-card.hc-nodata .hc-latency {
+  color: #64748b !important;
+}
 
 [data-theme="light"] .host-card.hc-maintenance {
   background:
-    repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.04) 0px, rgba(0, 0, 0, 0.04) 10px, transparent 10px, transparent 20px),
-    linear-gradient(180deg, #e2e8f0 0%, #cbd5e1 100%);
-  border-color: rgba(100, 116, 139, 0.5);
+    repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.02) 0px, rgba(0, 0, 0, 0.02) 10px, transparent 10px, transparent 20px),
+    #f8fafc;
+  border: 1px solid #cbd5e1;
 }
-[data-theme="light"] .host-card.hc-maintenance .hc-ip { color: #334155 !important; }
-[data-theme="light"] .host-card.hc-maintenance .hc-latency { color: rgba(51, 65, 85, 0.7) !important; }
+[data-theme="light"] .host-card.hc-maintenance .hc-ip {
+  color: #475569 !important;
+}
+[data-theme="light"] .host-card.hc-maintenance .hc-latency {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .host-card.hc-down.hc-suppressed {
+  background: #ffffff;
+  border: 1px dotted #d8b4fe;
+}
+[data-theme="light"] .host-card.hc-down.hc-suppressed .hc-ip {
+  color: #7e22ce !important;
+  font-weight: 700 !important;
+}
+[data-theme="light"] .host-card.hc-down.hc-suppressed .hc-latency {
+  color: #6b21a8 !important;
+}
 
