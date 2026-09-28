@@ -4,7 +4,7 @@ Dashboard NOC real-time untuk memantau ketersediaan server, website, dan jaringa
 
 > **Catatan Cakupan**: Repo ini berisi **InfraWatch** (Flask backend + web console). Prometheus dan Blackbox Exporter adalah service eksternal yang harus sudah berjalan dan dapat dijangkau oleh container InfraWatch.
 
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/3effce5f-5698-4bce-9fae-42def254c587" />
+<img width="1920" height="1080" alt="Dashboard wallboard InfraWatch" src="https://github.com/user-attachments/assets/3effce5f-5698-4bce-9fae-42def254c587" />
 
 ---
 
@@ -61,13 +61,48 @@ Dashboard NOC real-time untuk memantau ketersediaan server, website, dan jaringa
 
 ## Tur Tampilan
 
-| | |
-| --- | --- |
-| ![Host detail drawer](<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/13b4ee0d-3476-481c-9fc4-0e09f2617370" />
-) **Host detail** — status, tren latensi, availability 24 jam, info target, event, ringkasan probe. | ![Availability overview](docs/assets/screenshots/availability.png) **Availability** — fleet availability, tren, downtime calendar, host yang perlu perhatian. |
-| ![Data completeness & SLA](docs/assets/screenshots/availability-sla.png) **Data Completeness & SLA** — SLA vs target, error budget, coverage, telemetri per host. | ![Incident history](docs/assets/screenshots/incident-history.png) **Incident History** — insiden live & historis, filter, force-resolve, export CSV. |
-| ![Alarm policy](docs/assets/screenshots/alarm-policy.png) **Alarm Policy** — preset, timing, perilaku setelah acknowledge, sirine kustom. | ![User management](docs/assets/screenshots/manage-users.png) **User Management** — kelola akun Admin & Viewer. |
-| ![Guided tour](docs/assets/screenshots/guided-tour.png) **Guided Tour** — tur interaktif langkah demi langkah. | ![Light theme](docs/assets/screenshots/dashboard-light.png) **Light theme** — tema terang untuk ruangan terang. |
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="https://github.com/user-attachments/assets/13b4ee0d-3476-481c-9fc4-0e09f2617370" alt="Host detail drawer"><br>
+      <b>Host detail</b> — status, tren latensi, availability 24 jam, info target, event, ringkasan probe.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/assets/screenshots/availability.png" alt="Availability overview"><br>
+      <b>Availability</b> — fleet availability, tren, downtime calendar, host yang perlu perhatian.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/assets/screenshots/availability-sla.png" alt="Data completeness &amp; SLA"><br>
+      <b>Data Completeness &amp; SLA</b> — SLA vs target, error budget, coverage, telemetri per host.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/assets/screenshots/incident-history.png" alt="Incident history"><br>
+      <b>Incident History</b> — insiden live &amp; historis, filter, force-resolve, export CSV.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/assets/screenshots/alarm-policy.png" alt="Alarm policy"><br>
+      <b>Alarm Policy</b> — preset, timing, perilaku setelah acknowledge, sirine kustom.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/assets/screenshots/manage-users.png" alt="User management"><br>
+      <b>User Management</b> — kelola akun Admin &amp; Viewer.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/assets/screenshots/guided-tour.png" alt="Guided tour"><br>
+      <b>Guided Tour</b> — tur interaktif langkah demi langkah.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/assets/screenshots/dashboard-light.png" alt="Light theme"><br>
+      <b>Light theme</b> — tema terang untuk ruangan terang.
+    </td>
+  </tr>
+</table>
 
 ---
 
