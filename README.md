@@ -63,7 +63,8 @@ Dashboard NOC real-time untuk memantau ketersediaan server, website, dan jaringa
 
 | | |
 | --- | --- |
-| ![Host detail drawer](docs/assets/screenshots/host-drawer.png) **Host detail** — status, tren latensi, availability 24 jam, info target, event, ringkasan probe. | ![Availability overview](docs/assets/screenshots/availability.png) **Availability** — fleet availability, tren, downtime calendar, host yang perlu perhatian. |
+| ![Host detail drawer](<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/13b4ee0d-3476-481c-9fc4-0e09f2617370" />
+) **Host detail** — status, tren latensi, availability 24 jam, info target, event, ringkasan probe. | ![Availability overview](docs/assets/screenshots/availability.png) **Availability** — fleet availability, tren, downtime calendar, host yang perlu perhatian. |
 | ![Data completeness & SLA](docs/assets/screenshots/availability-sla.png) **Data Completeness & SLA** — SLA vs target, error budget, coverage, telemetri per host. | ![Incident history](docs/assets/screenshots/incident-history.png) **Incident History** — insiden live & historis, filter, force-resolve, export CSV. |
 | ![Alarm policy](docs/assets/screenshots/alarm-policy.png) **Alarm Policy** — preset, timing, perilaku setelah acknowledge, sirine kustom. | ![User management](docs/assets/screenshots/manage-users.png) **User Management** — kelola akun Admin & Viewer. |
 | ![Guided tour](docs/assets/screenshots/guided-tour.png) **Guided Tour** — tur interaktif langkah demi langkah. | ![Light theme](docs/assets/screenshots/dashboard-light.png) **Light theme** — tema terang untuk ruangan terang. |
