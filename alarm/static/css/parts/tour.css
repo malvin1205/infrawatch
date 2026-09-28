@@ -1,0 +1,75 @@
+/* Guided Tour overlay (static/js/tour.js). Sits above every modal/drawer. */
+.tour-root { position: fixed; inset: 0; z-index: 2000000; }
+.tour-blocker { position: absolute; inset: 0; }
+.tour-root .hidden { display: none; }
+.tour-root.tour-dim .tour-blocker { background: rgba(2, 4, 8, 0.6); }
+
+.tour-spot {
+  position: fixed;
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 9999px rgba(2, 4, 8, 0.6);
+  pointer-events: none;
+  transition: left .25s ease, top .25s ease, width .25s ease, height .25s ease;
+}
+
+.tour-card {
+  position: fixed;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 14px 16px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  transition: left .25s ease, top .25s ease;
+}
+
+.tour-progress { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; margin-bottom: 10px; }
+.tour-progress-fill { display: block; height: 100%; background: var(--accent); transition: width .25s ease; }
+
+.tour-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.tour-chapter {
+  background: var(--surface-raised);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 2px 6px;
+}
+.tour-count { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+
+.tour-title { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+.tour-body { color: var(--text-secondary); }
+.tour-body b { color: var(--text-primary); font-weight: 600; }
+.tour-body kbd {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+.tour-note {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.tour-actions { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
+.tour-spacer { flex: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-spot, .tour-card, .tour-progress-fill { transition: none; }
+}

@@ -3,11 +3,13 @@
 import './ui/dialog.js'; // window.trapModalFocus, window.showConfirmDialog
 import { ServerMonitor } from './app-shell.js';
 import { initAuth } from './auth.js';
+import { initTour } from './tour.js';
 
 // ── Bootstrap ────────────────────────────────────────
 const _boot = () => {
   window.monitor = new ServerMonitor();
   initAuth();
+  initTour();
 };
 
 if (document.readyState === 'loading') {
