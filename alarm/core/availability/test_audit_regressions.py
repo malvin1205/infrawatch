@@ -331,3 +331,28 @@ def test_get_trend_falls_back_to_hourly_beyond_prometheus():
             out = eng.get_trend("all", end - DAY, end)
     assert out["trend_bucket_seconds"] == 3600, "no Prometheus data -> hourly stored buckets"
     assert len(out["trend"]) == 24 and all(p["availability_pct"] == 100.0 for p in out["trend"])
+
+
+def test_open_end_at_hour_edge_closes_when_next_hour_is_up():
+    """Live audit: 12:59:33-13:00:00 flagged ongoing_end, 13:00 hour clean.
+    The host was back at 13:00 — not "ongoing" with no recovery drawn."""
+    t0 = 1_790_000_000 // 3600 * 3600.0
+    blip = json.dumps({"i": [[t0 + H - 27, t0 + H]], "ongoing_end": True})
+    rows = [_row("h1", t0, down=27.0, outage=blip), _row("h1", t0 + H)]
+    with _incidents([]):
+        iv = _build_fleet_incidents(rows, t0, t0 + 2 * H, source=SRC)[0]["intervals"][0]
+    assert iv["still_down"] is False
+    day = _build_daily_downtime(rows, t0, t0 + 2 * H)[0]
+    assert day["events"][0]["intervals"][0]["still_down"] is False
+
+    # No row for the next hour (telemetry gap): we don't know, stays open.
+    with _incidents([]):
+        iv = _build_fleet_incidents(rows[:1], t0, t0 + 2 * H, source=SRC)[0]["intervals"][0]
+    assert iv["still_down"] is True
+
+    # Next hour continues the outage: stays one open outage.
+    cont = json.dumps({"i": [[t0 + H, t0 + H + 600]], "ongoing_start": True})
+    rows2 = [rows[0], _row("h1", t0 + H, down=600.0, outage=cont)]
+    with _incidents([]):
+        ivs = _build_fleet_incidents(rows2, t0, t0 + 2 * H, source=SRC)[0]["intervals"]
+    assert len(ivs) == 1 and ivs[0]["end_ts"] == int(t0 + H + 600)

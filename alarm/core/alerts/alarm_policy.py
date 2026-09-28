@@ -35,8 +35,19 @@ DEFAULT_ALARM_POLICY: Dict[str, Any] = {
     "ack_behavior": "remind",           # "silence" | "remind"
     "ack_reminder_interval_s": 300,     # wait time after ACK before reminder
     "ack_reminder_ring_duration_s": 10, # duration reminder siren sounds
+    "ack_quiet_s": 300,                 # silence right after an ACK, before the first reminder
+    "repeat_limit": 0,                  # stop repeating after N repeats (0 = until acknowledged)
+    "new_outage_mode": "ring",          # "ring": a new outage rings at once and restarts the
+                                        # repeat cycle, even mid-cooldown | "wait": next scheduled ring
     "sound_id": "alarm-default",        # active alarm sound ID
+    "sound_start_s": None,              # clip start within the sound (None = whole file)
+    "sound_end_s": None,                # clip end within the sound
 }
+
+# Clip length bounds. The max matches the longest ring (ring_duration_s <= 300):
+# a longer clip would never be heard to its end.
+CLIP_MIN_S = 1.0
+CLIP_MAX_S = 300.0
 
 # Standard presets for convenience:
 ALARM_PRESETS: Dict[str, Dict[str, Any]] = {
@@ -48,7 +59,12 @@ ALARM_PRESETS: Dict[str, Dict[str, Any]] = {
         "ack_behavior": "remind",
         "ack_reminder_interval_s": 300,
         "ack_reminder_ring_duration_s": 10,
+        "ack_quiet_s": 300,
+        "repeat_limit": 0,
+        "new_outage_mode": "ring",
         "sound_id": "alarm-default",
+        "sound_start_s": None,
+        "sound_end_s": None,
     },
     "short_transient": {
         "initial_delay_s": 15,
@@ -58,7 +74,12 @@ ALARM_PRESETS: Dict[str, Dict[str, Any]] = {
         "ack_behavior": "remind",
         "ack_reminder_interval_s": 300,
         "ack_reminder_ring_duration_s": 10,
+        "ack_quiet_s": 300,
+        "repeat_limit": 0,
+        "new_outage_mode": "ring",
         "sound_id": "alarm-default",
+        "sound_start_s": None,
+        "sound_end_s": None,
     },
     "standard": {
         "initial_delay_s": 30,
@@ -68,7 +89,12 @@ ALARM_PRESETS: Dict[str, Dict[str, Any]] = {
         "ack_behavior": "silence",
         "ack_reminder_interval_s": 300,
         "ack_reminder_ring_duration_s": 10,
+        "ack_quiet_s": 300,
+        "repeat_limit": 0,
+        "new_outage_mode": "ring",
         "sound_id": "alarm-default",
+        "sound_start_s": None,
+        "sound_end_s": None,
     },
 }
 
@@ -158,6 +184,32 @@ def validate_alarm_policy(data: Any) -> Tuple[bool, Optional[str], Dict[str, Any
             return False, "ack_reminder_ring_duration_s must be between 1 and 300 seconds", {}
         cleaned["ack_reminder_ring_duration_s"] = val_int
 
+    # 7b. ack_quiet_s: 0 to 86400 seconds of silence after an ACK
+    if "ack_quiet_s" in data:
+        val = data["ack_quiet_s"]
+        if not isinstance(val, (int, float)) or isinstance(val, bool):
+            return False, "ack_quiet_s must be a number", {}
+        val_int = int(round(val))
+        if not (0 <= val_int <= 86400):
+            return False, "ack_quiet_s must be between 0 and 86400 seconds", {}
+        cleaned["ack_quiet_s"] = val_int
+
+    # 7c. repeat_limit: 0 (no limit) to 1000 repeats
+    if "repeat_limit" in data:
+        val = data["repeat_limit"]
+        if not isinstance(val, (int, float)) or isinstance(val, bool) or val != int(val):
+            return False, "repeat_limit must be a whole number", {}
+        if not (0 <= int(val) <= 1000):
+            return False, "repeat_limit must be between 0 and 1000", {}
+        cleaned["repeat_limit"] = int(val)
+
+    # 7d. new_outage_mode: "ring" | "wait"
+    if "new_outage_mode" in data:
+        val = str(data["new_outage_mode"]).strip().lower()
+        if val not in ("ring", "wait"):
+            return False, "new_outage_mode must be either 'ring' or 'wait'", {}
+        cleaned["new_outage_mode"] = val
+
     # 8. sound_id: string ID of registered sound (defaults to alarm-default if absent or invalid)
     if "sound_id" in data:
         val = str(data["sound_id"]).strip()
@@ -173,6 +225,39 @@ def validate_alarm_policy(data: Any) -> Tuple[bool, Optional[str], Dict[str, Any
                     cleaned["sound_id"] = "alarm-default"
             except Exception:
                 cleaned["sound_id"] = "alarm-default"
+
+    # 9. sound_start_s / sound_end_s: optional clip of the sound, sent as a pair.
+    #    Both None = play the whole file.
+    if "sound_start_s" in data or "sound_end_s" in data:
+        start, end = data.get("sound_start_s"), data.get("sound_end_s")
+        if start is None and end is None:
+            cleaned["sound_start_s"] = None
+            cleaned["sound_end_s"] = None
+        else:
+            for name, val in (("sound_start_s", start), ("sound_end_s", end)):
+                if not isinstance(val, (int, float)) or isinstance(val, bool) or val != val:
+                    return False, f"{name} must be a number (or both null for the whole file)", {}
+            start, end = round(float(start), 1), round(float(end), 1)
+            if start < 0:
+                return False, "sound_start_s must be 0 or more", {}
+            if end <= start:
+                return False, "sound_end_s must be after sound_start_s", {}
+            if not (CLIP_MIN_S <= end - start <= CLIP_MAX_S):
+                return False, f"Clip length must be between {CLIP_MIN_S:g} and {CLIP_MAX_S:g} seconds", {}
+            # Only yt-dlp's duration is exact; upload durations are estimates
+            # (128 kbps guess for MP3), so the browser, which reads the real
+            # length, enforces this for those.
+            sid = cleaned.get("sound_id")
+            if sid and sid != "alarm-default":
+                try:
+                    rec = AlarmSoundRepository.get_sound(sid)
+                except Exception:
+                    rec = None
+                dur = rec and rec.get("source") == "youtube" and rec.get("duration")
+                if dur and end > float(dur) + 0.5:
+                    return False, f"sound_end_s ({end:g}s) is past the end of the sound ({float(dur):g}s)", {}
+            cleaned["sound_start_s"] = start
+            cleaned["sound_end_s"] = end
 
     return True, None, cleaned
 
@@ -197,6 +282,10 @@ def get_alarm_policy() -> Dict[str, Any]:
                 merged = copy.deepcopy(DEFAULT_ALARM_POLICY)
                 if ok:
                     merged.update(cleaned)
+                    # Policies saved before ack_quiet_s existed waited one
+                    # reminder interval before the first reminder: keep that.
+                    if "ack_quiet_s" not in cleaned and "ack_reminder_interval_s" in cleaned:
+                        merged["ack_quiet_s"] = cleaned["ack_reminder_interval_s"]
                 _cached_policy = merged
                 _cached_mtime = mtime
                 return copy.deepcopy(merged)
@@ -220,6 +309,13 @@ def save_alarm_policy(new_policy: Dict[str, Any]) -> Tuple[bool, Optional[str], 
     with _policy_lock:
         try:
             current = get_alarm_policy()
+            # A clip belongs to one sound: switching sound without sending a
+            # new clip drops the old one instead of cutting the new file at
+            # the old sound's timestamps.
+            if ("sound_id" in cleaned and cleaned["sound_id"] != current.get("sound_id")
+                    and "sound_start_s" not in cleaned):
+                cleaned["sound_start_s"] = None
+                cleaned["sound_end_s"] = None
             current.update(cleaned)
             tmp_file = f"{POLICY_FILE}.tmp.{os.getpid()}"
             with open(tmp_file, "w", encoding="utf-8") as f:

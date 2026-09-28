@@ -578,6 +578,9 @@ class FleetStateEngine:
                         "labels": labels,
                         "isWeb": False,
                         "downSince": down_since_val,
+                        # "window": downSince is the 32d lookback's edge, not an
+                        # observed drop — down at LEAST since then.
+                        "downSinceBasis": "window" if health != 'up' and prom_queries.down_since_is_window_bound(down_since_val) else None,
                         "upSince": up_since_val,
                         # "telemetry": up at LEAST since upSince — Prometheus has no
                         # data before it, so nothing earlier is claimed.

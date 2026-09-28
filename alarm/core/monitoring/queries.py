@@ -8,6 +8,7 @@ prometheus_client. Nothing imports app.
 The single mock seam for these and for prometheus_client is
 `prometheus_client.fetch_prometheus_json` (call it as a module attribute).
 """
+import time
 from urllib.parse import quote
 
 try:
@@ -111,6 +112,20 @@ def fetch_prom_range_map(query_expr, start_ts, end_ts, step_sec, cache_ttl=5.0, 
             pts.sort(key=lambda p: p[0])
             pick_series(picked, inst, labels, pts, prefer_job)
     return {inst: v for inst, (_, v) in picked.items()}
+
+
+# Widest lookback of the down-since queries below ([32d:1h]). A target never
+# UP inside it gets the window's first DOWN sample, which slides forward as
+# time passes: a lower bound, not the outage start.
+DOWN_SINCE_LOOKBACK_SEC = 32 * 86400
+
+
+def down_since_is_window_bound(down_since, now=None):
+    """True when `down_since` sits on the lookback edge (±1h subquery step)."""
+    if not down_since:
+        return False
+    edge = (time.time() if now is None else now) - DOWN_SINCE_LOOKBACK_SEC
+    return abs(float(down_since) - edge) <= 3600.0
 
 
 def fetch_down_since_prom_map(cache_ttl=300.0, source=None):

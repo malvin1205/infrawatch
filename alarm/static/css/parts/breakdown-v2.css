@@ -407,8 +407,17 @@
 .avb .avb-lg { display: inline-flex; align-items: center; gap: 5px; }
 .avb .avb-lg-sw { display: inline-block; width: 14px; height: 9px; flex: 0 0 auto; }
 .avb .avb-lg-sw.is-target { height: 0; border-top: 1px dashed var(--crit); opacity: 0.75; }
-.avb .avb-lg-sw.is-drop { width: 2px; background: var(--crit, #ef4444); opacity: 0.6; }
-.avb .avb-lg-sw.is-recovery { width: 2px; background: var(--ok, #10b981); opacity: 0.7; }
+/* Swatch node bulat bercahaya */
+.avb .avb-lg-sw.is-drop {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--crit, #ef4444);
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.7);
+}
+.avb .avb-lg-sw.is-recovery {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--ok, #10b981);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.7);
+}
 .avb .avb-lg-sw.is-gap { background: rgba(139, 148, 158, 0.16); }
 .avb .avb-lg-sw.is-partial { background: rgba(139, 148, 158, 0.3); }
 
@@ -504,16 +513,117 @@
    because a host went down/came back" should never have to be inferred from
    the slope alone, and each needs an actual mark to click, not just the
    line's general vicinity. */
-.avb .avb-trend-recovery-tick {
-  stroke: var(--ok, #10b981);
-  stroke-width: 1px;
-  opacity: 0.35;
+/* ── Curve Vertex Nodes & Halo Layer ── */
+.avb .avb-trend-nodes-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
 }
-.avb .avb-trend-drop-tick {
-  stroke: var(--crit, #ef4444);
-  stroke-width: 1px;
-  opacity: 0.3;
+
+.avb .avb-node {
+  position: absolute;
+  width: 0;
+  height: 0;
+  cursor: pointer;
+  pointer-events: auto;
 }
+
+/* Outer Halo Ring */
+.avb .avb-node .halo {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border-radius: 50%;
+  transition: transform .15s ease, opacity .15s ease;
+  opacity: 0.85;
+}
+.avb .avb-node.is-drop .halo {
+  background: rgba(239, 68, 68, 0.22);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+}
+.avb .avb-node.is-rec .halo {
+  background: rgba(16, 185, 129, 0.22);
+  border: 1px solid rgba(16, 185, 129, 0.5);
+}
+
+/* Pulsing on Major Incidents (> 2 hosts) */
+.avb .avb-node.is-major .halo {
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+}
+/* Pulse only a drop whose hosts are still down (see _renderAvailabilityTrend). */
+.avb .avb-node.is-live .halo {
+  animation: avbNodePulse 2.2s infinite;
+}
+@keyframes avbNodePulse {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+  70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .avb .avb-node.is-live .halo { animation: none; }
+}
+
+/* Inner Solid Core Dot */
+.avb .avb-node .dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  border: 1.5px solid #070D18;
+  transition: transform .12s ease;
+}
+.avb .avb-node.is-drop .dot { background: var(--crit, #ef4444); box-shadow: 0 0 6px rgba(239, 68, 68, 0.8); }
+.avb .avb-node.is-rec .dot  { background: var(--ok, #10b981);   box-shadow: 0 0 6px rgba(16, 185, 129, 0.8); }
+
+.avb .avb-node:hover .halo,
+.avb .avb-node:focus-visible .halo { transform: scale(1.35); }
+.avb .avb-node:hover .dot,
+.avb .avb-node:focus-visible .dot  { transform: scale(1.25); }
+.avb .avb-node:focus-visible { outline: none; }
+.avb .avb-node:focus-visible .halo { box-shadow: 0 0 0 2px var(--accent, #38bdf8); }
+
+/* Event inside a telemetry gap: no value to sit on, so it rides the top
+   rail, hollow, instead of being drawn at a made-up y. */
+.avb .avb-node.is-offcurve .dot { background: transparent; box-shadow: none; }
+.avb .avb-node.is-offcurve.is-drop .dot { border-color: var(--crit, #ef4444); }
+.avb .avb-node.is-offcurve.is-rec .dot  { border-color: var(--ok, #10b981); }
+.avb .avb-node.is-offcurve .halo { border-style: dashed; background: transparent; }
+
+/* Hover card for a node ("● 2 Hosts Down / db-prod-01, 02 (18m)"). */
+.avb .avb-node-card {
+  position: absolute;
+  z-index: 6;
+  transform: translate(-50%, calc(-100% - 16px));
+  background: var(--bg-elevated, #0b1120);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.16));
+  border-radius: 8px;
+  padding: 8px 12px;
+  min-width: 150px;
+  max-width: 280px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.65);
+  pointer-events: none;
+}
+.avb .avb-node-card.hidden { display: none; }
+.avb .avb-node-card.flip-x { transform: translate(calc(-100% - 14px), calc(-100% - 16px)); }
+.avb .avb-node-card.edge-left { transform: translate(14px, calc(-100% - 16px)); }
+.avb .avb-node-card.flip-y { transform: translate(-50%, 16px); }
+.avb .avb-node-card.flip-y.flip-x { transform: translate(calc(-100% - 14px), 16px); }
+.avb .avb-node-card.flip-y.edge-left { transform: translate(14px, 16px); }
+.avb .avb-node-card .title-row { font-size: 11px; font-weight: 700; margin-bottom: 2px; }
+.avb .avb-node-card.is-drop .title-row { color: var(--crit, #ef4444); }
+.avb .avb-node-card.is-rec .title-row { color: var(--ok, #10b981); }
+.avb .avb-node-card .sub-row {
+  font-family: var(--avb-font-mono);
+  font-size: 9.5px;
+  color: var(--text-mid, #94a3b8);
+  overflow-wrap: anywhere;
+}
+.avb .avb-node-card .sub-row.hidden { display: none; }
 
 /* ── Section header row (title + Reset zoom) — Trend and Outage Today ── */
 .avb .avb-sec-titlewrap-row {
@@ -595,6 +705,32 @@
   color: var(--warn, #f59e0b);
 }
 .avb .avb-evd-sub { margin: 4px 0 0; font-size: 11px; color: var(--text-low); }
+.avb .avb-trend-plot.is-node-hover .avb-trend-tip { visibility: hidden; }
+/* Node-span panel: zoom shortcut + down-count step strip. */
+.avb .avb-evd-zoom {
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border, rgba(148, 163, 184, 0.3));
+  background: transparent;
+  color: var(--text-hi);
+  cursor: pointer;
+}
+.avb .avb-evd-zoom:hover { border-color: var(--text-low); }
+.avb .avb-evd-strip { margin-top: 8px; }
+.avb .avb-evd-strip svg { display: block; width: 100%; height: 36px; }
+.avb .avb-evd-strip .area { fill: rgba(239, 68, 68, 0.12); }
+.avb .avb-evd-strip .line { fill: none; stroke: var(--crit, #ef4444); stroke-width: 1.5; }
+.avb .avb-evd-strip .peak { stroke: var(--warn, #f59e0b); stroke-width: 1; stroke-dasharray: 3 2; }
+.avb .avb-evd-strip-lbl {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--avb-font-mono);
+  font-size: 10px;
+  color: var(--text-low);
+}
+.avb .avb-evd-strip-lbl .is-peak { color: var(--warn, #f59e0b); }
 .avb .avb-evd-rows { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 /* Every affected host is listed — no "+N more" truncation. A busy incident
    (dozens of hosts) grows the panel and scrolls with the modal's own

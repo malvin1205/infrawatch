@@ -45,7 +45,7 @@ class _DrawerMethods {
 
     const isAcked = (this.acknowledgedDownInstances && this.acknowledgedDownInstances.has(target.instance)) || target.acknowledged;
     const evalTarget = { ...target, acknowledged: isAcked };
-    const alarmEval = evaluateAlarmState(evalTarget, now, alarmPolicyManager.getPolicy());
+    const alarmEval = alarmPolicyManager.hostState(evalTarget, now);
 
     alarmPill.classList.remove('hidden');
     alarmPill.textContent = alarmEval.label;
@@ -524,7 +524,7 @@ class _DrawerMethods {
         } else if (this.downStartTimes[target.instance]) {
           downMs = Math.max(0, now - this.downStartTimes[target.instance]);
         }
-        lastCheckEl.textContent = `Down for ${this._fmtDownAging(downMs)}`;
+        lastCheckEl.textContent = `Down for ${this._downAtLeast(target)}${this._fmtDownAging(downMs)}`;
       } else {
         const upStart = typeof this._upStartMs === 'function' ? this._upStartMs(target) : null;
         const upStr = upStart ? ` · Up for ${this._upAtLeast(target)}${this._fmtDownAging(Math.max(0, now - upStart))}` : '';
@@ -542,7 +542,7 @@ class _DrawerMethods {
         } else if (this.downStartTimes[target.instance]) {
           downMs = Math.max(0, now - this.downStartTimes[target.instance]);
         }
-        latEl.textContent = `Down ${this._fmtDownAging(downMs)}`;
+        latEl.textContent = `Down ${this._downAtLeast(target)}${this._fmtDownAging(downMs)}`;
       } else {
         latEl.textContent = (target.responseTimeMs != null) ? `${target.responseTimeMs} ms` : '—';
       }

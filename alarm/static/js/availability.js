@@ -1027,36 +1027,7 @@ class _AvailabilityMethods {
     // calendar/headline underneath had already loaded real MTD data: the
     // range label and the numbers on screen disagreed until the operator
     // touched the dropdown themselves.
-    const modalRangeSelect = document.getElementById('modalRangeSelect');
-    if (modalRangeSelect) {
-      if (this.periodLabel === 'mtd') {
-        modalRangeSelect.value = 'mtd';
-      } else if (this.periodLabel === 'custom') {
-        // Hidden, disabled option: shows "Custom range" without being pickable
-        // (a custom range is set from the dashboard's range popover).
-        modalRangeSelect.value = 'custom';
-      } else {
-        const curMins = Math.round(this.periodMinutes);
-        const matchingOpt = Array.from(modalRangeSelect.options).find(o => Math.round(parseFloat(o.value)) === curMins);
-        if (matchingOpt) {
-          modalRangeSelect.value = matchingOpt.value;
-        }
-      }
-      // The select is skinned into a custom dropdown (ui/select-skin.js)
-      // whose visible trigger label only redraws on user interaction or a
-      // dispatched 'change' — a bare `.value =` (above) leaves the real
-      // value correct but the on-screen text stuck on whatever was last
-      // shown. Dispatching 'change' isn't an option here: dashboard.js's
-      // own listener on this element would treat it as a user-initiated
-      // range switch and fire a redundant Prometheus fetch even when the
-      // data underneath is already cached. Just re-paint the label text
-      // directly instead.
-      const ddLabel = modalRangeSelect.parentElement && modalRangeSelect.parentElement.querySelector('.job-dd-label');
-      if (ddLabel) {
-        const opt = modalRangeSelect.options[modalRangeSelect.selectedIndex];
-        if (opt) ddLabel.textContent = opt.textContent;
-      }
-    }
+    this._syncModalRangeSelect();
 
     const cacheKey = this._getAvailCacheKey();
     const cached = this._availCache.get(cacheKey);
@@ -1069,6 +1040,28 @@ class _AvailabilityMethods {
     } else {
       this.loadAvailability(true);
     }
+  }
+
+  // The modal's range dropdown shows the ACTIVE range — however it was
+  // picked (dashboard chips, custom popover, the dropdown itself). A bare
+  // `.value =` left the skinned label on the previous text ("Last 24 Hours"
+  // over a month-to-date chart); dispatching 'change' would refetch.
+  _syncModalRangeSelect() {
+    const sel = document.getElementById('modalRangeSelect');
+    if (!sel) return;
+    if (this.periodLabel === 'mtd') {
+      sel.value = 'mtd';
+    } else if (this.periodLabel === 'custom') {
+      // Hidden, disabled option: shows "Custom range" without being pickable.
+      sel.value = 'custom';
+    } else {
+      const curMins = Math.round(this.periodMinutes);
+      const opt = Array.from(sel.options).find(o => Math.round(parseFloat(o.value)) === curMins);
+      if (opt) sel.value = opt.value;
+    }
+    const ddLabel = sel.parentElement && sel.parentElement.querySelector('.job-dd-label');
+    const cur = sel.options[sel.selectedIndex];
+    if (ddLabel && cur) ddLabel.textContent = cur.textContent;
   }
 
   _closeAvailabilityBreakdown() {
@@ -1398,6 +1391,10 @@ class _AvailabilityMethods {
       resetGrid();
       const staleNote = document.getElementById('avbTrendTargetNote');
       if (staleNote) staleNote.innerHTML = '';
+      const staleNodes = document.getElementById('avbTrendNodesLayer');
+      if (staleNodes) staleNodes.innerHTML = '';
+      const staleCard = document.getElementById('avbTrendNodeCard');
+      if (staleCard) staleCard.classList.add('hidden');
       // Nothing is drawn, so nothing may be hovered or clicked: the previous
       // render's state and click handler would otherwise pin a stale detail.
       this._trendHoverState = null;
@@ -1487,41 +1484,114 @@ class _AvailabilityMethods {
       ? data.trend_incidents
       : data.daily;
     this._fleetSweep = this._buildFleetSweep(sweepSource, fullStart, fullEnd);
-    const visibleRecoveries = this._fleetSweep.changes.filter(c => c.type === 'recovery' && c.ts >= startTs && c.ts <= endTs);
-    const visibleDrops = this._fleetSweep.changes.filter(c => c.type === 'drop' && c.ts >= startTs && c.ts <= endTs);
-    // Up to 40 changes: one tick each. More (exactly during a big incident,
-    // when they matter most) used to draw NOTHING; now they are binned into
-    // ~80 columns across the plot, thicker where more changes landed.
-    const tickSvg = (list, cls) => {
-      if (list.length <= 40) {
-        return list.map(c =>
-          `<line class="${cls}" x1="${xOf(c.ts).toFixed(2)}" y1="0" x2="${xOf(c.ts).toFixed(2)}" y2="100" vector-effect="non-scaling-stroke"></line>`
-        ).join('');
-      }
-      const bins = new Map();
-      list.forEach(c => {
-        const b = Math.min(79, Math.floor(xOf(c.ts) / 1.25));
-        bins.set(b, (bins.get(b) || 0) + 1);
-      });
-      return [...bins].map(([b, n]) => {
-        const x = ((b + 0.5) * 1.25).toFixed(2);
-        const w = Math.min(4, 1 + Math.log2(n)).toFixed(1);
-        return `<line class="${cls}" x1="${x}" y1="0" x2="${x}" y2="100" style="stroke-width:${w}px" vector-effect="non-scaling-stroke"></line>`;
-      }).join('');
-    };
-    const recoverySvg = tickSvg(visibleRecoveries, 'avb-trend-recovery-tick');
-    const dropSvg = tickSvg(visibleDrops, 'avb-trend-drop-tick');
-
+    // Curve Vertex Nodes & Halo (docs/concepts/availability-trend-option4-vertex-nodes.md):
+    // drop / recovery moments as nodes sitting ON the curve instead of
+    // full-height lines. HTML divs, not SVG circles — this viewBox is
+    // stretched (preserveAspectRatio="none"), so circles would be ovals.
     wrap.innerHTML =
       `<svg class="avb-trend-svg" viewBox="0 0 100 100" preserveAspectRatio="none">` +
       gapBandsSvg +
       partialBandsSvg +
       validAreasSvg +
-      dropSvg +
-      recoverySvg +
       validLinesSvg +
       targetSvg +
       `</svg>`;
+
+    let nodesLayer = document.getElementById('avbTrendNodesLayer');
+    if (!nodesLayer) {
+      nodesLayer = document.createElement('div');
+      nodesLayer.id = 'avbTrendNodesLayer';
+      nodesLayer.className = 'avb-trend-nodes-layer';
+      plot.appendChild(nodesLayer);
+    }
+    nodesLayer.innerHTML = '';
+    plot.classList.remove('is-node-hover');  // its node may be gone
+    const card = this._trendNodeCard(plot);
+    card.classList.add('hidden');
+
+    // Cluster by on-screen distance, not a fixed 0.5% of the window: a node
+    // is ~20px wide, so on a 1000px plot 0.5% put 120 changes into 60
+    // overlapping halos. Each change lands in exactly one cluster.
+    const visibleChanges = this._fleetSweep.changes
+      .filter(c => c.ts >= startTs && c.ts <= endTs)
+      .sort((a, b) => a.ts - b.ts);
+    const plotW = (plot.getBoundingClientRect && plot.getBoundingClientRect().width) || 0;
+    // At least 26px (a major halo is 24px wide) and at most ~20 nodes across
+    // the plot: a chronically flapping fleet over 30 days otherwise strings
+    // 40 nodes edge to edge along the curve. Merged, never dropped.
+    const minGapPct = plotW > 0 ? (Math.max(26, plotW / 20) / plotW) * 100 : 5;
+    const clusters = [];
+    visibleChanges.forEach(c => {
+      const xp = xOf(c.ts);
+      const cur = clusters[clusters.length - 1];
+      if (cur && xp - cur.xp < minGapPct) cur.items.push(c);
+      else clusters.push({ ts: c.ts, xp, items: [c] });
+    });
+
+    const nodeState = { segments, yMax, ySpan: (yMax - yMin) || 1 };
+    let drawnDrops = 0, drawnRecs = 0;
+    // Pulse at most ONE node: the latest drop whose hosts are still down at
+    // the live edge. Chronically-down hosts made 21 of 40 nodes pulse.
+    const hasLiveDrop = cl => cl.items.some(c => c.type === 'drop' && c.interval && !c.interval.isRecovery);
+    const liveCluster = this.periodEnd ? null : [...clusters].reverse().find(cl =>
+      hasLiveDrop(cl) && cl.items.filter(c => c.type === 'drop').length >= cl.items.filter(c => c.type === 'recovery').length);
+    clusters.forEach(cl => {
+      const drops = cl.items.filter(c => c.type === 'drop');
+      const recs = cl.items.filter(c => c.type === 'recovery');
+      const isDrop = drops.length >= recs.length;
+      if (isDrop) drawnDrops++; else drawnRecs++;
+      // On the curve where a value is drawn; inside a gap / partial slot
+      // there is no value, so the node rides the top rail instead of being
+      // parked at a made-up y.
+      const lineY = this._trendLineY(cl.xp, nodeState);
+      const offCurve = lineY === null;
+      const yp = offCurve ? 4 : lineY;
+      const node = document.createElement('div');
+      // is-major (bigger halo): a drop of 3+ hosts. is-live (pulse): a drop
+      // whose hosts are still down at the live edge — the only thing worth
+      // animating; pulsing every 3-host cluster lit up 18 of 27 nodes.
+      const isLive = cl === liveCluster;
+      node.className = `avb-node is-${isDrop ? 'drop' : 'rec'}${isDrop && drops.length >= 3 ? ' is-major' : ''}${isLive ? ' is-live' : ''}${offCurve ? ' is-offcurve' : ''}`;
+      node.style.left = `${cl.xp.toFixed(2)}%`;
+      node.style.top = `${yp.toFixed(2)}%`;
+      node.dataset.drops = String(drops.length);
+      node.dataset.recs = String(recs.length);
+      node.dataset.ts = String(cl.ts);
+      node.setAttribute('role', 'button');
+      node.setAttribute('tabindex', '0');
+      const text = this._trendNodeText(drops, recs);
+      node.setAttribute('aria-label', [text.title, text.hosts, text.extra].filter(Boolean).join('. '));
+      node.innerHTML = '<span class="halo"></span><span class="dot"></span>';
+      // Crosshair and pin tips hide under a node: both sat beneath its card.
+      const show = () => {
+        plot.classList.add('is-node-hover');
+        this._showTrendNodeCard(card, text, isDrop, cl.xp, yp);
+      };
+      const hide = () => {
+        plot.classList.remove('is-node-hover');
+        card.classList.add('hidden');
+      };
+      // The detail lists exactly this node's changes (its first..last change),
+      // not "±5 min of the node's first second": a node spans up to 26px
+      // (~37 min at 24h) and hosts in its card went missing from the panel.
+      const range = { lo: cl.items[0].ts, hi: cl.items[cl.items.length - 1].ts };
+      const pin = e => {
+        if (e) e.stopPropagation();
+        this._pinEventDetail('avbTrendEventDetail', cl.ts, this._fleetSweep, windowSec, range);
+      };
+      // A press on a node is a click on that event, never the start of a
+      // drag-zoom / plot click underneath it.
+      node.addEventListener('pointerdown', e => e.stopPropagation());
+      node.addEventListener('click', pin);
+      node.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pin(e); }
+      });
+      node.addEventListener('mouseenter', show);
+      node.addEventListener('focus', show);
+      node.addEventListener('mouseleave', hide);
+      node.addEventListener('blur', hide);
+      nodesLayer.appendChild(node);
+    });
 
     // Legend note for the reference line and telemetry gaps
     const targetNoteEl = document.getElementById('avbTrendTargetNote');
@@ -1535,10 +1605,13 @@ class _AvailabilityMethods {
           ? `<span class="avb-lg">SLA target ${targetPct}% — below this chart's range</span>`
           : chip('is-target', `SLA target ${targetPct}%`));
       }
-      if (dropSvg) parts.push(chip('is-drop', 'host went down'));
-      if (recoverySvg) parts.push(chip('is-recovery', 'host recovered'));
+      // Only the kinds actually drawn in this window.
+      if (drawnDrops) parts.push(chip('is-drop', 'Node Down'));
+      if (drawnRecs) parts.push(chip('is-recovery', 'Node Recovery'));
       if (hasGaps) parts.push(chip('is-gap', 'no telemetry'));
-      if (geo.partials.length) parts.push(chip('is-partial', 'too few hosts reporting'));
+      // Same 60s floor as gaps: the live edge's in-progress slot (a few
+      // seconds, few hosts reported yet) is an invisible sliver.
+      if (geo.partials.some(([lo, hi]) => hi - lo >= 60)) parts.push(chip('is-partial', 'too few hosts reporting'));
       targetNoteEl.innerHTML = parts.join('');
     }
 
@@ -1610,7 +1683,7 @@ class _AvailabilityMethods {
     // it has scrolled out of the window.
     if (typeof this._trendPinTs === 'number') {
       if (this._trendPinTs >= startTs && this._trendPinTs <= endTs) {
-        this._pinEventDetail('avbTrendEventDetail', this._trendPinTs, this._fleetSweep, windowSec);
+        this._pinEventDetail('avbTrendEventDetail', this._trendPinTs, this._fleetSweep, windowSec, this._trendPinRange);
       } else {
         this._clearTrendHighlight();
       }
@@ -1635,7 +1708,7 @@ class _AvailabilityMethods {
         if (sel && !(lo >= dayLo - 1 && hi <= dayLo + 86401)) this._setCalendarSelection(null);
         this._renderAvailabilityTrend(this._lastAvailabilityData, this._trendZoom);
       },
-      (ts, clientX) => this._pinEventDetail('avbTrendEventDetail', ts, this._fleetSweep, windowSec, clientX)
+      ts => this._pinEventDetail('avbTrendEventDetail', ts, this._fleetSweep, windowSec)
     );
     const hint = document.getElementById('avbTrendHint');
     if (hint && resetBtn && !resetBtn.dataset.wired) {
@@ -1661,6 +1734,62 @@ class _AvailabilityMethods {
         this._zoomTrendToWibDay(today);
       });
     }
+  }
+
+  // Hover card for a trend node ("● 2 Hosts Down / db-prod-01, 02 (18m)").
+  // Created once per plot; filled with textContent so host names are never HTML.
+  _trendNodeCard(plot) {
+    let card = document.getElementById('avbTrendNodeCard');
+    if (!card) {
+      card = document.createElement('div');
+      card.id = 'avbTrendNodeCard';
+      card.className = 'avb-node-card hidden';
+      card.setAttribute('aria-hidden', 'true');
+      card.innerHTML = '<div class="title-row"></div><div class="sub-row"></div><div class="sub-row is-extra"></div>';
+      plot.appendChild(card);
+    }
+    return card;
+  }
+
+  // Card / aria text for one node's changes: the dominant kind as the title,
+  // up to 3 host names with the longest outage duration, and the other kind
+  // (a mixed cluster) as an extra line so no change is hidden.
+  _trendNodeText(drops, recs) {
+    const isDrop = drops.length >= recs.length;
+    const main = isDrop ? drops : recs;
+    // Distinct hosts, not changes: a host that flapped twice in one node is
+    // one host down (the flap count goes on the extra line).
+    const names = [...new Set(main.map(c => c.name || c.host))];
+    const n = names.length;
+    const title = isDrop ? `● ${n} Host${n === 1 ? '' : 's'} Down` : `▲ ${n} Host${n === 1 ? '' : 's'} Recovered`;
+    const shown = names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3}` : '');
+    const longest = Math.max(0, ...main.map(c => (c.interval ? c.interval.e - c.interval.s : 0)));
+    const ongoing = isDrop && main.some(c => c.interval && !c.interval.isRecovery);
+    const dur = isDrop
+      ? (ongoing && main.length === 1 ? `${this._compactDur(longest)}, ongoing` : this._compactDur(longest))
+      : `down ${this._compactDur(longest)}`;
+    const other = isDrop ? recs.length : drops.length;
+    const flaps = main.length > n ? `${main.length} ${isDrop ? 'drops' : 'recoveries'}` : '';
+    const mixed = other ? `+ ${other} ${isDrop ? 'recovered' : 'went down'} here` : '';
+    const extra = [flaps, mixed].filter(Boolean).join(' · ');
+    return { title, hosts: `${shown} (${dur})`, extra };
+  }
+
+  _showTrendNodeCard(card, text, isDrop, xp, yp) {
+    const rows = card.querySelectorAll('.title-row, .sub-row');
+    const [t, h, x] = rows.length >= 3 ? rows : card.children;
+    t.textContent = text.title;
+    h.textContent = text.hosts;
+    x.textContent = text.extra;
+    x.classList.toggle('hidden', !text.extra);
+    card.classList.remove('is-drop', 'is-rec');
+    card.classList.add(isDrop ? 'is-drop' : 'is-rec');
+    card.style.left = `${xp}%`;
+    card.style.top = `${yp}%`;
+    card.classList.toggle('flip-x', xp > 62);
+    card.classList.toggle('edge-left', xp < 38);
+    card.classList.toggle('flip-y', yp < 30);
+    card.classList.remove('hidden');
   }
 
   // The priced trend point whose slot (slotStart, ts] contains `ts` — what
@@ -1830,6 +1959,7 @@ class _AvailabilityMethods {
 
   _clearTrendHighlight() {
     this._trendPinTs = null;
+    this._trendPinRange = null;
     const pin = document.getElementById('avbTrendPin');
     if (pin) pin.classList.add('hidden');
     const evd = document.getElementById('avbTrendEventDetail');
@@ -1926,7 +2056,9 @@ class _AvailabilityMethods {
   // used to scale the click-snap tolerance to the zoom level (see
   // _eventDetailHtml) so "click near a boundary" means the same number of
   // PIXELS whether zoomed to a week or to ten minutes.
-  _pinEventDetail(containerId, ts, sweep, windowSec) {
+  // `range` ({lo, hi}) — set when a Trend node is clicked: the detail lists
+  // exactly the changes inside the node's span instead of ±TOL around `ts`.
+  _pinEventDetail(containerId, ts, sweep, windowSec, range = null) {
     const el = document.getElementById(containerId);
     if (!el) return;
     if (ts === null || typeof ts !== 'number') {
@@ -1934,12 +2066,24 @@ class _AvailabilityMethods {
       el.innerHTML = '';
       return;
     }
-    el.innerHTML = this._eventDetailHtml(ts, sweep, windowSec);
+    el.innerHTML = this._eventDetailHtml(ts, sweep, windowSec, range);
     el.classList.remove('hidden');
+    const zoomBtn = el.querySelector('.avb-evd-zoom');
+    if (zoomBtn) {
+      zoomBtn.addEventListener('click', () => {
+        const lo = Number(zoomBtn.dataset.lo), hi = Number(zoomBtn.dataset.hi);
+        const pad = Math.max(60, (hi - lo) * 0.05);
+        this._clearTrendHighlight();
+        this._trendZoom = { lo: lo - pad, hi: hi + pad };
+        this._renderAvailabilityTrend(this._lastAvailabilityData, this._trendZoom);
+      });
+    }
     if (containerId === 'avbTrendEventDetail') {
       this._highlightTrendAt(ts);
-      // Remembered so a poll re-render re-reads this moment from new data.
+      // Remembered so a poll re-render re-reads this moment (and node span)
+      // from new data.
       this._trendPinTs = ts;
+      this._trendPinRange = range;
     }
   }
 
@@ -1974,7 +2118,7 @@ class _AvailabilityMethods {
   // "RECOVERED" (it didn't stay down). Conflating the two — deciding the
   // badge from isOngoing instead of changeType — is what let a clicked
   // DOWN tick render as a "RECOVERED" row.
-  _evdHostRowHtml({ host, name, job, startTs, endTs, isOngoing, changeType, id, isPrimary, durationOverride, laterRecoveryTs, entries, openStart }) {
+  _evdHostRowHtml({ host, name, job, startTs, endTs, isOngoing, changeType, id, isPrimary, durationOverride, laterRecoveryTs, entries, openStart, note }) {
     const target = (this.data || []).find(t => t.instance === host);
     const endpoint = target && target.scrapeUrl && target.scrapeUrl !== host ? target.scrapeUrl : null;
     const roleLabel = this._getHostRoleLabel(target, { job });
@@ -1995,7 +2139,9 @@ class _AvailabilityMethods {
     const liveDownSince = isOngoing && target && typeof target.downSince === 'number' ? target.downSince : null;
     const carriedIn = !!openStart;
     const trueStartTs = carriedIn && liveDownSince && liveDownSince < startTs ? liveDownSince : startTs;
-    const startIsExact = !carriedIn || trueStartTs !== startTs;
+    // A lookback-edge downSince (downSinceBasis "window") is a bound too.
+    const liveIsBound = !!(target && target.downSinceBasis === 'window');
+    const startIsExact = !carriedIn || (trueStartTs !== startTs && !liveIsBound);
 
     const durSec = isOngoing
       ? (carriedIn ? Math.max(0, Date.now() / 1000 - trueStartTs) : (typeof durationOverride === 'number' ? durationOverride : Math.max(0, endTs - startTs)))
@@ -2044,6 +2190,7 @@ class _AvailabilityMethods {
         <div class="avb-evd-meta">
           <span>${durTxt}${isOngoing && !laterRecoveryTs ? ' so far' : ''}</span>
           <span>Impact ${availTxt} this window</span>
+          ${note ? `<span class="avb-evd-note">${this._esc(note)}</span>` : ''}
           <span class="avb-evd-ref" title="Stable reference for this occurrence — a later DOWN on the same host gets a different one">${ref}</span>
         </div>
       </div>`;
@@ -2060,20 +2207,33 @@ class _AvailabilityMethods {
   // Rows beyond AVB_EVD_MAX_ROWS collapse behind "+N more", still limited to
   // this moment. Header state is the fleet AT ts (N down / UP) — a clicked
   // recovery during a 10-host outage no longer reads "RECOVERED".
-  _eventDetailHtml(ts, sweep, windowSec) {
+  _eventDetailHtml(ts, sweep, windowSec, range = null) {
     if (!sweep) return '';
     const st = this._trendHoverState;
     const win = windowSec || 86400;
-    const timeStr = this._trendTsLabel(ts, win);
+    const isRange = !!range;
+    const timeStr = isRange && range.hi > range.lo
+      ? `${this._trendTsLabel(range.lo, win).replace(/ WIB$/, '')} – ${this._calendarFormatTime(range.hi)} WIB`
+      : this._trendTsLabel(ts, win);
     const entries = this._entriesByHost || new Map();
     const TOL = Math.max(15, Math.min(300, win * 0.01));
     const tolTxt = TOL >= 60 ? `${Math.round(TOL / 60)}m` : `${Math.round(TOL)}s`;
+    const scopeTxt = `within ±${tolTxt}`;
 
-    const near = sweep.changes
-      .filter(c => Math.abs(c.ts - ts) <= TOL)
-      .sort((a, b) => (Math.abs(a.ts - ts) - Math.abs(b.ts - ts))
-        || (a.type !== b.type ? (a.type === 'recovery' ? -1 : 1) : 0)
-        || (a.host < b.host ? -1 : a.host > b.host ? 1 : 0));
+    let near = (range
+      // A node: exactly its changes, in time order.
+      ? sweep.changes.filter(c => c.ts >= range.lo && c.ts <= range.hi)
+        .sort((a, b) => (a.ts - b.ts) || (a.host < b.host ? -1 : a.host > b.host ? 1 : 0))
+      : sweep.changes
+        .filter(c => Math.abs(c.ts - ts) <= TOL)
+        .sort((a, b) => (Math.abs(a.ts - ts) - Math.abs(b.ts - ts))
+          || (a.type !== b.type ? (a.type === 'recovery' ? -1 : 1) : 0)
+          || (a.host < b.host ? -1 : a.host > b.host ? 1 : 0)));
+    if (isRange) return this._rangeDetailHtml(range, near, sweep, entries, timeStr);
+    // A short outage puts both its edges within ±TOL: keep the closer one,
+    // its row already shows DOWN → RECOVERED. Two rows with one EVT ref read
+    // as two outages.
+    near = near.filter((c, i) => near.findIndex(x => x.interval === c.interval) === i);
     const inNear = new Set(near.map(c => c.interval));
     // Most recent drop first — that's what the operator is investigating;
     // hosts already down when the window opened (chronic) go last.
@@ -2151,12 +2311,112 @@ class _AvailabilityMethods {
       const p0 = near[0];
       const label = p0.type === 'drop' ? 'went down' : 'recovered';
       sub = `Selected: ${this._esc(p0.name)} ${label} at ${this._calendarFormatTime(p0.ts)} WIB`
-        + (near.length > 1 ? ` · ${near.length - 1} other change${near.length === 2 ? '' : 's'} within ±${tolTxt}` : '')
+        + (near.length > 1 ? ` · ${near.length - 1} other change${near.length === 2 ? '' : 's'} ${scopeTxt}` : '')
         + (downNow.length ? ` · ${downNow.length} other host${downNow.length === 1 ? '' : 's'} already down` : '');
     } else {
       sub = `No drop or recovery within ±${tolTxt} — ${downNow.length} host${downNow.length === 1 ? '' : 's'} down at this moment`;
     }
     return `${head(stateHtml, sub)}
+      <div class="avb-evd-rows">${shown}</div>
+      ${more}`;
+  }
+
+  // Detail for a clicked Trend node. A node is a SPAN (at MTD one node can
+  // cover 15h and 270 changes), so the panel answers span questions: how many
+  // distinct hosts went down — the same number the node card shows — the
+  // peak concurrent down-count and when, the fleet entering/leaving the span,
+  // and a step strip of down-count across it. Rows are one per host in
+  // first-change order. It used to report the fleet at the span's FIRST
+  // second ("10 down" under a "59 Hosts Down" card), so operators zoomed in
+  // and summed by hand.
+  _rangeDetailHtml({ lo, hi }, near, sweep, entries, timeStr) {
+    const hm = ts => this._calendarFormatTime(ts);
+    const before = sweep.hostsDownAt(lo - 1);
+    const startDown = before.length;
+    const endDown = sweep.downAt(hi);
+    let peak = startDown, peakTs = lo;
+    const inSpan = sweep.steps.filter(st => st.ts >= lo && st.ts <= hi);
+    inSpan.forEach(st => { if (st.down > peak) { peak = st.down; peakTs = st.ts; } });
+
+    const byHost = new Map();
+    near.forEach(c => {
+      const g = byHost.get(c.host) || { first: c, ivs: new Set(), drops: 0 };
+      g.ivs.add(c.interval);
+      if (c.type === 'drop') g.drops++;
+      byHost.set(c.host, g);
+    });
+    const groups = [...byHost.values()];
+    const wentDown = groups.filter(g => g.drops).length;
+    const drops = near.filter(c => c.type === 'drop').length;
+    const recs = near.length - drops;
+    const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+    const rows = groups.map((g, i) => {
+      const c = g.first;
+      const inMark = [...g.ivs].reduce((sum, iv) => sum + Math.max(0, Math.min(iv.e, hi) - Math.max(iv.s, lo)), 0);
+      const note = (g.ivs.size > 1 ? `${g.ivs.size} outages · ` : '') + `${this._compactDur(inMark)} down in span`;
+      return this._evdHostRowHtml({
+        host: c.host, name: c.name, job: c.interval.job,
+        startTs: c.interval.s, endTs: c.interval.e,
+        changeType: c.type, isOngoing: c.type === 'recovery' ? false : !c.interval.isRecovery,
+        id: c.interval.id, isPrimary: i === 0, openStart: c.interval.openStart, entries, note,
+      });
+    });
+    // Down the whole span with no change inside it: context, listed last.
+    const carried = before.filter(iv => !byHost.has(iv.host));
+    carried.forEach(iv => rows.push(this._evdHostRowHtml({
+      host: iv.host, name: iv.name, job: iv.job, id: iv.id,
+      startTs: iv.s, endTs: iv.e, isOngoing: true,
+      durationOverride: hi - iv.s,
+      laterRecoveryTs: iv.isRecovery ? iv.e : null,
+      openStart: iv.openStart, entries, note: 'down through the whole span',
+    })));
+
+    // Step strip: down-count over [lo, hi], same sweep the chart reads.
+    // Scaled min..peak, not 0..peak: 9 chronic hosts flattened a 9→20 swing.
+    const floor = Math.min(startDown, ...inSpan.map(st => st.down));
+    const W = (hi - lo) || 1, H = (peak - floor) || 1;
+    const px = t => (((t - lo) / W) * 100).toFixed(2);
+    const py = n => (92 - ((n - floor) / H) * 84).toFixed(2);
+    let d = `M0 ${py(startDown)}`;
+    inSpan.forEach(st => { d += `H${px(st.ts)}V${py(st.down)}`; });
+    d += 'H100';
+    const strip = hi > lo ? `
+      <div class="avb-evd-strip" title="Hosts down across this span">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path class="area" d="${d}V100H0Z"></path>
+          <path class="line" d="${d}" vector-effect="non-scaling-stroke"></path>
+          <line class="peak" x1="${px(peakTs)}" y1="0" x2="${px(peakTs)}" y2="100" vector-effect="non-scaling-stroke"></line>
+        </svg>
+        <div class="avb-evd-strip-lbl">
+          <span>${hm(lo)} · ${startDown} down</span>
+          <span class="is-peak">peak ${peak} at ${hm(peakTs)}</span>
+          <span>${hm(hi)} · ${endDown} down</span>
+        </div>
+      </div>` : '';
+
+    const shown = rows.slice(0, AVB_EVD_MAX_ROWS).join('');
+    const extra = rows.length - AVB_EVD_MAX_ROWS;
+    const more = extra > 0
+      ? `<details class="avb-evd-more"><summary>+${extra} more host${extra === 1 ? '' : 's'} in this span</summary><div class="avb-evd-rows">${rows.slice(AVB_EVD_MAX_ROWS).join('')}</div></details>`
+      : '';
+    const sub = [
+      wentDown ? `${plural(wentDown, 'host')} went down (${plural(drops, 'drop')})` : '',
+      recs ? `${recs} recover${recs === 1 ? 'y' : 'ies'}` : '',
+      `peak ${peak} down at ${hm(peakTs)}`,
+      carried.length ? `${carried.length} already down before` : '',
+    ].filter(Boolean).join(' · ');
+    return `
+      <div class="avb-evd-head">
+        <span class="avb-evd-time">${timeStr}</span>
+        ${wentDown
+          ? `<span class="avb-evd-state is-down">${wentDown} went down</span>`
+          : `<span class="avb-evd-state is-up">${recs} recovered</span>`}
+        ${peak > 1 ? `<span class="avb-evd-incident-badge" title="Peak concurrent hosts down in this span">INCIDENT · PEAK ${peak}</span>` : ''}
+        ${hi > lo ? `<button type="button" class="avb-evd-zoom" data-lo="${lo}" data-hi="${hi}">Zoom to span</button>` : ''}
+      </div>
+      <p class="avb-evd-sub">${sub}</p>
+      ${strip}
       <div class="avb-evd-rows">${shown}</div>
       ${more}`;
   }
@@ -2290,7 +2550,7 @@ class _AvailabilityMethods {
       const avg = sums[dow] / counts[dow];
       if (avg < worstAvg) { worstAvg = avg; worstDow = dow; }
     }
-    return (worstDow < 0 || worstAvg >= 100.0) ? null : names[worstDow];
+    return (worstDow < 0 || worstAvg >= 100.0) ? null : { name: names[worstDow], avg: worstAvg };
   }
 
   _calendarDayDetailHtml(d) {
@@ -2360,18 +2620,20 @@ class _AvailabilityMethods {
   }
 
   // Ties on availability_pct (2-decimal rounded, so common) are broken by
-  // more hosts down, then more total downtime — not by calendar order.
+  // more hosts down, then more total downtime — not by calendar order. Days
+  // still fully tied with the n-th are ALL included: a chronic outage makes
+  // nine identical days, and picking two of them by date claimed those two
+  // were worse than the other seven.
   _calendarWorstDates(daily, n) {
     const downtime = d => this._calendarDayDowntime(d);
-    return new Set(
-      [...daily]
-        .filter(d => typeof d.availability_pct === 'number' && (d.availability_pct < 100.0 || (d.hosts_down && d.hosts_down > 0)))
-        .sort((a, b) => (a.availability_pct - b.availability_pct)
-          || ((b.hosts_down || 0) - (a.hosts_down || 0))
-          || (downtime(b) - downtime(a)))
-        .slice(0, n)
-        .map(d => d.date)
-    );
+    const cmp = (a, b) => (a.availability_pct - b.availability_pct)
+      || ((b.hosts_down || 0) - (a.hosts_down || 0))
+      || (downtime(b) - downtime(a));
+    const ranked = [...daily]
+      .filter(d => typeof d.availability_pct === 'number' && (d.availability_pct < 100.0 || (d.hosts_down && d.hosts_down > 0)))
+      .sort(cmp);
+    const cut = ranked[n - 1];
+    return new Set(ranked.filter((d, i) => i < n || cmp(d, cut) === 0).map(d => d.date));
   }
 
   // WIB midnight of a `daily[].date` string, as an absolute epoch second.
@@ -2684,7 +2946,13 @@ class _AvailabilityMethods {
       this._calendarOpenDate = null;
     }
 
-    const worstOn = !!this._calendarWorstOn;
+    // Offering to highlight "3 worst days" out of 2 is nonsense, and on a
+    // 24h range there is nothing to rank at all (audit 5.2). Gated here, not
+    // by clearing the toggle: a short window (24h, or MTD while it reloads)
+    // hid the button but still drew highlights and the insight, and clearing
+    // the toggle silently undid the operator's choice.
+    const rankable = daily.length >= 4;
+    const worstOn = !!this._calendarWorstOn && rankable;
     const worstDates = worstOn ? this._calendarWorstDates(daily, 3) : null;
 
     // Calendar weekday offset (Monday-first grid: 0=Mon, ..., 6=Sun)
@@ -2808,13 +3076,7 @@ class _AvailabilityMethods {
     if (toggleBtn) {
       toggleBtn.classList.toggle('is-active', worstOn);
       toggleBtn.setAttribute('aria-pressed', String(worstOn));
-      // Offering to highlight "3 worst days" out of 2 is nonsense, and on a
-      // 24h range there is nothing to rank at all (audit 5.2).
-      const rankable = daily.length >= 4;
       toggleBtn.classList.toggle('hidden', !rankable);
-      if (!rankable && worstOn) {
-        this._calendarWorstOn = false;
-      }
     }
 
     // A MON–SUN grid drawn for a 24h range is mostly empty cells, which reads
@@ -2830,8 +3092,16 @@ class _AvailabilityMethods {
     const insightEl = document.getElementById('avbCalendarWeekdayInsight');
     if (insightEl) {
       const worstWeekday = worstOn ? this._calendarWorstWeekday(daily) : null;
-      insightEl.textContent = worstWeekday ? `Most downtime: ${worstWeekday}` : '';
-      insightEl.classList.toggle('hidden', !worstWeekday);
+      const tieTxt = worstOn && worstDates && worstDates.size > 3
+        ? ` · ${worstDates.size} days highlighted (tied for 3rd worst)`
+        : '';
+      // Average daily availability per weekday, so say exactly that: "Most
+      // downtime" read as total host downtime, which the cells also show and
+      // which can rank a different weekday.
+      insightEl.textContent = worstWeekday
+        ? `Lowest avg availability: ${worstWeekday.name} (${worstWeekday.avg.toFixed(2)}%)${tieTxt}`
+        : tieTxt.replace(/^ · /, '');
+      insightEl.classList.toggle('hidden', !insightEl.textContent);
     }
 
     const subScopeEl = document.getElementById('avbCalendarSubScope');
@@ -2888,6 +3158,7 @@ class _AvailabilityMethods {
   _renderAvailabilityBreakdown(source = 'direct') {
     const data = this.availabilityBreakdown;
     const isMatchingData = this._dataMatchesSelection(data);
+    this._syncModalRangeSelect();
 
     this._updateAvailLoadingUI(this._availLoading && !isMatchingData);
     // No report yet (first load in flight or failed): a sort or header click

@@ -1755,6 +1755,13 @@ export class InstancesPage {
     return t && t.upSinceBasis === 'telemetry' ? '≥' : '';
   }
 
+  // Same for an outage whose downSince is the 32d lookback edge
+  // (queries.down_since_is_window_bound): it slides forward every hour, so
+  // "Timeout · 31d 23h" read as an exact age that never grew.
+  _downAtLeast(t) {
+    return t && t.downSinceBasis === 'window' ? '≥' : '';
+  }
+
   // The ONE place an outage's start is resolved, for the tile ticker, the tile
   // render and the drawer alike — so the same host can never report two
   // different durations on two screens (audit 5.6).
@@ -1793,7 +1800,7 @@ export class InstancesPage {
   // Down-aging string for a target, or null when the start is unknown.
   _downAgingFor(t, now = Date.now()) {
     const startMs = this._outageStartMs(t);
-    return startMs === null ? null : this._fmtDownAging(Math.max(0, now - startMs));
+    return startMs === null ? null : this._downAtLeast(t) + this._fmtDownAging(Math.max(0, now - startMs));
   }
 
   // "Updated 3s ago", ageing to a warning tint when the data stops arriving.
@@ -2034,12 +2041,12 @@ export class InstancesPage {
       const downDur = startMs ? ` (${formatDuration(Date.now() - startMs, { compact: false })})` : '';
       bits.push(startMs === null
         ? 'down, outage start unknown (older than the 1-day lookback)'
-        : `down since ${new Date(startMs).toLocaleString(DATE_LOCALE)}${downDur}`);
+        : `down since ${this._downAtLeast(t) ? 'before ' : ''}${new Date(startMs).toLocaleString(DATE_LOCALE)}${downDur}`);
       if (t.failureCategory && t.failureCategory !== 'Unknown') bits.push(t.failureCategory);
       if (t.suppressedBy) bits.push(`caused by ${t.suppressedBy}`);
       if (t.is_alarmable !== false && !t.suppressedBy) {
         const evalTarget = { ...t, acknowledged: isAcked };
-        const alarmEval = evaluateAlarmState(evalTarget, Date.now(), alarmPolicyManager.getPolicy());
+        const alarmEval = alarmPolicyManager.hostState(evalTarget, Date.now());
         bits.push(`Alarm: ${alarmEval.label}`);
       }
       if (isAcked) {

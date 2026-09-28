@@ -1716,8 +1716,10 @@ def save_alarm_policy_api():
                 f"delay={saved.get('initial_delay_s')}s, "
                 f"ring={saved.get('ring_duration_s')}s, "
                 f"repeat={saved.get('repeat_interval_s')}s (enabled={saved.get('repeat_enabled')}), "
-                f"ack={saved.get('ack_behavior')} (remind={saved.get('ack_reminder_interval_s')}s), "
+                f"ack={saved.get('ack_behavior')} (quiet={saved.get('ack_quiet_s')}s, remind={saved.get('ack_reminder_interval_s')}s), "
+                f"repeat_limit={saved.get('repeat_limit')}, new_outage={saved.get('new_outage_mode')}, "
                 f"sound={saved.get('sound_id', 'alarm-default')}"
+                + (f" clip={saved.get('sound_start_s')}-{saved.get('sound_end_s')}s" if saved.get('sound_end_s') is not None else "")
             )
         )
     except Exception:

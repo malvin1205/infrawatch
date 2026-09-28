@@ -133,6 +133,9 @@ function fakePlot() {
     { date: '2026-09-06', availability_pct: 100.0, hosts_down: 0, events: [] },
   ];
   assert.deepEqual([...p._calendarWorstDates(daily, 3)], ['2026-09-04', '2026-09-02', '2026-09-03']);
+  // Full ties with the 3rd are all included, not cut by calendar order.
+  const tied = ['01', '02', '03', '04', '05'].map((dd, i) => ({ date: `2026-09-${dd}`, availability_pct: i ? 79.49 : 79.48, hosts_down: 16, events: [] }));
+  assert.equal(p._calendarWorstDates(tied, 3).size, 5);
 }
 
 /* ── 5. Retention floor distinguishes "never" from "pending". ── */
@@ -218,8 +221,8 @@ function fakePlot() {
   const line = (wrap.innerHTML.match(/class="avb-trend-line" d="([^"]+)"/) || [])[1] || '';
   assert.ok(line && /C/.test(line) && !/[HV]/.test(line), `trend drawn as a smooth curve, not steps: ${line.slice(0, 60)}`);
 
-  const drops = (wrap.innerHTML.match(/avb-trend-drop-tick/g) || []).length;
-  assert.ok(drops > 0 && drops <= 80, `120 drops are clustered, not hidden (got ${drops})`);
+  assert.ok(!/avb-trend-drop-tick|avb-trend-recovery-tick|y1="0" x2=/.test(wrap.innerHTML), "no barcode ticks: events are curve nodes now");
+  assert.match(note.innerHTML, /Node Down/, "120 drops still reach the chart (as nodes)");
 
   assert.match(note.innerHTML, /avb-lg-sw is-target/);
   p._trendZoom = { lo: DAY0, hi: DAY0 + 86400 };
@@ -227,7 +230,7 @@ function fakePlot() {
   assert.match(sub.textContent, /zoomed to \w+, Sept? 27, 00:00 WIB – 24:00 WIB/, 'single-day zoom names the day');
   p._trendZoom = { lo, hi };
   p._renderAvailabilityTrend(p._lastAvailabilityData);
-  assert.match(note.innerHTML, /host went down/);
+  assert.match(note.innerHTML, /Node Down/);
 
   // Tooltip: slot average, no invented interpolated value, time said once.
   const st = p._trendHoverState;
@@ -424,3 +427,50 @@ function fakePlot() {
 }
 
 console.log('availability trend interaction + calendar ranking: ok');
+
+/* ── 12. Node span panel counts what the node card counts. A node click
+   used to report the fleet at the span's first second ("10 down") under a
+   "59 Hosts Down" card. */
+{
+  const p = new P();
+  const T = 1_790_000_000;
+  const sweep = p._buildFleetSweep([
+    { instance: 'chronic', intervals: [{ start_ts: T - 86400, end_ts: T + 86400, carried_in: true, still_down: true }] },
+    { instance: 'flap', intervals: [{ start_ts: T, end_ts: T + 60 }, { start_ts: T + 600, end_ts: T + 660 }] },
+    { instance: 'a', intervals: [{ start_ts: T + 300, end_ts: T + 900 }] },
+    { instance: 'b', intervals: [{ start_ts: T + 610, end_ts: T + 5000 }] },
+  ], T - 86400, T + 86400);
+  p._lastAvailabilityData = { daily: [] };
+  const html = p._eventDetailHtml(T, sweep, 86400, { lo: T, hi: T + 900 });
+  assert.match(html, /3 went down/, 'distinct hosts that went down, same as the node card');
+  assert.match(html, /INCIDENT · PEAK 4/, 'chronic + flap + a + b down at T+610');
+  assert.match(html, /3 hosts went down \(4 drops\)/);
+  assert.match(html, /1 already down before/);
+  assert.equal(html.split('avb-evd-row-top').length - 1, 4, 'one row per host (flap once), plus chronic');
+  assert.match(html, /2 outages · 2m down in span/, 'flapping host summarised on its row');
+  assert.match(html, /avb-evd-zoom/, 'span panel offers zoom');
+}
+console.log('availability node span panel: ok');
+
+/* ── 13. Misleading-label fixes from the operator guide walkthrough. */
+{
+  const p = new P();
+  // A 1-minute outage has both edges within ±TOL: one row, not DOWN + RECOVERED.
+  const T = 1_790_000_000;
+  const sweep = p._buildFleetSweep([
+    { instance: 'blip', intervals: [{ start_ts: T - 60, end_ts: T }] },
+  ], T - 3600, T + 3600);
+  p._trendHoverState = { pts: [{ ts: T + 600, availability_pct: 99 }], bucketSec: 600 };
+  p._lastAvailabilityData = { daily: [] };
+  const html = p._eventDetailHtml(T, sweep, 7200);
+  assert.equal(html.split('avb-evd-row-top').length - 1, 1, 'one row per outage');
+  assert.ok(!/other change/.test(html), 'its own other edge is not "another change"');
+
+  // Weekday insight reports what it ranks: average daily availability.
+  const w = p._calendarWorstWeekday([
+    { date: '2026-09-07', availability_pct: 80 },   // Monday
+    { date: '2026-09-08', availability_pct: 90 },   // Tuesday
+  ]);
+  assert.deepEqual(w, { name: 'Monday', avg: 80 });
+}
+console.log('availability misleading-label fixes: ok');

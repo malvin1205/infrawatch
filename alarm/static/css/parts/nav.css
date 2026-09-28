@@ -268,6 +268,52 @@
   box-shadow: 0 0 20px rgba(239, 68, 68, 0.22);
 }
 
+/* ── Alarm readout (between status and controls) ───────
+   Plain text, no capsule: it describes the siren, the capsule beside it
+   already carries severity. Takes the auto margin so the controls stay put. */
+.topnav-status { margin-right: 0; }
+.topnav-alarm {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-left: 16px;
+  margin-right: auto;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.topnav-alarm.is-idle { visibility: hidden; }
+.topnav-alarm-label {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.topnav-alarm-state { font-weight: 600; }
+.topnav-alarm-detail {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topnav-alarm-detail .is-warn { color: var(--warning); }
+.topnav-alarm[data-state="ringing"] .topnav-alarm-state { color: var(--critical); }
+.topnav-alarm[data-state="pending"] .topnav-alarm-state { color: var(--orange); }
+.topnav-alarm[data-state="cooldown"] .topnav-alarm-state { color: #60A5FA; }
+.topnav-alarm[data-state="acked"] .topnav-alarm-state { color: var(--success); }
+.topnav-alarm[data-state="silenced"] .topnav-alarm-state,
+.topnav-alarm[data-state="repeat_off"] .topnav-alarm-state { color: var(--text-secondary); }
+@media (max-width: 1180px) {
+  .topnav-alarm-label, .topnav-alarm-detail { display: none; }
+}
+@media (max-width: 900px) {
+  .topnav-alarm { display: none; }
+  .topnav-status { margin-right: auto; }
+}
+
 /* ── Cluster 3: Controls & meta ────────────────────────
    Grouped tightly on the right with consistent icon sizing. Children may
    shrink — the old rule pinned every child at flex-shrink:0, which is why

@@ -58,6 +58,15 @@
       </button>
     </div>
 
+    <!-- Alarm lifecycle across the fleet: what the siren is doing now and when
+         it rings next (the per-host pill in the drawer, summed up). Kept in
+         the layout while idle so the controls cluster doesn't jump. -->
+    <div class="topnav-alarm is-idle" id="alarmStatusBar" aria-live="polite">
+      <span class="topnav-alarm-label">Alarm</span>
+      <span class="topnav-alarm-state" id="alarmStatusState"></span>
+      <span class="topnav-alarm-detail" id="alarmStatusDetail"></span>
+    </div>
+
     <!-- ── Cluster 3: Controls & meta ─────────────────────── -->
     <div class="topnav-controls">
       <!-- Alert logs & incident history — leads the cluster, ahead of the

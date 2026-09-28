@@ -103,3 +103,12 @@ def test_up_since_wide_lookup_is_minute_resolution():
         queries.fetch_up_since_prom_map(cache_ttl=0)
     assert any("probe_success == 0)[32d:1m]" in q for q in seen)
     assert not any("== 0)[32d:1h]" in q for q in seen), "1h rounding dated a 17:58 recovery 17:00"
+
+
+def test_lookback_edge_is_flagged_as_bound():
+    """Never UP in 32d: the value is the window's edge and slides with time,
+    so it's reported as a bound ("≥"), not an outage start."""
+    now = 1_790_000_000
+    assert queries.down_since_is_window_bound(now - queries.DOWN_SINCE_LOOKBACK_SEC + 300, now)
+    assert not queries.down_since_is_window_bound(now - 86400, now)
+    assert not queries.down_since_is_window_bound(0, now)

@@ -363,13 +363,16 @@ def _build_fleet_incidents(
     maint_by_inst = maint_by_inst or {}
 
     by_host: Dict[str, Dict[str, Any]] = {}
+    observed: Dict[Tuple[str, float], bool] = {}
     for row in (db_bucket_records or []):
         inst = row.get("instance")
         if not inst or (inst_set and inst not in inst_set):
             continue
         if float(row.get("downtime_seconds") or 0.0) <= 0:
+            observed[(inst, float(row.get("bucket_start") or 0.0))] = False
             continue
         sl = _slice_row(row, req_start, req_end, maint_by_inst.get(inst), now=req_end)
+        observed[(inst, float(row.get("bucket_start") or 0.0))] = _row_continues_outage(row, sl)
         # No per-host outage intervals stored for this hour (scalar fallback,
         # backfill pending): skip it. Synthesizing one ("down from the top of
         # the hour for downtime_seconds") showed invented DOWN/RECOVERED times
@@ -434,6 +437,7 @@ def _build_fleet_incidents(
                     merged.append([s, e, open_start, open_end])
         if not merged:
             continue
+        _close_stale_open_ends(merged, inst, observed, maint_by_inst.get(inst))
         earliest_start = merged[0][0]
         latest_end = merged[-1][1]
         results.append({
@@ -640,6 +644,30 @@ def _wib_day_start(d_str):
     return datetime.strptime(d_str, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() - WIB_OFFSET_SEC
 
 
+def _row_continues_outage(row, sl) -> bool:
+    """True when this hour's row opens mid-outage (its first outage piece
+    starts at the bucket start, cut by the bucket edge)."""
+    outs = (sl or {}).get("outages") or []
+    b_start = float(row.get("bucket_start") or 0.0)
+    return bool(outs) and bool(outs[0][2]) and outs[0][0] <= b_start + 1.0
+
+
+def _close_stale_open_ends(merged, inst, observed, maint_windows):
+    """Clear still_down on a piece that only looked open because its hour
+    ended while the last sample was down: when the NEXT hour was observed and
+    does not continue the outage, the host was back at the boundary. Left
+    open, the UI drew no recovery and called a 27s blip "ongoing".
+    `observed` maps (instance, bucket_start) -> continues-outage flag for
+    every stored row; an hour with no row (telemetry gap) or a maintenance
+    window starting at the edge stays open — we don't know it recovered."""
+    for iv in merged:
+        e = float(iv[1])
+        if iv[3] and observed.get((inst, e)) is False and not any(
+                float(a) <= e < float(b) for a, b in (maint_windows or [])):
+            iv[3] = False
+    return merged
+
+
 def _merge_outages(raw):
     merged = []
     for s, e, open_start, open_end in sorted(raw, key=lambda x: x[0]):
@@ -690,6 +718,7 @@ def _build_daily_downtime(
 
     days = {}
     extra_rows = {}  # instance (not monitored any more) -> its rows
+    observed = {}    # (instance, bucket_start) -> row opens mid-outage
     for row in db_bucket_records or []:
         instance = row.get("instance")
         if not instance:
@@ -697,6 +726,7 @@ def _build_daily_downtime(
         if inst_set and instance not in inst_set:
             extra_rows.setdefault(instance, []).append(row)
         sl = _slice_row(row, req_start, req_end, maint_by_inst.get(instance), now=req_end)
+        observed[(instance, float(row.get("bucket_start") or 0.0))] = _row_continues_outage(row, sl)
         if not sl:
             continue
         date_str = datetime.fromtimestamp(sl["bucket_start"] + WIB_OFFSET_SEC, tz=timezone.utc).strftime("%Y-%m-%d")
@@ -757,7 +787,8 @@ def _build_daily_downtime(
 
         host_entries = []
         for instance, h in d["host_events"].items():
-            merged = _merge_outages(h["raw_intervals"])
+            merged = _close_stale_open_ends(
+                _merge_outages(h["raw_intervals"]), instance, observed, maint_by_inst.get(instance))
             host_entries.append({
                 "instance": instance,
                 "name": instance,

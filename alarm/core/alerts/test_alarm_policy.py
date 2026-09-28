@@ -144,3 +144,61 @@ def test_alarm_policy_api_endpoints(monkeypatch, tmp_path):
     assert bad_data["ok"] is False
     assert "error" in bad_data
 
+
+
+def test_sound_clip_validation():
+    ok, _, c = validate_alarm_policy({"sound_start_s": 80, "sound_end_s": 95})
+    assert ok and c == {"sound_start_s": 80.0, "sound_end_s": 95.0}
+    ok, _, c = validate_alarm_policy({"sound_start_s": None, "sound_end_s": None})
+    assert ok and c == {"sound_start_s": None, "sound_end_s": None}
+    for bad, word in (({"sound_start_s": 10}, "sound_end_s"),           # half a pair
+                      ({"sound_start_s": 20, "sound_end_s": 10}, "after"),
+                      ({"sound_start_s": -1, "sound_end_s": 5}, "0 or more"),
+                      ({"sound_start_s": 10, "sound_end_s": 10.5}, "between"),   # < 1s
+                      ({"sound_start_s": 0, "sound_end_s": 301}, "between"),     # > 300s
+                      ({"sound_start_s": True, "sound_end_s": 5}, "number")):
+        ok, err, _ = validate_alarm_policy(bad)
+        assert not ok and word in err, (bad, err)
+
+
+def test_sound_clip_past_youtube_duration_rejected(monkeypatch):
+    from alarm.core.alerts import alarm_policy as ap
+    monkeypatch.setattr(ap.AlarmSoundRepository, "get_sound",
+                        staticmethod(lambda sid, db_path=None: {"id": sid, "source": "youtube", "duration": 240}))
+    ok, err, _ = validate_alarm_policy({"sound_id": "yt", "sound_start_s": 230, "sound_end_s": 250})
+    assert not ok and "past the end" in err
+    ok, _, c = validate_alarm_policy({"sound_id": "yt", "sound_start_s": 80, "sound_end_s": 95})
+    assert ok and c["sound_end_s"] == 95.0
+
+
+def test_switching_sound_drops_old_clip(monkeypatch, tmp_path):
+    from alarm.core.alerts import alarm_policy as ap
+    monkeypatch.setattr(ap, "POLICY_FILE", str(tmp_path / "p.json"))
+    ap.reset_alarm_policy_cache()
+    monkeypatch.setattr(ap.AlarmSoundRepository, "get_sound",
+                        staticmethod(lambda sid, db_path=None: {"id": sid, "source": "upload", "duration": None}))
+    ok, _, saved = save_alarm_policy({"sound_id": "a", "sound_start_s": 5, "sound_end_s": 9})
+    assert ok and saved["sound_end_s"] == 9.0
+    ok, _, saved = save_alarm_policy({"sound_id": "b"})
+    assert saved["sound_start_s"] is None and saved["sound_end_s"] is None
+    ok, _, saved = save_alarm_policy({"sound_id": "b", "sound_start_s": 1, "sound_end_s": 3})
+    assert get_alarm_policy()["sound_end_s"] == 3.0
+
+
+def test_refined_timing_fields():
+    ok, _, c = validate_alarm_policy({"ack_quiet_s": 30, "repeat_limit": 3, "new_outage_mode": "wait"})
+    assert ok and c == {"ack_quiet_s": 30, "repeat_limit": 3, "new_outage_mode": "wait"}
+    for bad, word in (({"ack_quiet_s": -1}, "ack_quiet_s"), ({"repeat_limit": 1.5}, "whole"),
+                      ({"repeat_limit": 1001}, "1000"), ({"new_outage_mode": "later"}, "ring")):
+        ok, err, _ = validate_alarm_policy(bad)
+        assert not ok and word in err, (bad, err)
+
+
+def test_old_policy_file_keeps_first_reminder_timing(monkeypatch, tmp_path):
+    from alarm.core.alerts import alarm_policy as ap
+    f = tmp_path / "p.json"
+    f.write_text(json.dumps({"ack_reminder_interval_s": 10}))
+    monkeypatch.setattr(ap, "POLICY_FILE", str(f))
+    ap.reset_alarm_policy_cache()
+    pol = get_alarm_policy()
+    assert pol["ack_quiet_s"] == 10 and pol["repeat_limit"] == 0 and pol["new_outage_mode"] == "ring"
