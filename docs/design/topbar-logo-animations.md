@@ -1,7 +1,7 @@
 # InfraWatch — Topbar Logo & Symmetrical Icon Suite Concepts
 
 **Status:** Ready for Review & Selection  
-**Interactive Prototype:** [`docs/concepts/topbar-logo-animations.html`](file:///c:/Users/dimi/Downloads/infra-monitoring-stack-v3/docs/concepts/topbar-logo-animations.html)  
+**Interactive Prototype:** [`docs/design/topbar-logo-animations.html`](topbar-logo-animations.html)  
 **Goal:** Transform the topbar icon cluster from mediocre, haphazard, and static into an engineered symmetrical layout with fluid, satisfying micro-interactions across every single control.
 
 ---
@@ -85,7 +85,7 @@
 ## 4. How to Test & Choose
 
 Open the interactive HTML prototype in your browser:
-👉 [`docs/concepts/topbar-logo-animations.html`](file:///c:/Users/dimi/Downloads/infra-monitoring-stack-v3/docs/concepts/topbar-logo-animations.html)
+👉 [`docs/design/topbar-logo-animations.html`](topbar-logo-animations.html)
 
 ### Key Features to Try in the Prototype:
 1. **Switch Concepts:** Click through the 5 tabs at the top.

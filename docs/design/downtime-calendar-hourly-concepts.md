@@ -1,7 +1,7 @@
 # InfraWatch — Hourly Incident Inspector & Downtime Calendar (5 Detailed Concepts)
 
 **Status:** Ready for Review & Implementation Selection  
-**Interactive Prototype:** [`docs/concepts/downtime-calendar-hourly-concepts.html`](file:///c:/Users/dimi/Downloads/infra-monitoring-stack-v3/docs/concepts/downtime-calendar-hourly-concepts.html)  
+**Interactive Prototype:** [`docs/design/downtime-calendar-hourly-concepts.html`](downtime-calendar-hourly-concepts.html)  
 **Design Standard:** UI/UX Pro Max (`Inter` + `JetBrains Mono`, WCAG 4.5:1 Contrast, Dense Observability Standards)
 
 ---
@@ -120,7 +120,7 @@ Below are the 5 distinct, production-grade interaction concepts implemented in t
 
 ## 4. How to Test the Prototype in Your Browser
 
-1. Open [`docs/concepts/downtime-calendar-hourly-concepts.html`](file:///c:/Users/dimi/Downloads/infra-monitoring-stack-v3/docs/concepts/downtime-calendar-hourly-concepts.html) in your browser (Chrome / Edge / Firefox).
+1. Open [`docs/design/downtime-calendar-hourly-concepts.html`](downtime-calendar-hourly-concepts.html) in your browser (Chrome / Edge / Firefox).
 2. **Explore the 5 Concepts:** Click the 5 concept cards at the top or press keys `1`, `2`, `3`, `4`, or `5` on your keyboard.
 3. **In Concept 1 (Flight Recorder):**
    - Click the bar at **hour 14** or use the **`←` / `→` arrow keys** to scrub through hours.

@@ -1,7 +1,7 @@
 # InfraWatch — Status Legend in Logo · Concept Exploration & Simulation
 
 **Status:** Design Exploration / Simulation Phase  
-**Artifact:** [`docs/concepts/logo-status-legend-simulation.html`](file:///c:/Users/dimi/Downloads/infra-monitoring-stack-v3/docs/concepts/logo-status-legend-simulation.html)  
+**Artifact:** [`docs/design/logo-status-legend-simulation.html`](logo-status-legend-simulation.html)  
 **Goal:** Relocate the static status legend row from under the filter bar into an interactive reveal directly within the InfraWatch logo/wordmark.
 
 ---
@@ -31,7 +31,7 @@ Currently, the status legend sits as a permanent row beneath the host filter bar
 
 ## 2. Three Creative Concept Variants
 
-All three variants are fully simulated in [`docs/concepts/logo-status-legend-simulation.html`](file:///c:/Users/dimi/Downloads/infra-monitoring-stack-v3/docs/concepts/logo-status-legend-simulation.html) with real CSS tokens, authentic typography, and interactive controls.
+All three variants are fully simulated in [`docs/design/logo-status-legend-simulation.html`](logo-status-legend-simulation.html) with real CSS tokens, authentic typography, and interactive controls.
 
 ### Variant A: "Tactical Radar Sweep & Precision HUD Panel" *(Recommended)*
 * **Philosophy:** High-speed telemetry instrument. Utilitarian, crisp, minimum cognitive friction. Inspired by Linear and Datadog command centers.
@@ -134,7 +134,7 @@ python -m http.server 8089 --directory c:\Users\dimi\Downloads\infra-monitoring-
 ## 5. Next Steps (Upon Direction Selection)
 
 Once a variant is chosen:
-1. Wire the selected interaction and HTML markup into [`alarm/templates/partials/_topnav.html`](file:///c:/Users/dimi/Downloads/infra-monitoring-stack-v3/alarm/templates/partials/_topnav.html) under `.topnav-brand`.
-2. Add the corresponding CSS classes and keyframes into [`alarm/static/css/parts/nav.css`](file:///c:/Users/dimi/Downloads/infra-monitoring-stack-v3/alarm/static/css/parts/nav.css).
-3. Remove the static `.host-legend` element from [`alarm/templates/partials/_dashboard.html`](file:///c:/Users/dimi/Downloads/infra-monitoring-stack-v3/alarm/templates/partials/_dashboard.html).
-4. Wire lightweight event listeners (toggle, click outside, `Escape` key) into [`alarm/static/js/main.js`](file:///c:/Users/dimi/Downloads/infra-monitoring-stack-v3/alarm/static/js/main.js).
+1. Wire the selected interaction and HTML markup into [`alarm/templates/partials/_topnav.html`](../../alarm/templates/partials/_topnav.html) under `.topnav-brand`.
+2. Add the corresponding CSS classes and keyframes into [`alarm/static/css/parts/nav.css`](../../alarm/static/css/parts/nav.css).
+3. Remove the static `.host-legend` element from [`alarm/templates/partials/_dashboard.html`](../../alarm/templates/partials/_dashboard.html).
+4. Wire lightweight event listeners (toggle, click outside, `Escape` key) into [`alarm/static/js/main.js`](../../alarm/static/js/main.js).

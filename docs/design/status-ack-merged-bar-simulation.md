@@ -1,6 +1,6 @@
 # Merged Status & Acknowledge Bar — 5 Unique Design Concepts
 
-> Interactive Simulation Suite: [`status-ack-merged-bar-simulation.html`](file:///c:/Users/dimi/Downloads/infra-monitoring-stack-v3/docs/concepts/status-ack-merged-bar-simulation.html)
+> Interactive Simulation Suite: [`status-ack-merged-bar-simulation.html`](status-ack-merged-bar-simulation.html)
 
 ---
 
@@ -28,7 +28,7 @@ While functionally sound (unifying two related concerns), visually it suffered f
 
 ## 3. Interactive Simulation Suite Features
 
-The interactive file [`status-ack-merged-bar-simulation.html`](file:///c:/Users/dimi/Downloads/infra-monitoring-stack-v3/docs/concepts/status-ack-merged-bar-simulation.html) includes:
+The interactive file [`status-ack-merged-bar-simulation.html`](status-ack-merged-bar-simulation.html) includes:
 - **Real Topnav Preview Arena**: Test each option live inside an exact pixel-matched replica of InfraWatch's top navigation bar.
 - **Global State Switcher (Sticky HUD)**:
   - 🚨 **Critical** (2 unacknowledged outages)
