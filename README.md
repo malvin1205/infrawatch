@@ -4,7 +4,7 @@ Dashboard NOC real-time untuk memantau ketersediaan server, website, dan jaringa
 
 > **Catatan Cakupan**: Repo ini berisi **InfraWatch** (Flask backend + web console). Prometheus dan Blackbox Exporter adalah service eksternal yang harus sudah berjalan dan dapat dijangkau oleh container InfraWatch.
 
-![Dashboard wallboard InfraWatch](docs/assets/screenshots/dashboard.png)
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/3effce5f-5698-4bce-9fae-42def254c587" />
 
 ---
 
