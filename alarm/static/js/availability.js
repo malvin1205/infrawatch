@@ -311,17 +311,17 @@ class _AvailabilityMethods {
     // The Response Time Trend card has its own range once its buttons are used.
     if (typeof this._syncRtButtons === 'function') this._syncRtButtons();
 
-    // Must outlast the backend's slowest honest answer: the hybrid path
-    // (MTD/30d while SQLite history is still being backfilled) runs ~30s
-    // Prometheus queries plus daily reconstruction — measured ~40s live. A
-    // 35s abort here killed every MTD load and left the previous range's
-    // Trend on screen. A timeout is a failure (retry + unavailable), never a
-    // silent "superseded" abort.
+    // Must outlast the backend's slowest honest answer: a cold 30d/MTD report
+    // prices the whole window from Prometheus while SQLite history is still
+    // being backfilled — measured 70-165s on a loaded host. Only the first
+    // load after a restart pays that (the server then serves the previous
+    // report while refreshing). A timeout is a failure (retry + unavailable),
+    // never a silent "superseded" abort.
     let timedOut = false;
     const timeoutId = setTimeout(() => {
       timedOut = true;
       try { controller.abort(); } catch (_) {}
-    }, 90000);
+    }, 240000);
 
     try {
       let url = `/api/availability?minutes=${Math.round(this.periodMinutes)}`;

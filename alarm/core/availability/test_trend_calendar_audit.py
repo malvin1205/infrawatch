@@ -373,3 +373,59 @@ def test_m3_headline_queries_carry_job_filter():
         eng.get_availability(AvailabilityQuery(job="gitlab-rails", minutes=1440, end_ts=end))
     metric_q = [q for q in prom.exprs if "probe_success" in q or "up" in q]
     assert metric_q and all('job="gitlab-rails"' in q for q in metric_q), metric_q
+
+
+# ── P1: a correct 30d/MTD report costs ~70s cold; polls must never wait on it ──
+
+def test_p1_long_window_cache_survives_pruning_and_is_minute_stable():
+    from alarm.core.availability._cache import AvailabilityCache
+    k1, ttl = AvailabilityCache.derive_cache_key("http://p", "all", 43200, None, 99.9, 30, 0, now=1_000_000.0)
+    k2, _ = AvailabilityCache.derive_cache_key("http://p", "all", 43200, None, 99.9, 30, 0, now=1_000_000.0 + 240)
+    assert k1 == k2 and ttl >= 900, (k1, k2, ttl)
+    # MTD grows a minute per minute: consecutive polls share one key
+    m1, _ = AvailabilityCache.derive_cache_key("http://p", "all", 38000, None, 99.9, 30, 0, now=1_000_000.0)
+    m2, _ = AvailabilityCache.derive_cache_key("http://p", "all", 38003, None, 99.9, 30, 0, now=1_000_000.0 + 180)
+    assert m1 == m2, (m1, m2)
+    c = AvailabilityCache()
+    c.set(k1, {"x": 1}, now=0.0)
+    c.get("other", ttl, now=500.0)  # triggers a prune pass
+    assert c.get(k1, ttl, now=500.0) == {"x": 1}, "an entry inside its TTL must not be pruned"
+
+
+def test_p1_live_long_window_serves_previous_report_while_refreshing():
+    import threading
+    import time as _time
+    end = DAY0 + 30 * DAY
+    repo = DbRepo()
+    rows = [row(i, DAY0 + h * H) for h in range(int(30 * 24)) for i in ("h1",)]
+    eng = _engine(repo, {"h1": "blackbox"})
+    computed = []
+
+    def slowed(real):
+        def slow(self, *a, **k):
+            computed.append(threading.current_thread().name)
+            if len(computed) > 1:
+                _time.sleep(0.5)
+            return real(self, *a, **k)
+        return slow
+
+    clock = {"t": end}
+    with patch.object(repo_mod, "AVAIL_TARGET_WHITELIST", None), _Ctx(no_prom()), \
+         patch.object(AvailabilityEngine, "_resolve_maintenance_windows", return_value=None), \
+         patch.object(AvailabilityEngine, "_compute_fast_path_payload",
+                      slowed(AvailabilityEngine._compute_fast_path_payload)), \
+         patch.object(AvailabilityEngine, "_compute_hybrid_path_payload",
+                      slowed(AvailabilityEngine._compute_hybrid_path_payload)), \
+         patch("alarm.core.availability.engine.time.time", side_effect=lambda: clock["t"]):
+        repo.save_buckets(rows, SRC)
+        first = eng.get_availability(AvailabilityQuery(job="all", minutes=43200))
+        clock["t"] = end + 1000  # next 15-min cache bucket: cold again
+        t0 = _time.perf_counter()
+        second = eng.get_availability(AvailabilityQuery(job="all", minutes=43200))
+        waited = _time.perf_counter() - t0
+        for th in threading.enumerate():
+            if th.name.startswith("avail-refresh"):
+                th.join(5)
+    assert waited < 0.4, f"poll waited {waited:.2f}s on a cold recompute"
+    assert second.to_dict()["overall"] == first.to_dict()["overall"]
+    assert len(computed) == 2 and computed[1].startswith("avail-refresh"), computed

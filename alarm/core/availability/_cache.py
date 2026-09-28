@@ -7,7 +7,10 @@ from typing import Optional, Tuple, Any, Dict
 class AvailabilityCache:
     """In-memory cache with single-flight request coalescing and TTL pruning."""
 
-    def __init__(self, prune_interval: float = 30.0, max_age: float = 120.0):
+    # max_age must outlive the longest TTL handed out by derive_cache_key: at
+    # 120s a 300s-TTL 30d report was pruned after two minutes and recomputed
+    # (~70s of Prometheus + merge) far more often than intended.
+    def __init__(self, prune_interval: float = 30.0, max_age: float = 1800.0):
         self._cache: Dict[str, Tuple[float, Any]] = {}
         self._lock = threading.Lock()
         self._flight_locks: Dict[str, threading.Lock] = {}
@@ -110,8 +113,14 @@ class AvailabilityCache:
         # path behind a cache miss fires avg_over_time/count_over_time/changes
         # over the whole window — 10-40s of Prometheus load that starves the
         # /instances poll. Cache the historical tabs for minutes, not 15s.
-        if minutes_int >= 10080:        # 7d / 30d — glacial
-            avail_cache_ttl, bucket_sec = 300.0, 300
+        key_minutes = minutes_int
+        if minutes_int >= 10080:        # 7d / 30d / MTD — glacial
+            # A correct 30d/MTD report prices the whole window from Prometheus
+            # (~70s cold on a loaded host); a 30-day % does not need 5-minute
+            # freshness. MTD grows a minute every minute, so its minute count
+            # is bucketed too — otherwise every poll is a new key.
+            avail_cache_ttl, bucket_sec = 900.0, 900
+            key_minutes = (minutes_int // 15) * 15
         elif minutes_int >= 1440:       # 24h
             avail_cache_ttl, bucket_sec = 90.0, 60
         else:                           # short realtime windows
@@ -125,5 +134,5 @@ class AvailabilityCache:
             norm_end = f"live_{bucket_ts}"
             effective_ttl = avail_cache_ttl
 
-        key = f"avail:{endpoint}:{norm_job}:{minutes_int}:{norm_end}:sla{sla_target_pct}/{sla_days}/{sla_map_sig}"
+        key = f"avail:{endpoint}:{norm_job}:{key_minutes}:{norm_end}:sla{sla_target_pct}/{sla_days}/{sla_map_sig}"
         return key, effective_ttl

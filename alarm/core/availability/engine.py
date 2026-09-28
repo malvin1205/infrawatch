@@ -6,6 +6,8 @@ import bisect
 import logging
 import math
 import os
+import re
+import threading
 import time
 from typing import Optional, Dict, Any, List, Tuple
 
@@ -160,6 +162,10 @@ class AvailabilityEngine:
         # Effective depth (seconds) for the current source — see _backfill_depth.
         self._backfill_depth_sec: Optional[float] = None
         self._retention_cache: Dict[str, Tuple[float, Optional[float]]] = {}
+        # Stale-while-revalidate state for live long windows (get_availability).
+        self._refresh_guard = threading.Lock()
+        self._refreshing: set = set()
+        self._last_live: Dict[str, Tuple[float, int, Dict[str, Any]]] = {}
 
     def _prom_retention_seconds(self, source: str) -> Optional[float]:
         """`storage.tsdb.retention.time` of server `source` (cached 1h), or None
@@ -188,8 +194,37 @@ class AvailabilityEngine:
         clear_helpers_caches()
         return self.cache.invalidate(job=job, instance=instance)
 
-    def get_availability(self, query: AvailabilityQuery) -> AvailabilityReport:
-        """Single deep entry point for querying fleet and per-target availability."""
+    # A live long-window report may be served from the previous cache bucket
+    # for this long while its replacement is computed in the background.
+    STALE_SERVE_SEC = 1800.0
+
+    def _refresh_in_background(self, query: AvailabilityQuery, cache_key: str) -> None:
+        with self._refresh_guard:
+            if cache_key in self._refreshing:
+                return
+            self._refreshing.add(cache_key)
+
+        def run():
+            try:
+                self.get_availability(query, allow_stale=False)
+            except Exception:
+                logger.exception("availability background refresh failed for %s", cache_key)
+            finally:
+                with self._refresh_guard:
+                    self._refreshing.discard(cache_key)
+
+        threading.Thread(target=run, name=f"avail-refresh-{len(self._refreshing)}", daemon=True).start()
+
+    def get_availability(self, query: AvailabilityQuery, allow_stale: bool = True) -> AvailabilityReport:
+        """Single deep entry point for querying fleet and per-target availability.
+
+        Live windows of 24h and longer are stale-while-revalidate: when the
+        current cache bucket is cold, the previous report for the same view
+        (same server/job/SLA, a window within an hour of this one, at most
+        STALE_SERVE_SEC old) is returned at once and the new one is computed
+        in the background. A cold 30d/MTD report takes over a minute — past
+        the browser's patience — and every poll landing on a new bucket used
+        to wait for it."""
         t_req_start = time.perf_counter()
         now = time.time()
 
@@ -225,6 +260,15 @@ class AvailabilityEngine:
         cached_payload = self.cache.get(cache_key, effective_ttl, now=now)
         if cached_payload is not None:
             return AvailabilityReport(cached_payload)
+
+        live_long = query.end_ts is None and query.minutes_int >= 1440
+        view_id = re.sub(r":\d+:live_\d+:", ":live:", cache_key)
+        if live_long and allow_stale:
+            with self._refresh_guard:
+                prev = self._last_live.get(view_id)
+            if prev and now - prev[0] < self.STALE_SERVE_SEC and abs(prev[1] - query.minutes_int) <= 60:
+                self._refresh_in_background(query, cache_key)
+                return AvailabilityReport(prev[2])
 
         # 2. Acquire single-flight coalescing lock
         t_lock_wait_start = time.perf_counter()
@@ -393,6 +437,9 @@ class AvailabilityEngine:
                 payload.pop("_trace", None)
 
             self.cache.set(cache_key, payload, now=now_under_lock)
+            if live_long:
+                with self._refresh_guard:
+                    self._last_live[view_id] = (now_under_lock, query.minutes_int, payload)
             return AvailabilityReport(payload)
 
     def get_trend(self, job: str, start_ts: float, end_ts: float, max_points: int = 180) -> Dict[str, Any]:
