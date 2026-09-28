@@ -5,6 +5,9 @@
 import { calculateNiceScale, buildMSGradientDefs } from './ui/charts.js';
 import { escapeHtml, slowThresholdMs, latencySeverity, latencyColor, DATE_LOCALE } from './ui/format.js';
 import { apiFetch } from './net.js';
+
+// Response Time Trend presets (minutes). 'mtd' and 'custom' are computed.
+const RT_PRESET_MIN = { '5m': 5, '15m': 15, '1h': 60, '6h': 360, '24h': 1440, '7d': 10080, '30d': 43200 };
 import { alarmPolicyManager, evaluateAlarmState, AlarmState } from './alarm-policy.js';
 
 class _DrawerMethods {
@@ -420,6 +423,10 @@ class _DrawerMethods {
     // Reset drawer state & zoom range to prevent data bleed across targets
     this._sparklineZoomRange = null;
     this._rawSparklinePoints = [];
+    // A freshly opened drawer's Response Time Trend follows the dashboard
+    // period again until its own range buttons are used.
+    this._rtRange = null;
+    this._closeRtCustomRange(true);
 
     // IP + job
     const titleEl = document.getElementById('drawerTargetTitle');
@@ -520,7 +527,7 @@ class _DrawerMethods {
         lastCheckEl.textContent = `Down for ${this._fmtDownAging(downMs)}`;
       } else {
         const upStart = typeof this._upStartMs === 'function' ? this._upStartMs(target) : null;
-        const upStr = upStart ? ` · Up for ${this._fmtDownAging(Math.max(0, now - upStart))}` : '';
+        const upStr = upStart ? ` · Up for ${this._upAtLeast(target)}${this._fmtDownAging(Math.max(0, now - upStart))}` : '';
         lastCheckEl.textContent = (target.lastScrape ? this._relTime(target.lastScrape) : 'Just now') + upStr;
       }
     }
@@ -833,7 +840,118 @@ class _DrawerMethods {
     ].join('');
   }
 
-  _renderSparkline(points, isInternalCall = false) {
+  // ── Response Time Trend: the card's own range ─────────────────────────
+  // null = follow the dashboard period (this.periodMinutes/periodEnd);
+  // otherwise {label, minutes, end}. Only this card uses it — uptime, SLA,
+  // events and history keep the dashboard period they are labelled with.
+  _rtWindow() {
+    const r = this._rtRange;
+    if (r && r.label === 'mtd') return { label: 'mtd', minutes: this._monthToDateMinutes(), end: null };
+    if (r) return r;
+    return { label: this.periodLabel || '24h', minutes: Math.round(this.periodMinutes || 1440), end: this.periodEnd || null };
+  }
+
+  _rtRangeText(w = this._rtWindow()) {
+    if (w.label === 'mtd') return 'Month to date';
+    if (w.label === 'custom') {
+      const end = w.end || Math.floor(Date.now() / 1000);
+      const fmt = ts => new Date(ts * 1000).toLocaleString(DATE_LOCALE, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+      return `${fmt(end - w.minutes * 60)} – ${fmt(end)}`;
+    }
+    return w.label;
+  }
+
+  _syncRtButtons() {
+    const w = this._rtWindow();
+    document.querySelectorAll('#spRangeGroup .sp-range-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.range === w.label);
+    });
+    const el = document.getElementById('drawerSparklineRange');
+    if (el) el.textContent = `(${this._rtRangeText(w)})`;
+  }
+
+  _setRtRange(range) {
+    if (range === 'custom') { this._openRtCustomRange(); return; }
+    if (range !== 'mtd' && !RT_PRESET_MIN[range]) return;
+    this._closeRtCustomRange(true);
+    this._rtRange = { label: range, minutes: RT_PRESET_MIN[range] || null, end: null };
+    this._sparklineZoomRange = null;
+    const resetBtn = document.getElementById('sparklineResetZoomBtn');
+    if (resetBtn) resetBtn.style.display = 'none';
+    this._syncRtButtons();
+    if (this.selectedTarget) this._loadRtSparkline(this.selectedTarget.instance);
+  }
+
+  _openRtCustomRange() {
+    const box = document.getElementById('spCustomRange');
+    if (!box) return;
+    const w = this._rtWindow();
+    const end = w.end ? new Date(w.end * 1000) : new Date();
+    const fromEl = document.getElementById('spCustomFrom'), toEl = document.getElementById('spCustomTo');
+    if (fromEl) fromEl.value = this._toDatetimeLocalValue(new Date(end.getTime() - w.minutes * 60000));
+    if (toEl) toEl.value = this._toDatetimeLocalValue(end);
+    document.getElementById('spCustomError')?.classList.add('hidden');
+    box.classList.remove('hidden');
+    document.querySelectorAll('#spRangeGroup .sp-range-btn').forEach(b => b.classList.toggle('active', b.dataset.range === 'custom'));
+  }
+
+  _closeRtCustomRange(silent = false) {
+    document.getElementById('spCustomRange')?.classList.add('hidden');
+    if (!silent) this._syncRtButtons();
+  }
+
+  _applyRtCustomRange() {
+    const fromVal = document.getElementById('spCustomFrom')?.value || '';
+    const toVal = document.getElementById('spCustomTo')?.value || '';
+    const errEl = document.getElementById('spCustomError');
+    const fail = msg => { if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); } };
+    const from = new Date(fromVal), to = new Date(toVal);
+    if (!fromVal || !toVal || isNaN(from) || isNaN(to)) return fail('Please select start and end date & time');
+    const minutes = (to - from) / 60000;
+    if (!(minutes >= 5)) return fail('"To" must be at least 5 minutes after "From"');
+    if (minutes > 90 * 1440) return fail('Maximum range is 90 days');
+    if (to.getTime() > Date.now() + 60000) return fail('Range cannot be in the future');
+    this._rtRange = { label: 'custom', minutes, end: Math.floor(to.getTime() / 1000) };
+    this._sparklineZoomRange = null;
+    this._closeRtCustomRange();
+    if (this.selectedTarget) this._loadRtSparkline(this.selectedTarget.instance);
+  }
+
+  // Fetch just the Response Time Trend for the card's own range.
+  async _loadRtSparkline(targetInstance) {
+    if (this._rtAbort) this._rtAbort.abort();
+    const controller = new AbortController();
+    this._rtAbort = controller;
+    const w = this._rtWindow();
+    const wrap = document.getElementById('drawerSparkline');
+    if (wrap) wrap.style.opacity = '0.55';
+    try {
+      let url = `/api/target-history?target=${encodeURIComponent(targetInstance)}&minutes=${Math.max(1, Math.round(w.minutes))}`;
+      if (w.end) url += `&end=${w.end}`;
+      const data = await (await fetch(url, { signal: controller.signal })).json();
+      if (controller !== this._rtAbort || this.selectedTarget?.instance !== targetInstance) return;
+      this._renderSparkline(data.ok ? (data.latency_points || []) : [], false, this._rtMetaFrom(data, w));
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      this._renderSparkline([], false, null);
+    } finally {
+      if (wrap && controller === this._rtAbort) wrap.style.opacity = '';
+    }
+  }
+
+  _rtMetaFrom(data, w) {
+    const end = (data && data.range_end) || w.end || Math.floor(Date.now() / 1000);
+    return {
+      start: (data && data.range_start) || end - Math.round(w.minutes * 60),
+      end,
+      step: (data && data.latency_step) || null,
+      stats: (data && data.latency_stats) || null,
+      // [[start_ts, end_ts, http_code|null, probes], ...] — failed probe runs
+      failed: (data && Array.isArray(data.failed_points)) ? data.failed_points : [],
+    };
+  }
+
+  _renderSparkline(points, isInternalCall = false, meta = null) {
     const wrap = document.getElementById('drawerSparkline');
     const badge = document.getElementById('drawerSparklineBadge');
     const resetBtn = document.getElementById('sparklineResetZoomBtn');
@@ -846,6 +964,7 @@ class _DrawerMethods {
 
     if (!isInternalCall) {
       this._rawSparklinePoints = Array.isArray(points) ? points : [];
+      this._sparklineMeta = meta;
       if (!this._sparklineZoomRange) {
         if (resetBtn) resetBtn.style.display = 'none';
       }
@@ -876,15 +995,32 @@ class _DrawerMethods {
       }
     }
 
+    const m = this._sparklineMeta || {};
+    const zoomed = !!this._sparklineZoomRange;
+    // X domain = the requested window (or the zoom), never just the span the
+    // data happens to cover: a 7d range whose data covered 2h used to be drawn
+    // edge to edge and read as 7 healthy days.
+    const t0 = zoomed ? this._sparklineZoomRange.tMin : (m.start || activePoints[0][0]);
+    const tN = zoomed ? this._sparklineZoomRange.tMax : (m.end || activePoints[activePoints.length - 1][0]);
+    const dt = Math.max(1, tN - t0);
+    // A hole longer than this is missing telemetry, drawn as a gap — not a
+    // straight line implying the value held.
+    const deltas = activePoints.slice(1).map((p, i) => p[0] - activePoints[i][0]).sort((a, b) => a - b);
+    const typicalStep = m.step || deltas[Math.floor(deltas.length / 2)] || 60;
+    const gapSec = Math.max(3 * typicalStep, 120);
+
     const lats = activePoints.map(p => p[1]);
+    const lastT = activePoints[activePoints.length - 1][0];
     const nowVal = lats[lats.length - 1];
     const minL = Math.min(...lats);
-    const maxL = Math.max(...lats);
-    const avgL = lats.reduce((a, b) => a + b, 0) / lats.length;
-
     const sortedLats = [...lats].sort((a, b) => a - b);
-    const p95Idx = Math.min(sortedLats.length - 1, Math.floor(sortedLats.length * 0.95));
-    const p95L = sortedLats[p95Idx];
+    // Whole-window stats come from the backend's RAW successful-probe samples
+    // (the plotted points are per-step averages). A zoom recomputes from the
+    // visible points. Nearest-rank p95.
+    const st = !zoomed && m.stats && typeof m.stats.avg === 'number' ? m.stats : null;
+    const avgL = st ? st.avg : lats.reduce((a, b) => a + b, 0) / lats.length;
+    const p95L = st && typeof st.p95 === 'number' ? st.p95 : sortedLats[Math.max(0, Math.ceil(sortedLats.length * 0.95) - 1)];
+    const maxL = st && typeof st.max === 'number' ? st.max : Math.max(...lats);
 
     // Update Header Summary Cards strictly based on visible activePoints
     // Colour by value against the target's threshold, not by which column it
@@ -898,6 +1034,12 @@ class _DrawerMethods {
       el.style.color = latencyColor(val, statThreshold);
     };
     paint(statNow, nowVal);
+    // "Current" only if the last sample is recent; otherwise say how old it is.
+    const nowLabel = statNow && statNow.previousElementSibling;
+    // A window that ends in the past has no "current" value — only its last.
+    const live = !zoomed && (m.end || 0) >= Date.now() / 1000 - gapSec;
+    const stale = live && (Math.floor(Date.now() / 1000) - lastT) > gapSec;
+    if (nowLabel) nowLabel.textContent = !live ? 'Last' : (stale ? `Last · ${this._compactDur(Date.now() / 1000 - lastT)} ago` : 'Current');
     paint(statAvg, avgL);
     paint(statP95, p95L);
     paint(statMax, maxL);
@@ -933,7 +1075,9 @@ class _DrawerMethods {
     }
 
     // Dynamic Adaptive Nice Scale Math
-    const niceScale = calculateNiceScale(minL, maxL, 4);
+    // Scale to what is PLOTTED (per-step averages); MAX may be a single raw
+    // spike far above them and would flatten the line against the floor.
+    const niceScale = calculateNiceScale(minL, Math.max(...lats), 4);
     const rangeMin = niceScale.niceMin;
     const rangeMax = niceScale.niceMax;
     const rangeSpan = Math.max(0.001, rangeMax - rangeMin);
@@ -944,10 +1088,6 @@ class _DrawerMethods {
     const padBottom = 10;
     const drawHeight = height - padTop - padBottom;
 
-    const t0 = activePoints[0][0];
-    const tN = activePoints[activePoints.length - 1][0];
-    const dt = Math.max(1, tN - t0);
-
     const pts = activePoints.map(p => {
       const x = (((p[0] - t0) / dt) * width).toFixed(1);
       const yRatio = (p[1] - rangeMin) / rangeSpan;
@@ -955,9 +1095,29 @@ class _DrawerMethods {
       return { x: parseFloat(x), y: parseFloat(y), t: p[0], val: p[1] };
     });
 
-    const lineD = 'M' + pts.map(p => `${p.x},${p.y}`).join(' L');
     const bottomY = (height - padBottom - (((0 - rangeMin) / rangeSpan) * drawHeight)).toFixed(1);
-    const areaD = `${lineD} L${width},${bottomY} L0,${bottomY}Z`;
+    // Split into runs at telemetry gaps; each run gets its own line + area.
+    const runs = [];
+    pts.forEach((p, i) => {
+      if (i === 0 || p.t - pts[i - 1].t > gapSec) runs.push([]);
+      runs[runs.length - 1].push(p);
+    });
+    const lineD = runs.map(r => 'M' + r.map(p => `${p.x},${p.y}`).join(' L') + (r.length === 1 ? ` L${(r[0].x + 1.5).toFixed(1)},${r[0].y}` : '')).join(' ');
+    const areaD = runs.map(r => `M${r[0].x},${bottomY} L` + r.map(p => `${p.x},${p.y}`).join(' L') + ` L${r[r.length - 1].x},${bottomY}Z`).join(' ');
+    // Shade where there was no data: before the first run, between runs,
+    // after the last one.
+    const xAt = t => Math.max(0, Math.min(width, ((t - t0) / dt) * width));
+    const holes = [];
+    if (pts[0].t - t0 > gapSec) holes.push([t0, pts[0].t]);
+    for (let i = 1; i < runs.length; i++) holes.push([runs[i - 1][runs[i - 1].length - 1].t, runs[i][0].t]);
+    if (tN - lastT > gapSec) holes.push([lastT, tN]);
+    // Failed-probe runs: the host was probed and did NOT answer — an outage,
+    // drawn red. Only the rest of a hole is gray "no telemetry".
+    const failRuns = (m.failed || [])
+      .map(f => [Math.max(t0, f[0] - (m.step || 0) / 2), Math.min(tN, f[1] + (m.step || 0) / 2), f[2], f[3]])
+      .filter(f => f[1] > f[0]);
+    const failRects = failRuns.map(([a, b]) => `<rect x="${xAt(a).toFixed(1)}" y="0" width="${Math.max(1, xAt(b) - xAt(a)).toFixed(1)}" height="${height}" fill="rgba(239,68,68,0.16)"/>`).join('');
+    const gapRects = holes.map(([a, b]) => `<rect x="${xAt(a).toFixed(1)}" y="0" width="${Math.max(0, xAt(b) - xAt(a)).toFixed(1)}" height="${height}" fill="rgba(148,163,184,0.08)"/>`).join('');
 
     // Grid lines & Y-axis labels matching dynamic tick positions
     const gridLines = [];
@@ -975,14 +1135,17 @@ class _DrawerMethods {
       rightLabels.push(`<span style="position:absolute; left:0; top:${topPct}%; transform:translateY(-50%); font-size:10.5px; font-family:var(--font-mono); color:var(--text-secondary); opacity:0.85; white-space:nowrap;">${formattedVal}</span>`);
     });
 
-    // Time axis label formatting helper
+    // Time labels: date + time whenever the window spans more than one day
+    // (a 7d chart used to print bare "10.06.54"); seconds only under 1h.
+    const spansDays = new Date(t0 * 1000).toDateString() !== new Date(tN * 1000).toDateString();
     const fmtTime = (ts) => {
       const d = new Date(ts * 1000);
-      const isLongRange = (tN - t0) > 86400; // >24h
-      if (isLongRange) {
-        return d.toLocaleDateString(DATE_LOCALE, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+      if (spansDays || dt > 86400) {
+        return d.toLocaleString(DATE_LOCALE, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
       }
-      return d.toLocaleTimeString(DATE_LOCALE, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      return d.toLocaleTimeString(DATE_LOCALE, dt <= 3600
+        ? { hour: '2-digit', minute: '2-digit', second: '2-digit' }
+        : { hour: '2-digit', minute: '2-digit' });
     };
 
     const t0Str = fmtTime(t0);
@@ -1005,6 +1168,8 @@ class _DrawerMethods {
           <svg class="sparkline" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
             ${defsHtml}
             ${gridLines.join('')}
+            ${gapRects}
+            ${failRects}
             <path class="spark-area" d="${areaD}" fill="url(#sgAreaGrad)"/>
             <path class="spark-line" d="${lineD}" fill="none" stroke="url(#sgLineGrad)" stroke-width="1.8" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
@@ -1017,6 +1182,10 @@ class _DrawerMethods {
           ${rightLabels.join('')}
         </div>
       </div>
+      ${failRuns.length || holes.length ? `<div style="display:flex; gap:12px; justify-content:flex-end; font-size:10px; color:var(--text-secondary); margin-top:4px;">
+        ${failRuns.length ? '<span><span style="display:inline-block; width:10px; height:8px; background:rgba(239,68,68,0.35); margin-right:4px;"></span>probe failed</span>' : ''}
+        ${holes.length ? '<span><span style="display:inline-block; width:10px; height:8px; background:rgba(148,163,184,0.25); margin-right:4px;"></span>no data</span>' : ''}
+      </div>` : ''}
       <div class="sparkline-x-axis" style="display:flex; justify-content:space-between; font-size:10px; font-family:var(--font-mono); color:var(--text-secondary); margin-top:8px; padding:6px 54px 0 54px; border-top:1px dashed rgba(255,255,255,0.08);">
         <span>${t0Str}</span>
         <span>${tMidStr}</span>
@@ -1107,13 +1276,27 @@ class _DrawerMethods {
       dot.style.background = valColor;
       dot.style.boxShadow = `0 0 8px ${valColor}`;
 
-      const dObj = new Date(closest.t * 1000);
-      const timeLabel = dObj.toLocaleTimeString(DATE_LOCALE, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const timeLabel = fmtTime(closest.t);
+      // Over a gap: say so instead of snapping to a sample hours away —
+      // and tell a failed probe (outage) apart from missing telemetry.
+      if (minDiff > gapSec) {
+        const run = failRuns.find(f => targetT >= f[0] && targetT <= f[1]);
+        const why = run
+          ? `<span style="color:#EF4444;">probe failed${run[2] ? ` (HTTP ${run[2]})` : ' (no response)'}</span>`
+          : 'no data';
+        tooltip.innerHTML = `<div style="font-weight:600; color:var(--text-secondary); font-size:10px;">${fmtTime(targetT)} · ${why}</div>`;
+        dot.style.display = 'none';
+        tooltip.style.left = `${Math.max(45, Math.min(rect.width - 45, (clientX - rect.left)))}px`;
+        tooltip.style.top = '20px';
+        tooltip.style.display = 'block';
+        return;
+      }
+      const avgNote = typicalStep >= 60 ? ` <span style="opacity:.7;">(avg of ${this._compactDur(typicalStep)})</span>` : '';
       const statusText = closest.val === 0 ? 'DOWN' : (latencySeverity(closest.val, slowThresholdMs(this.selectedTarget)) === 'ok' ? 'UP' : 'SLOW');
 
       tooltip.innerHTML = `
         <div style="font-weight:600; color:var(--text-secondary); margin-bottom:2px; font-size:10px;">Time: <span style="color:#fff;">${timeLabel}</span></div>
-        <div style="font-weight:600; color:var(--text-secondary); margin-bottom:2px; font-size:10px;">Response Time: <span style="color:${valColor}; font-weight:700;">${closest.val.toFixed(1)} ms</span></div>
+        <div style="font-weight:600; color:var(--text-secondary); margin-bottom:2px; font-size:10px;">Response Time: <span style="color:${valColor}; font-weight:700;">${closest.val.toFixed(1)} ms</span>${avgNote}</div>
         <div style="font-weight:600; color:var(--text-secondary); font-size:10px;">Status: <span style="color:${valColor}; font-weight:700;">${statusText}</span></div>
       `;
       
@@ -1471,8 +1654,7 @@ class _DrawerMethods {
     const isStale = () => seq !== this._targetHistorySeq || this.selectedTarget?.instance !== targetInstance;
 
     const rangeText = this._rangeDisplay();
-    const drawerSparklineRangeEl = document.getElementById('drawerSparklineRange');
-    if (drawerSparklineRangeEl) drawerSparklineRangeEl.textContent = `(${rangeText})`;
+    this._syncRtButtons();
     const historyRangeTag = document.getElementById('historyRangeTag');
     if (historyRangeTag) historyRangeTag.textContent = `History (${rangeText})`;
 
@@ -1497,13 +1679,15 @@ class _DrawerMethods {
       // selected host or range would be worse than none.
       this._lastFailedPoints = (data.ok && Array.isArray(data.failed_points)) ? data.failed_points : [];
 
-      if (data.ok && Array.isArray(data.latency_points) && data.latency_points.length > 1) {
-        this._renderSparkline(data.latency_points);
-        this._renderHistoryChart(data.latency_points);
+      const hasPts = data.ok && Array.isArray(data.latency_points) && data.latency_points.length > 1;
+      // The Response Time Trend follows this (dashboard-period) load only while
+      // the card has no range of its own; otherwise it fetches its own window.
+      if (this._rtRange) {
+        this._loadRtSparkline(targetInstance);
       } else {
-        this._renderSparkline([]);
-        this._renderHistoryChart([]);
+        this._renderSparkline(hasPts ? data.latency_points : [], false, this._rtMetaFrom(data, this._rtWindow()));
       }
+      this._renderHistoryChart(hasPts ? data.latency_points : []);
 
       this._renderDrawerAvailabilityBars(this.selectedTarget, data.latency_points || [], data.events || [], fetchedRangeStart, data.data_start_ts);
 

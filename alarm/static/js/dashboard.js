@@ -456,7 +456,7 @@ export class InstancesPage {
           const drawerUptimeLabel = document.getElementById('drawerUptimeLabel');
           if (drawerUptimeLabel) drawerUptimeLabel.textContent = 'Uptime (Realtime)';
           const drawerSparklineRangeEl = document.getElementById('drawerSparklineRange');
-          if (drawerSparklineRangeEl) drawerSparklineRangeEl.textContent = '(Realtime)';
+          if (drawerSparklineRangeEl && !this._rtRange) drawerSparklineRangeEl.textContent = '(Realtime)';
           // Fleet-aggregate/lowest-availability breakdown is inherently a
           // time-weighted historical metric — doesn't apply to an instant
           // snapshot, so hide the Detail button rather than show stale data.
@@ -681,13 +681,20 @@ export class InstancesPage {
       });
     }
 
-    // Calendar's only job now: pick a date, which retargets the Trend chart's
-    // zoom window (_toggleCalendarDay). No inline detail panel anymore.
+    // Calendar: picking a date zooms the Trend to it (_toggleCalendarDay) and
+    // lists that day's hosts under the grid; a host row opens its drawer.
     const calendarGridEl = document.getElementById('avbCalendarGrid');
     if (calendarGridEl) {
       calendarGridEl.addEventListener('click', e => {
         const cell = e.target.closest('.avb-calendar-cell');
         if (cell && cell.dataset.date) this._toggleCalendarDay(cell.dataset.date);
+      });
+    }
+    const calendarDayEl = document.getElementById('avbCalendarDayDetail');
+    if (calendarDayEl) {
+      calendarDayEl.addEventListener('click', e => {
+        const row = e.target.closest('.avb-cal-host');
+        if (row && row.dataset.instance) this._openHostFromInstance(row.dataset.instance);
       });
     }
     const calendarWorstToggleBtn = document.getElementById('avbCalendarWorstToggle');
@@ -796,30 +803,19 @@ export class InstancesPage {
       modalCloseBottomBtn.addEventListener('click', () => this._closeDrawer());
     }
 
-    // Sparkline Time Range selector buttons (5m, 15m, 1h, 6h, 24h, 7d)
+    // Response Time Trend range buttons. They set the CARD's own range
+    // (_setRtRange) — they used to write this.periodMinutes/periodLabel, the
+    // dashboard-wide period, so picking "5m" here silently switched the
+    // dashboard's Availability card (and every drawer section) to 5m too.
     const spRangeGroup = document.getElementById('spRangeGroup');
     if (spRangeGroup) {
       spRangeGroup.addEventListener('click', e => {
         const btn = e.target.closest('[data-range]');
-        if (!btn) return;
-        const range = btn.dataset.range;
-        const presets = { '5m': 5, '15m': 15, '1h': 60, '6h': 360, '24h': 1440, '7d': 10080 };
-        this.periodMinutes = presets[range] || 1440;
-        this.periodLabel = range;
-        this.periodEnd = null;
-        this._sparklineZoomRange = null;
-        
-        spRangeGroup.querySelectorAll('.sp-range-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-
-        const resetBtn = document.getElementById('sparklineResetZoomBtn');
-        if (resetBtn) resetBtn.style.display = 'none';
-
-        if (this.selectedTarget) {
-          this.loadTargetHistory(this.selectedTarget.instance);
-        }
+        if (btn) this._setRtRange(btn.dataset.range);
       });
     }
+    document.getElementById('spCustomApply')?.addEventListener('click', () => this._applyRtCustomRange());
+    document.getElementById('spCustomCancel')?.addEventListener('click', () => this._closeRtCustomRange());
 
     // Sparkline Reset Zoom button
     const spResetBtn = document.getElementById('sparklineResetZoomBtn');
@@ -1115,7 +1111,7 @@ export class InstancesPage {
         const lastCheckEl = document.getElementById('drawerLastCheck');
         if (lastCheckEl) {
           const upStart = typeof this._upStartMs === 'function' ? this._upStartMs(this.selectedTarget) : null;
-          const upStr = upStart ? ` · Up for ${this._fmtDownAging(Math.max(0, now - upStart))}` : '';
+          const upStr = upStart ? ` · Up for ${this._upAtLeast(this.selectedTarget)}${this._fmtDownAging(Math.max(0, now - upStart))}` : '';
           lastCheckEl.textContent = (this.selectedTarget.lastScrape ? this._relTime(this.selectedTarget.lastScrape) : 'Just now') + upStr;
         }
       }
@@ -1748,7 +1744,15 @@ export class InstancesPage {
     const startMs = this._upStartMs(t);
     if (!startMs) return 'Online';
     const elapsed = Math.max(0, now - startMs);
-    return `Up ${formatDuration(elapsed, { compact })}`;
+    return `Up ${this._upAtLeast(t)}${formatDuration(elapsed, { compact })}`;
+  }
+
+  // "≥" when upSince is where Prometheus's data starts, not an observed
+  // recovery: the host was up at least that long; before it is unknown
+  // (e.g. a telemetry gap — "Up 3d 7h" used to be claimed straight through
+  // two days with no samples).
+  _upAtLeast(t) {
+    return t && t.upSinceBasis === 'telemetry' ? '≥' : '';
   }
 
   // The ONE place an outage's start is resolved, for the tile ticker, the tile
@@ -2533,7 +2537,10 @@ export class InstancesPage {
 
         let uptimeHtml = '';
         if (isUp) {
-          uptimeHtml = `<div class="hc-uptime">${this._esc(this._upAgingFor(t, now))}</div>`;
+          const upTitle = this._upAtLeast(t)
+            ? ` title="${this._esc(`Up at least this long: no telemetry before ${new Date(t.upSince * 1000).toLocaleString(DATE_LOCALE)}`)}"`
+            : '';
+          uptimeHtml = `<div class="hc-uptime"${upTitle}>${this._esc(this._upAgingFor(t, now))}</div>`;
         }
 
         return `<div class="${fullClass}"

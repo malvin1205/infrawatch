@@ -513,6 +513,24 @@
   transition: all var(--t-fast);
 }
 
+.sp-range-group { flex-wrap: wrap; }
+
+/* Custom range row for the Response Time Trend */
+.sp-custom-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-raised);
+}
+.sp-custom-range.hidden { display: none; }
+.sp-custom-field { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); }
+.sp-custom-range .crp-error { flex-basis: 100%; }
+
 .sp-reset-zoom-btn:hover {
   background: rgba(56, 189, 248, 0.2);
 }

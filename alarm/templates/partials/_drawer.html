@@ -108,11 +108,24 @@
                 <button class="sp-range-btn" data-range="6h" type="button">6h</button>
                 <button class="sp-range-btn active" data-range="24h" type="button">24h</button>
                 <button class="sp-range-btn" data-range="7d" type="button">7d</button>
+                <button class="sp-range-btn" data-range="30d" type="button">30d</button>
+                <button class="sp-range-btn" data-range="mtd" type="button" title="Month to date (WIB)">MTD</button>
+                <button class="sp-range-btn" data-range="custom" type="button" aria-haspopup="dialog" aria-controls="spCustomRange">Custom</button>
               </div>
               <button id="sparklineResetZoomBtn" class="sp-reset-zoom-btn" type="button" style="display: none;">
                 <svg aria-hidden="true" focusable="false" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
                 <span>Reset Zoom</span>
               </button>
+            </div>
+
+            <!-- Custom range (Response Time Trend only — the rest of the drawer
+                 keeps following the dashboard's period) -->
+            <div class="sp-custom-range hidden" id="spCustomRange" role="dialog" aria-label="Custom response time range">
+              <label class="sp-custom-field">From <input type="datetime-local" id="spCustomFrom" class="crp-input"></label>
+              <label class="sp-custom-field">To <input type="datetime-local" id="spCustomTo" class="crp-input"></label>
+              <button type="button" class="btn btn-secondary btn-sm" id="spCustomCancel">Cancel</button>
+              <button type="button" class="btn btn-primary btn-sm" id="spCustomApply">Apply</button>
+              <div class="crp-error hidden" id="spCustomError"></div>
             </div>
 
             <!-- Summary Stats Header Bar -->

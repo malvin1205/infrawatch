@@ -24,6 +24,48 @@ function fmtTargetPct(v) {
 // share one offset so they can never disagree about which day/hour an event
 // falls in.
 const WIB_OFFSET_SEC = 7 * 3600;
+// Horizontal pointer travel before a press on a time-series plot counts as a
+// drag-to-zoom instead of a click (see _attachZoomDrag).
+const AVB_DRAG_PX = 8;
+
+// Monotone cubic interpolation (Fritsch–Carlson / d3.curveMonotoneX) through
+// [[x, y], ...] with increasing x. Returns the SVG path continuation
+// (" C…" segments, to follow an M/L at pts[0]) and at(x) evaluating the same
+// curve, so a hover dot sits exactly on the drawn line. Monotone: between two
+// points the curve never leaves their y-range, so no fake overshoot.
+export function monotoneCurve(pts) {
+  const n = pts.length;
+  if (n < 2) return { d: '', at: () => (n ? pts[0][1] : null) };
+  const h = [], m = [];
+  for (let i = 0; i < n - 1; i++) {
+    h[i] = pts[i + 1][0] - pts[i][0] || 1e-9;
+    m[i] = (pts[i + 1][1] - pts[i][1]) / h[i];
+  }
+  const t = new Array(n);
+  t[0] = m[0];
+  t[n - 1] = m[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    t[i] = m[i - 1] * m[i] <= 0 ? 0
+      : 3 * (h[i - 1] + h[i]) / ((2 * h[i] + h[i - 1]) / m[i - 1] + (h[i] + 2 * h[i - 1]) / m[i]);
+  }
+  let d = '';
+  for (let i = 0; i < n - 1; i++) {
+    const [xa, ya] = pts[i], [xb, yb] = pts[i + 1], k = h[i] / 3;
+    d += ` C${(xa + k).toFixed(2)} ${(ya + t[i] * k).toFixed(2)} ${(xb - k).toFixed(2)} ${(yb - t[i + 1] * k).toFixed(2)} ${xb.toFixed(2)} ${yb.toFixed(2)}`;
+  }
+  const at = x => {
+    if (x <= pts[0][0]) return pts[0][1];
+    if (x >= pts[n - 1][0]) return pts[n - 1][1];
+    let i = 0;
+    while (i < n - 2 && x > pts[i + 1][0]) i++;
+    const u = (x - pts[i][0]) / h[i], u2 = u * u, u3 = u2 * u;
+    return (2 * u3 - 3 * u2 + 1) * pts[i][1] + (u3 - 2 * u2 + u) * h[i] * t[i]
+      + (-2 * u3 + 3 * u2) * pts[i + 1][1] + (u3 - u2) * h[i] * t[i + 1];
+  };
+  return { d, at };
+}
+// Host rows shown in the Trend event-detail panel before "+N more" collapses the rest.
+const AVB_EVD_MAX_ROWS = 5;
 
 class _AvailabilityMethods {
   startAvailabilityPolling() {
@@ -50,7 +92,9 @@ class _AvailabilityMethods {
   _getAvailCacheKey(minutes = this.periodMinutes, job = this.selectedJob, end = this.periodEnd) {
     const epKey = this._activeEndpoint || (this.monitor && this.monitor._activeEndpoint) || 'default';
     const jobKey = (job && job !== 'all') ? job : 'all';
-    const minKey = Math.round(minutes || 1440);
+    // Month-to-date grows a minute every minute; keying it by minutes made
+    // every poll a cache miss and flashed "Updating…" once a minute.
+    const minKey = (this.periodLabel === 'mtd' && !end) ? 'mtd' : Math.round(minutes || 1440);
     const endKey = end ? String(end) : 'live';
     return `${epKey}:${jobKey}:${minKey}:${endKey}`;
   }
@@ -60,6 +104,17 @@ class _AvailabilityMethods {
   // lines up with how uptime is reported and billed to Indonesia-based
   // operators, not with whatever month UTC happens to be in for the last 7
   // hours of it.
+  // Is `data` the report for the current selection (range + job)? MTD matches
+  // a report up to an hour old — its minute count grows every minute.
+  _dataMatchesSelection(data) {
+    if (!data) return false;
+    const job = (this.selectedJob && this.selectedJob !== 'all') ? this.selectedJob : 'all';
+    if ((data.job || 'all') !== job) return false;
+    const got = Math.round(data.period_minutes || 0), want = Math.round(this.periodMinutes);
+    if (this.periodLabel === 'mtd' && !this.periodEnd) return got <= want && want - got <= 60;
+    return got === want;
+  }
+
   _monthToDateMinutes() {
     const wibNow = new Date(Date.now() + WIB_OFFSET_SEC * 1000);
     const monthStartWib = Date.UTC(wibNow.getUTCFullYear(), wibNow.getUTCMonth(), 1);
@@ -159,8 +214,8 @@ class _AvailabilityMethods {
     // reaches its own label writes, leaving the previous range's name behind.
     const drawerUptimeLabelEl = document.getElementById('drawerUptimeLabel');
     if (drawerUptimeLabelEl) drawerUptimeLabelEl.textContent = `Uptime (${label})`;
-    const drawerSparklineRangeEl2 = document.getElementById('drawerSparklineRange');
-    if (drawerSparklineRangeEl2) drawerSparklineRangeEl2.textContent = `(${label})`;
+    // Response Time Trend title follows the card's own range when it has one.
+    if (typeof this._syncRtButtons === 'function') this._syncRtButtons();
 
     // Refresh drawer uptime figure if a host is currently open
     if (this.selectedTarget) this._updateDrawerUptime(this.selectedTarget);
@@ -189,6 +244,12 @@ class _AvailabilityMethods {
     // Realtime mode is driven entirely by the live /instances poll (see
     // _updateStats()) — no historical Prometheus aggregate to fetch here.
     if (this.isRealtime) return;
+
+    // MTD is anchored to 00:00 WIB on the 1st, not a fixed length: recompute
+    // on every load (the 15s poll included). Computed once at selection, the
+    // window slid forward as a rolling N-minute range — dropping the 1st's
+    // early hours, and spanning the previous month after a rollover.
+    if (this.periodLabel === 'mtd' && !this.periodEnd) this.periodMinutes = this._monthToDateMinutes();
 
     const cacheKey = this._getAvailCacheKey();
     const now = Date.now();
@@ -240,19 +301,15 @@ class _AvailabilityMethods {
     const isStale = () => seq !== this._availRequestSeq;
 
     this._availLoading = true;
-    const currentJobKey = (this.selectedJob && this.selectedJob !== 'all') ? this.selectedJob : 'all';
-    const hasMatchingData = this.availabilityBreakdown &&
-      Math.round(this.availabilityBreakdown.period_minutes || 0) === Math.round(this.periodMinutes) &&
-      ((this.availabilityBreakdown.job || 'all') === currentJobKey);
-    this._updateAvailLoadingUI(!hasMatchingData);
+    this._updateAvailLoadingUI(!this._dataMatchesSelection(this.availabilityBreakdown));
 
     const rangeText = this._rangeDisplay();
 
     if (this.availabilityLabel) this.availabilityLabel.textContent = `Availability (${rangeText})`;
     const drawerUptimeLabel = document.getElementById('drawerUptimeLabel');
     if (drawerUptimeLabel) drawerUptimeLabel.textContent = `Uptime (${rangeText})`;
-    const drawerSparklineRangeEl = document.getElementById('drawerSparklineRange');
-    if (drawerSparklineRangeEl) drawerSparklineRangeEl.textContent = `(${rangeText})`;
+    // The Response Time Trend card has its own range once its buttons are used.
+    if (typeof this._syncRtButtons === 'function') this._syncRtButtons();
 
     // Must outlast the backend's slowest honest answer: the hybrid path
     // (MTD/30d while SQLite history is still being backfilled) runs ~30s
@@ -371,9 +428,20 @@ class _AvailabilityMethods {
     if (this.periodLabel !== 'custom') this._setActiveRangeChip(this.periodLabel);
   }
 
+  // The custom-range inputs are WIB wall-clock time, like every label in the
+  // modal — never the browser's own timezone (an operator abroad picking
+  // "00:00" used to get 00:00 of THEIR zone, i.e. 07:00 WIB in UTC).
   _toDatetimeLocalValue(date) {
+    const d = new Date(date.getTime() + WIB_OFFSET_SEC * 1000);
     const pad = n => String(n).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  }
+
+  // "YYYY-MM-DDTHH:MM" read as WIB -> Date, or an invalid Date.
+  _parseWibLocal(val) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(val || '');
+    if (!m) return new Date(NaN);
+    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) - WIB_OFFSET_SEC * 1000);
   }
 
   _applyCustomRange() {
@@ -391,8 +459,8 @@ class _AvailabilityMethods {
       return;
     }
 
-    const fromDate = new Date(fromVal);
-    const toDate = new Date(toVal);
+    const fromDate = this._parseWibLocal(fromVal);
+    const toDate = this._parseWibLocal(toVal);
 
     if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
       showError('Please select a valid date & time');
@@ -963,6 +1031,10 @@ class _AvailabilityMethods {
     if (modalRangeSelect) {
       if (this.periodLabel === 'mtd') {
         modalRangeSelect.value = 'mtd';
+      } else if (this.periodLabel === 'custom') {
+        // Hidden, disabled option: shows "Custom range" without being pickable
+        // (a custom range is set from the dashboard's range popover).
+        modalRangeSelect.value = 'custom';
       } else {
         const curMins = Math.round(this.periodMinutes);
         const matchingOpt = Array.from(modalRangeSelect.options).find(o => Math.round(parseFloat(o.value)) === curMins);
@@ -986,14 +1058,10 @@ class _AvailabilityMethods {
       }
     }
 
-    const currentMins = Math.round(this.periodMinutes);
-    const currentJob = (this.selectedJob && this.selectedJob !== 'all') ? this.selectedJob : 'all';
     const cacheKey = this._getAvailCacheKey();
     const cached = this._availCache.get(cacheKey);
 
-    if (cached && cached.data &&
-        Math.round(cached.data.period_minutes || 0) === currentMins &&
-        ((cached.data.job || 'all') === currentJob)) {
+    if (cached && cached.data && this._dataMatchesSelection(cached.data)) {
       // Modal is already unhidden above, so _applyAvailabilityData's own
       // modal-open check already triggers a render — a second explicit call
       // here just re-renders the same data.
@@ -1073,6 +1141,27 @@ class _AvailabilityMethods {
   }
 
   // Human duration label for an offset of `sec` seconds before "now".
+  // WIB calendar date key ('2026-09-27') of an epoch second.
+  _wibDateKey(ts) {
+    return new Date((ts + WIB_OFFSET_SEC) * 1000).toISOString().slice(0, 10);
+  }
+
+  // Compact duration for tight cells/rows: 45s, 12m, 3h, 3h 5m, 2d 4h.
+  _compactDur(sec) {
+    const s = Math.max(0, Math.round(sec || 0));
+    if (s < 60) return `${s}s`;
+    // Round once at the smallest unit shown, then split — rounding each part
+    // separately printed "14h 60m" / "60m".
+    const mins = Math.round(s / 60);
+    if (mins < 60) return `${mins}m`;
+    if (mins < 24 * 60) {
+      const h = Math.floor(mins / 60), m = mins % 60;
+      return m ? `${h}h ${m}m` : `${h}h`;
+    }
+    const hrs = Math.round(s / 3600), dd = Math.floor(hrs / 24), h = hrs % 24;
+    return h ? `${dd}d ${h}h` : `${dd}d`;
+  }
+
   _trendOffsetLabel(sec) {
     if (sec <= 60) return 'now';
     if (sec < 3600) return `-${Math.round(sec / 60)}m`;
@@ -1086,10 +1175,14 @@ class _AvailabilityMethods {
   // Rail): the Trend point and the rail segment for the same moment must
   // show the same number, or correlating a dip here with the rail below
   // means doing timezone math by hand.
+  //
+  // Time-only is used only when the visible window sits inside ONE WIB day
+  // (_trendSpansDays, set per render). A 29h zoom used to read
+  // "06:08 WIB – 11:42 WIB" — indistinguishable from a 5h one.
   _trendTsLabel(ts, windowSec, isEnd = false, startTs = 0) {
     const d = new Date((ts + WIB_OFFSET_SEC) * 1000);
     const pad = n => String(n).padStart(2, '0');
-    if (windowSec <= 86400 * 2) {
+    if (windowSec <= 86400 * 2 && !this._trendSpansDays) {
       const hh = d.getUTCHours(), mm = d.getUTCMinutes();
       // A full-day zoom's end lands on 00:00 of the NEXT day — say "24:00" of
       // the day it's closing out, same convention as the Calendar's day-detail
@@ -1112,9 +1205,75 @@ class _AvailabilityMethods {
   // window not yet reflected on `this._trendZoom` (avoids a stale-frame
   // flash); normal calls (poll refresh, tab switch) omit it and read
   // this._trendZoom as usual.
+  // Start of the slot a trend point summarizes. Points sit on WIB-aligned slot
+  // boundaries (helpers._build_fleet_trend key_of), except the in-progress one,
+  // which is clipped to the window end — so the slot is (aligned floor, ts], not
+  // (ts - bucket, ts]: the latter claimed up to a whole bucket of time before an
+  // in-progress point that it never covered.
+  _trendSlotStart(ts, bucketSec) {
+    const b = bucketSec || 3600;
+    return Math.floor((ts - 1 + WIB_OFFSET_SEC) / b) * b - WIB_OFFSET_SEC;
+  }
+
+  // The chart's one geometry model — drawing, hover, pin and click all read
+  // it, so a band can never say "no telemetry" where the tooltip reads a value.
+  //   slots    — priced points with their [lo, hi] (clipped to the window)
+  //   segments — runs of touching priced slots (the drawn line pieces)
+  //   partials — [lo, hi, point] of too-few-hosts slots
+  //   gaps     — [lo, hi] with neither: no telemetry. Never bridged, never
+  //              extended: the line stops where its last slot stops.
+  _trendGeometry(pts, partialPts, startTs, endTs, bucketSec) {
+    const clip = (a, b) => [Math.max(a, startTs), Math.min(b, endTs)];
+    const slots = pts.map(p => {
+      const [lo, hi] = clip(this._trendSlotStart(p.ts, bucketSec), p.ts);
+      return { p, lo, hi };
+    }).filter(s => s.hi > s.lo);
+    const segments = [];
+    for (const s of slots) {
+      const cur = segments[segments.length - 1];
+      if (cur && s.lo <= cur[cur.length - 1].hi + 1) cur.push(s);
+      else segments.push([s]);
+    }
+    const partials = partialPts.map(p => {
+      const [lo, hi] = clip(this._trendSlotStart(p.ts, bucketSec), p.ts);
+      return [lo, hi, p];
+    }).filter(([lo, hi]) => hi > lo);
+    const covered = [...slots.map(s => [s.lo, s.hi]), ...partials.map(([lo, hi]) => [lo, hi])]
+      .sort((a, b) => a[0] - b[0]);
+    const gaps = [];
+    let cursor = startTs;
+    for (const [lo, hi] of covered) {
+      if (lo > cursor) gaps.push([cursor, lo]);
+      cursor = Math.max(cursor, hi);
+    }
+    if (endTs > cursor) gaps.push([cursor, endTs]);
+    return { slots, segments, partials, gaps };
+  }
+
+  // What the chart shows at `ts`: { kind: 'value', p } inside a priced slot,
+  // { kind: 'partial', p } inside a too-few-hosts slot, else { kind: 'gap' }.
+  _trendHoverInfo(ts, st) {
+    const slot = this._trendSlotAt(ts, st);
+    if (slot) return { kind: 'value', p: slot };
+    const part = st && (st.partials || []).find(([lo, hi]) => ts > lo && ts <= hi);
+    if (part) return { kind: 'partial', p: part[2] };
+    return { kind: 'gap' };
+  }
+
+  // Tooltip text for a moment the chart has NO value for.
+  _trendGapText(ts, st, info) {
+    const when = this._trendTsLabel(ts, st.windowSec);
+    if (info.kind === 'partial') {
+      const q = info.p;
+      return `${when} · Partial Telemetry: ${q.hosts_reporting}/${q.hosts_expected} hosts reporting` +
+        (typeof st.minReportingPct === 'number' ? ` (below ${st.minReportingPct}% coverage threshold)` : '');
+    }
+    return `${when} · Telemetry Gap: no samples here (Prometheus unreachable, scrape stopped, or not aggregated yet)`;
+  }
+
   _renderAvailabilityTrend(data, zoomOverride) {
     const plot = document.getElementById('avbTrendPlot');
-    if (!plot) return;
+    if (!plot || !data) return;
     const section = plot.closest('.avb-trend-section');
     const emptyEl = plot.querySelector('.avb-trend-empty');
     const gridLabels = plot.querySelectorAll('.avb-trend-grid span i');
@@ -1129,33 +1288,49 @@ class _AvailabilityMethods {
       ? data.trend_start_ts
       : fullEnd - 86400;
 
-    const bucketSec = typeof data.trend_bucket_seconds === 'number' ? data.trend_bucket_seconds : 3600;
-
-    if (!this._trendZoom || (typeof this._trendZoom.lo === 'number' && typeof this._trendZoom.hi === 'number' && (this._trendZoom.lo >= fullEnd || this._trendZoom.hi <= fullStart || this._trendZoom.lo >= this._trendZoom.hi))) {
+    // A zoom whose `hi` is null follows the live edge (a Calendar "today"
+    // selection, or a drag ending at "now"): it keeps growing with every poll
+    // instead of freezing at the moment it was made.
+    const z = this._trendZoom;
+    if (!z || (typeof z.lo === 'number' && (z.lo >= fullEnd || (typeof z.hi === 'number' && (z.hi <= fullStart || z.lo >= z.hi))))) {
       this._trendZoom = { lo: null, hi: null };
     }
     const zoom = zoomOverride || this._trendZoom;
-
-    const allPts = Array.isArray(data && data.trend)
-      ? data.trend.filter(p => p && typeof p.ts === 'number' && typeof p.availability_pct === 'number')
-      : [];
-    allPts.sort((a, b) => a.ts - b.ts);
-    // availability_pct === null = too few hosts reported that slot to price the
-    // fleet (see _build_fleet_trend). Drawn as a gray band that breaks the line,
-    // never as a value on it.
-    const allPartial = Array.isArray(data && data.trend)
-      ? data.trend.filter(p => p && typeof p.ts === 'number' && p.availability_pct === null)
-      : [];
 
     const startTs = (typeof zoom.lo === 'number') ? Math.max(fullStart, zoom.lo) : fullStart;
     const endTs = (typeof zoom.hi === 'number') ? Math.min(fullEnd, zoom.hi) : fullEnd;
     const windowSec = Math.max(1, endTs - startTs);
     const isZoomed = startTs > fullStart + 1 || endTs < fullEnd - 1;
-    const pts = allPts.filter(p => p.ts >= startTs && (p.ts <= endTs || (p.ts - bucketSec < endTs && Math.abs(endTs - fullEnd) < 60)));
-    const partialPts = allPartial.filter(p => p.ts > startTs && p.ts - bucketSec < endTs);
+
+    // Zoomed: draw the series re-sliced for exactly this window (finer slots,
+    // see _ensureTrendDetail) once it has arrived. The report's own trend is
+    // sized for the whole range — a 30d report is 4h slots — so zooming it
+    // only magnified 4h blocks.
+    const detail = isZoomed ? this._trendDetailFor(startTs, endTs, data) : null;
+    const src = detail || data;
+    const bucketSec = typeof src.trend_bucket_seconds === 'number' ? src.trend_bucket_seconds : 3600;
+    if (isZoomed) this._ensureTrendDetail(startTs, endTs, data);
+
+    const allPts = Array.isArray(src && src.trend)
+      ? src.trend.filter(p => p && typeof p.ts === 'number' && typeof p.availability_pct === 'number')
+      : [];
+    allPts.sort((a, b) => a.ts - b.ts);
+    // availability_pct === null = too few hosts reported that slot to price the
+    // fleet (see _build_fleet_trend). Drawn as a gray band that breaks the line,
+    // never as a value on it.
+    const allPartial = Array.isArray(src && src.trend)
+      ? src.trend.filter(p => p && typeof p.ts === 'number' && p.availability_pct === null).sort((a, b) => a.ts - b.ts)
+      : [];
+    // A slot is on screen when any of it (slotStart, ts] is inside the window.
+    const inView = p => p.ts > startTs && this._trendSlotStart(p.ts, bucketSec) < endTs;
+    const pts = allPts.filter(inView);
+    const partialPts = allPartial.filter(inView);
 
     const resetBtn = document.getElementById('avbTrendZoomReset');
     if (resetBtn) resetBtn.classList.toggle('hidden', !isZoomed);
+    // Drives the date-vs-time choice in _trendTsLabel for every label below
+    // (caption, ticks, tooltips, event detail) — see there.
+    this._trendSpansDays = this._wibDateKey(startTs) !== this._wibDateKey(endTs - 1);
 
     // Caption reflects the active range (drives from periodLabel, same source
     // as every other "Availability (…)" label in the modal) — or the zoomed
@@ -1163,16 +1338,30 @@ class _AvailabilityMethods {
     // chart is actually showing.
     if (subEl) {
       subEl.textContent = isZoomed
-        ? `· zoomed to ${this._trendTsLabel(startTs, windowSec)} – ${this._trendTsLabel(endTs, windowSec, true, startTs)}`
+        ? (this._trendSpansDays
+          ? `· zoomed to ${this._trendTsLabel(startTs, windowSec)} – ${this._trendTsLabel(endTs, windowSec, true, startTs)}`
+          // Inside one day the times alone ("00:00 – 24:00") never said WHICH day.
+          : `· zoomed to ${this._calendarDayLabel(this._wibDateKey(startTs))}, ${this._trendTsLabel(startTs, windowSec)} – ${this._trendTsLabel(endTs, windowSec, true, startTs)}`)
         : (this.periodLabel === 'mtd' ? '· month to date'
           : this.periodLabel === 'custom' ? '· selected range'
             : `· last ${this.periodLabel || '24h'}`);
+      if (isZoomed && zoom.hi === null) subEl.textContent += ' (live)';
+      if (isZoomed && !detail && this._trendDetailPending) subEl.textContent += ' · loading detail…';
     }
     // 5 evenly spaced x-axis ticks across the visible window.
     if (xAxisSpans.length === 5) {
       for (let i = 0; i < 5; i++) {
+        const tickTs = startTs + windowSec * (i / 4);
+        // Zoomed across midnight: prefix the date on the first tick and on
+        // every tick that lands on a new WIB day ("Sep 28 04:18"), so a 29h
+        // zoom can't pass for a 5h one.
+        // The end tick at exactly 00:00 reads "24:00" of the day it closes.
+        const keyTs = i === 4 ? tickTs - 1 : tickTs;
+        const prevTs = startTs + windowSec * ((i - 1) / 4);
+        const newDay = this._trendSpansDays && (i === 0 || this._wibDateKey(keyTs) !== this._wibDateKey(prevTs));
+        const dateTxt = newDay ? `${this._calendarDayLabel(this._wibDateKey(keyTs)).split(', ')[1]} ` : '';
         xAxisSpans[i].textContent = isZoomed
-          ? this._calendarFormatTime(startTs + windowSec * (i / 4), i === 4, startTs)
+          ? dateTxt + this._calendarFormatTime(tickTs, i === 4, startTs)
           : this._trendOffsetLabel(windowSec * (1 - i / 4));
       }
     }
@@ -1188,8 +1377,32 @@ class _AvailabilityMethods {
     if (pts.length < 1) {
       if (wrap) wrap.remove();
       if (hover) { hover.remove(); }
-      if (emptyEl) emptyEl.classList.remove('hidden');
+      if (emptyEl) {
+        emptyEl.classList.remove('hidden');
+        // "…yet / populates once Prometheus has telemetry" is only true for a
+        // live window; a zoom into a past gap will never fill in.
+        const pEl = emptyEl.querySelector('p'), sEl = emptyEl.querySelector('span');
+        if (pEl && sEl) {
+          if (emptyEl.dataset.p == null) { emptyEl.dataset.p = pEl.textContent; emptyEl.dataset.s = sEl.textContent; }
+          const past = endTs < Date.now() / 1000 - 3600;
+          const partialOnly = partialPts.length > 0;
+          pEl.textContent = partialOnly ? 'Too few hosts reporting to price this window.'
+            : isZoomed || past ? 'No telemetry in this window.' : emptyEl.dataset.p;
+          sEl.textContent = partialOnly
+            ? `Fewer than ${typeof data.trend_min_reporting_pct === 'number' ? data.trend_min_reporting_pct : 50}% of hosts reported in every slot — a value here would describe a handful of hosts, not the fleet.`
+            : isZoomed || past
+              ? `Prometheus has no samples for ${this._trendTsLabel(startTs, windowSec)} – ${this._trendTsLabel(endTs, windowSec, true, startTs)}${isZoomed ? ' — Reset zoom for the full range.' : '.'}`
+              : emptyEl.dataset.s;
+        }
+      }
       resetGrid();
+      const staleNote = document.getElementById('avbTrendTargetNote');
+      if (staleNote) staleNote.innerHTML = '';
+      // Nothing is drawn, so nothing may be hovered or clicked: the previous
+      // render's state and click handler would otherwise pin a stale detail.
+      this._trendHoverState = null;
+      plot.__avbOnClick = null;
+      this._clearTrendHighlight();
       return;
     }
 
@@ -1214,110 +1427,44 @@ class _AvailabilityMethods {
     const yOf = v => clamp(((yMax - v) / (yMax - yMin)) * 100, 0, 100);
     const coords = pts.map(p => [xOf(p.ts), yOf(p.availability_pct)]);
 
-    // ── Missing telemetry / gap detection ──
-    // Points separated by more than gapThreshold represent an unknown / no-data
-    // period (e.g. unreachable Prometheus or missing buckets). We split points
-    // into contiguous valid segments and render gaps as neutral, non-availability
-    // visual markers. Never draw continuous availability across telemetry gaps.
-    const gapThreshold = Math.max(bucketSec * 1.8, 7200);
-
-    const segments = [];
-    const partialBreak = [];  // partialBreak[i]: segments i and i+1 are split by partial-data slots
-    let currentSeg = [];
-    let pi = 0;
-    for (let i = 0; i < pts.length; i++) {
-      const p = pts[i];
-      if (currentSeg.length === 0) {
-        currentSeg.push(p);
-      } else {
-        const prevP = currentSeg[currentSeg.length - 1];
-        let partialBetween = false;
-        while (pi < partialPts.length && partialPts[pi].ts < p.ts) {
-          if (partialPts[pi].ts > prevP.ts) partialBetween = true;
-          pi++;
-        }
-        if (p.ts - prevP.ts <= gapThreshold && !partialBetween) {
-          currentSeg.push(p);
-        } else {
-          segments.push(currentSeg);
-          partialBreak.push(partialBetween);
-          currentSeg = [p];
-        }
-      }
-    }
-    if (currentSeg.length > 0) {
-      segments.push(currentSeg);
-    }
-
+    const geo = this._trendGeometry(pts, partialPts, startTs, endTs, bucketSec);
+    const f = n => n.toFixed(2);
     let validLinesSvg = '';
     let validAreasSvg = '';
+    // Each point is its slot's AVERAGE, placed at the slot's MIDPOINT and
+    // joined by a monotone cubic (d3 curveMonotoneX): smooth, and it never
+    // overshoots — no invented dip below/peak above the neighbouring slots.
+    // Flat half-slot tails show exactly where the segment's coverage starts
+    // and ends. Nothing is ever drawn outside a priced slot: gaps and
+    // partial slots break the line and are never bridged or held.
+    const segments = geo.segments.map(seg => {
+      const mids = seg.map(s => [xOf((s.lo + s.hi) / 2), yOf(s.p.availability_pct)]);
+      const x0 = xOf(seg[0].lo), xEnd = xOf(seg[seg.length - 1].hi);
+      const curve = monotoneCurve(mids);
+      const yFirst = mids[0][1], yLast = mids[mids.length - 1][1];
+      const d = `M${f(x0)} ${f(yFirst)} L${f(mids[0][0])} ${f(yFirst)}${curve.d} L${f(xEnd)} ${f(yLast)}`;
+      validAreasSvg += `<path class="avb-trend-area" d="${d} L${f(xEnd)} 100 L${f(x0)} 100 Z"></path>`;
+      validLinesSvg += `<path class="avb-trend-line" d="${d}" vector-effect="non-scaling-stroke"></path>`;
+      const out = seg.map(s => s.p);
+      out._curve = { x0, xEnd, mids, at: curve.at };
+      return out;
+    });
+
+    // No-telemetry bands, exactly where the geometry says there is no slot.
+    // Sub-minute slivers (the in-progress edge lagging "now" by a scrape) are
+    // not worth a legend entry but are still not drawn as values.
     let gapBandsSvg = '';
-    let gapConnectorsSvg = '';
-    // No per-point markers: SVG circles in this stretched (preserveAspectRatio
-    // none) viewBox render as wide ovals. The hover/pin dot marks a point.
     let hasGaps = false;
-
-    // Leading gap (telemetry begins after startTs)
-    if (pts.length > 0 && (pts[0].ts - startTs) > gapThreshold) {
-      // Legend entry only if this stretch isn't already explained by partial-coverage bands.
-      if (!partialPts.some(q => q.ts <= pts[0].ts)) hasGaps = true;
-      const x1 = xOf(pts[0].ts);
-      gapBandsSvg += `<rect class="avb-trend-gap-band" x="0" y="0" width="${x1.toFixed(2)}" height="100"></rect>`;
+    for (const [lo, hi] of geo.gaps) {
+      const x1 = xOf(lo), x2 = xOf(hi);
+      if (x2 - x1 <= 0) continue;
+      gapBandsSvg += `<rect class="avb-trend-gap-band" x="${f(x1)}" y="0" width="${f(x2 - x1)}" height="100"></rect>`;
+      if (hi - lo >= 60) hasGaps = true;
     }
-
-    // Render each contiguous valid segment and gaps between segments
-    for (let sIdx = 0; sIdx < segments.length; sIdx++) {
-      const seg = segments[sIdx];
-      const isLastSeg = (sIdx === segments.length - 1);
-
-      if (seg.length >= 2) {
-        const segCoords = seg.map(p => [xOf(p.ts), yOf(p.availability_pct)]);
-        // Only extend flat to visible right edge if this is the last segment AND
-        // it reaches within gapThreshold of endTs (in-progress bucket)
-        if (isLastSeg && (endTs - seg[seg.length - 1].ts) <= gapThreshold && segCoords[segCoords.length - 1][0] < 99.95) {
-          segCoords.push([100, segCoords[segCoords.length - 1][1]]);
-          seg._extendedRight = true;
-        }
-        const sLineD = segCoords.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`).join(' ');
-        const sAreaD = `${sLineD} L${segCoords[segCoords.length - 1][0].toFixed(2)} 100 L${segCoords[0][0].toFixed(2)} 100 Z`;
-        validAreasSvg += `<path class="avb-trend-area" d="${sAreaD}"></path>`;
-        validLinesSvg += `<path class="avb-trend-line" d="${sLineD}" vector-effect="non-scaling-stroke"></path>`;
-      } else if (seg.length === 1) {
-        // Isolated point (neighbours are gaps/partial): a flat stroke across
-        // the slot it summarizes, (ts - bucketSec, ts] — a line, not a marker.
-        const p = seg[0];
-        const x1 = xOf(p.ts - bucketSec).toFixed(2), x2 = xOf(p.ts).toFixed(2), y = yOf(p.availability_pct).toFixed(2);
-        validAreasSvg += `<path class="avb-trend-area" d="M${x1} ${y} L${x2} ${y} L${x2} 100 L${x1} 100 Z"></path>`;
-        validLinesSvg += `<path class="avb-trend-line" d="M${x1} ${y} L${x2} ${y}" vector-effect="non-scaling-stroke"></path>`;
-      }
-
-      // Gap between this segment and next segment
-      if (sIdx < segments.length - 1) {
-        if (!partialBreak[sIdx]) hasGaps = true;
-        const nextSeg = segments[sIdx + 1];
-        const pBefore = seg[seg.length - 1];
-        const pAfter = nextSeg[0];
-        const x1 = xOf(pBefore.ts), y1 = yOf(pBefore.availability_pct);
-        const x2 = xOf(pAfter.ts), y2 = yOf(pAfter.availability_pct);
-        gapBandsSvg += `<rect class="avb-trend-gap-band" x="${x1.toFixed(2)}" y="0" width="${Math.max(0, x2 - x1).toFixed(2)}" height="100"></rect>`;
-        // Partial-data breaks get their own band below — no dashed bridge implying a value.
-        if (!partialBreak[sIdx]) gapConnectorsSvg += `<line class="avb-trend-gap-connector" x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" vector-effect="non-scaling-stroke"></line>`;
-      }
-    }
-
-    // Trailing gap (telemetry ends before endTs)
-    if (pts.length > 0 && (endTs - pts[pts.length - 1].ts) > gapThreshold) {
-      const lastP = pts[pts.length - 1];
-      if (!partialPts.some(q => q.ts > lastP.ts)) hasGaps = true;
-      const xLast = xOf(lastP.ts);
-      gapBandsSvg += `<rect class="avb-trend-gap-band" x="${xLast.toFixed(2)}" y="0" width="${Math.max(0, 100 - xLast).toFixed(2)}" height="100"></rect>`;
-    }
-
-    // Partial-data slots: each covers (ts - bucketSec, ts].
     let partialBandsSvg = '';
-    for (const p of partialPts) {
-      const x1 = xOf(p.ts - bucketSec), x2 = xOf(p.ts);
-      partialBandsSvg += `<rect class="avb-trend-partial-band" x="${x1.toFixed(2)}" y="0" width="${Math.max(0, x2 - x1).toFixed(2)}" height="100"></rect>`;
+    for (const [lo, hi] of geo.partials) {
+      const x1 = xOf(lo), x2 = xOf(hi);
+      partialBandsSvg += `<rect class="avb-trend-partial-band" x="${f(x1)}" y="0" width="${f(Math.max(0, x2 - x1))}" height="100"></rect>`;
     }
 
     if (!wrap) {
@@ -1342,16 +1489,28 @@ class _AvailabilityMethods {
     this._fleetSweep = this._buildFleetSweep(sweepSource, fullStart, fullEnd);
     const visibleRecoveries = this._fleetSweep.changes.filter(c => c.type === 'recovery' && c.ts >= startTs && c.ts <= endTs);
     const visibleDrops = this._fleetSweep.changes.filter(c => c.type === 'drop' && c.ts >= startTs && c.ts <= endTs);
-    const recoverySvg = visibleRecoveries.length <= 40
-      ? visibleRecoveries.map(c =>
-        `<line class="avb-trend-recovery-tick" x1="${xOf(c.ts).toFixed(2)}" y1="0" x2="${xOf(c.ts).toFixed(2)}" y2="100" vector-effect="non-scaling-stroke"></line>`
-      ).join('')
-      : '';
-    const dropSvg = visibleDrops.length <= 40
-      ? visibleDrops.map(c =>
-        `<line class="avb-trend-drop-tick" x1="${xOf(c.ts).toFixed(2)}" y1="0" x2="${xOf(c.ts).toFixed(2)}" y2="100" vector-effect="non-scaling-stroke"></line>`
-      ).join('')
-      : '';
+    // Up to 40 changes: one tick each. More (exactly during a big incident,
+    // when they matter most) used to draw NOTHING; now they are binned into
+    // ~80 columns across the plot, thicker where more changes landed.
+    const tickSvg = (list, cls) => {
+      if (list.length <= 40) {
+        return list.map(c =>
+          `<line class="${cls}" x1="${xOf(c.ts).toFixed(2)}" y1="0" x2="${xOf(c.ts).toFixed(2)}" y2="100" vector-effect="non-scaling-stroke"></line>`
+        ).join('');
+      }
+      const bins = new Map();
+      list.forEach(c => {
+        const b = Math.min(79, Math.floor(xOf(c.ts) / 1.25));
+        bins.set(b, (bins.get(b) || 0) + 1);
+      });
+      return [...bins].map(([b, n]) => {
+        const x = ((b + 0.5) * 1.25).toFixed(2);
+        const w = Math.min(4, 1 + Math.log2(n)).toFixed(1);
+        return `<line class="${cls}" x1="${x}" y1="0" x2="${x}" y2="100" style="stroke-width:${w}px" vector-effect="non-scaling-stroke"></line>`;
+      }).join('');
+    };
+    const recoverySvg = tickSvg(visibleRecoveries, 'avb-trend-recovery-tick');
+    const dropSvg = tickSvg(visibleDrops, 'avb-trend-drop-tick');
 
     wrap.innerHTML =
       `<svg class="avb-trend-svg" viewBox="0 0 100 100" preserveAspectRatio="none">` +
@@ -1360,7 +1519,6 @@ class _AvailabilityMethods {
       validAreasSvg +
       dropSvg +
       recoverySvg +
-      gapConnectorsSvg +
       validLinesSvg +
       targetSvg +
       `</svg>`;
@@ -1368,24 +1526,27 @@ class _AvailabilityMethods {
     // Legend note for the reference line and telemetry gaps
     const targetNoteEl = document.getElementById('avbTrendTargetNote');
     if (targetNoteEl) {
-      const noteParts = [];
+      // Legend as swatches that look like the marks they explain. Every mark
+      // actually drawn gets an entry — the solid gap band had none before.
+      const chip = (sw, label) => `<span class="avb-lg"><span class="avb-lg-sw ${sw}"></span>${label}</span>`;
+      const parts = [];
       if (targetPct !== null) {
-        if (targetPct < yMin) {
-          noteParts.push(`SLA target ${targetPct}% — below this chart's range`);
-        } else {
-          noteParts.push(`╌╌ SLA target ${targetPct}%`);
-        }
+        parts.push(targetPct < yMin
+          ? `<span class="avb-lg">SLA target ${targetPct}% — below this chart's range</span>`
+          : chip('is-target', `SLA target ${targetPct}%`));
       }
-      if (recoverySvg) noteParts.push('│ green = a host recovered');
-      if (hasGaps) noteParts.push('┈┈ gray dashed = no telemetry / unknown');
-      if (partialPts.length) noteParts.push('▮ gray band = insufficient host coverage');
-      targetNoteEl.textContent = noteParts.join(' · ');
+      if (dropSvg) parts.push(chip('is-drop', 'host went down'));
+      if (recoverySvg) parts.push(chip('is-recovery', 'host recovered'));
+      if (hasGaps) parts.push(chip('is-gap', 'no telemetry'));
+      if (geo.partials.length) parts.push(chip('is-partial', 'too few hosts reporting'));
+      targetNoteEl.innerHTML = parts.join('');
     }
 
     this._entriesByHost = new Map((data.entries || []).map(e => [e.id || e.name, e]));
     this._trendHoverState = {
-      coords, pts, partialPts, segments, yMin, yMax, ySpan: (yMax - yMin) || 1,
-      minReportingPct: data.trend_min_reporting_pct, windowSec, bucketSec, startTs, endTs, gapThreshold,
+      coords, pts, partialPts, segments, partials: geo.partials, gaps: geo.gaps,
+      yMin, yMax, ySpan: (yMax - yMin) || 1,
+      minReportingPct: data.trend_min_reporting_pct, windowSec, bucketSec, startTs, endTs,
       sweep: this._fleetSweep,
     };
     this._renderTrendPin(plot);
@@ -1404,127 +1565,74 @@ class _AvailabilityMethods {
         if (!st || st.coords.length === 0) return;
         const rect = hover.getBoundingClientRect();
         if (!rect.width) return;
+        this._trendHoverClientX = e.clientX;
         const xp = clamp(((e.clientX - rect.left) / rect.width) * 100, 0, 100);
         const hoverTs = st.startTs + (xp / 100) * st.windowSec;
-
-        let best = 0, bd = Infinity;
-        for (let i = 0; i < st.pts.length; i++) {
-          const d = Math.abs(st.pts[i].ts - hoverTs);
-          if (d < bd) { bd = d; best = i; }
-        }
-        const p = st.pts[best];
         const cross = hover.querySelector('.avb-trend-cross');
         const dot = hover.querySelector('.avb-trend-dot');
         const tip = hover.querySelector('.avb-trend-tip');
         cross.style.left = `${xp}%`;
-
-        // Check if cursor is over a telemetry gap (partial coverage or no data)
-        const partial = (st.partialPts || []).find(q => hoverTs > q.ts - st.bucketSec && hoverTs <= q.ts);
-        const isLeadingGap = st.pts.length > 0 && hoverTs < (st.pts[0].ts - st.bucketSec * 0.8) && (st.pts[0].ts - st.startTs) > st.gapThreshold;
-        const isTrailingGap = st.pts.length > 0 && hoverTs > (st.pts[st.pts.length - 1].ts + st.gapThreshold);
-        let isBetweenGap = false;
-        if (!isLeadingGap && !isTrailingGap && st.segments && st.segments.length > 1) {
-          for (let sIdx = 0; sIdx < st.segments.length - 1; sIdx++) {
-            const segA = st.segments[sIdx], segB = st.segments[sIdx + 1];
-            const endA = segA[segA.length - 1].ts;
-            const startB = segB[0].ts;
-            if (hoverTs > endA && hoverTs < startB && (startB - endA) > st.gapThreshold) {
-              isBetweenGap = true;
-              break;
-            }
-          }
-        }
-        const isOverGap = partial || isLeadingGap || isTrailingGap || isBetweenGap;
-        if (isOverGap) {
+        tip.style.left = `${xp}%`;
+        tip.classList.toggle('flip-x', xp > 62);
+        tip.classList.toggle('edge-left', xp < 38);
+        const info = this._trendHoverInfo(hoverTs, st);
+        if (info.kind !== 'value') {
+          // Gap or partial slot: no dot, no value — the same answer the band gives.
           dot.style.display = 'none';
-          tip.textContent = partial
-            ? `${this._trendTsLabel(partial.ts, st.windowSec)} · Partial Telemetry: ${partial.hosts_reporting}/${partial.hosts_expected} hosts reporting` +
-              (typeof st.minReportingPct === 'number' ? ` (below ${st.minReportingPct}% coverage threshold)` : '')
-            : `${this._trendTsLabel(hoverTs, st.windowSec)} · Telemetry Gap: No scrape data (Prometheus unreachable or scrape stopped during this window)`;
-          tip.style.left = `${xp}%`;
-          tip.style.top = `50%`;
-          tip.classList.toggle('flip-x', xp > 62);
-          tip.classList.toggle('edge-left', xp < 38);
+          tip.textContent = this._trendGapText(hoverTs, st, info);
+          tip.style.top = '50%';
           tip.classList.remove('flip-y');
         } else {
-          // Continuous interpolation along the active SVG segment
-          let interpPct = null;
-          if (st.segments && st.segments.length) {
-            for (let sIdx = 0; sIdx < st.segments.length; sIdx++) {
-              const seg = st.segments[sIdx];
-              const isLastSeg = (sIdx === st.segments.length - 1);
-              if (seg.length >= 2) {
-                const segStart = seg[0].ts;
-                const segEnd = (isLastSeg && seg._extendedRight) ? st.endTs : seg[seg.length - 1].ts;
-                if (hoverTs >= segStart - (st.bucketSec * 0.2) && hoverTs <= segEnd + 0.1) {
-                  if (hoverTs >= seg[seg.length - 1].ts) {
-                    interpPct = seg[seg.length - 1].availability_pct;
-                  } else if (hoverTs <= seg[0].ts) {
-                    interpPct = seg[0].availability_pct;
-                  } else {
-                    for (let k = 0; k < seg.length - 1; k++) {
-                      if (hoverTs >= seg[k].ts && hoverTs <= seg[k + 1].ts) {
-                        const tSpan = seg[k + 1].ts - seg[k].ts;
-                        const r = tSpan > 0 ? (hoverTs - seg[k].ts) / tSpan : 0;
-                        interpPct = seg[k].availability_pct + r * (seg[k + 1].availability_pct - seg[k].availability_pct);
-                        break;
-                      }
-                    }
-                  }
-                  break;
-                }
-              } else if (seg.length === 1) {
-                const p0 = seg[0];
-                if (hoverTs >= p0.ts - st.bucketSec && hoverTs <= p0.ts + (st.bucketSec * 0.5)) {
-                  interpPct = p0.availability_pct;
-                  break;
-                }
-              }
-            }
-          }
-          if (interpPct === null && p) {
-            interpPct = p.availability_pct;
-          }
-          if (typeof interpPct !== 'number' || isNaN(interpPct)) {
-            interpPct = 100.0;
-          }
-
-          const cy = clamp(((st.yMax - interpPct) / (st.ySpan || 1)) * 100, 0, 100);
+          const lineY = this._trendLineY(xp, st);
+          const cy = lineY !== null ? lineY : clamp(((st.yMax - info.p.availability_pct) / (st.ySpan || 1)) * 100, 0, 100);
           dot.style.display = '';
           dot.style.left = `${xp}%`;
           dot.style.top = `${cy}%`;
-          tip.textContent = `${this._trendTsLabel(hoverTs, st.windowSec)} · ${interpPct.toFixed(2)}%${this._trendWhyText(hoverTs, st, p)}`;
-          tip.style.left = `${xp}%`;
+          tip.textContent = this._trendTipText(hoverTs, st, info.p);
           tip.style.top = `${cy}%`;
-          tip.classList.toggle('flip-x', xp > 62);
-          tip.classList.toggle('edge-left', xp < 38);
           tip.classList.toggle('flip-y', cy < 22);
         }
         hover.classList.add('active');
       };
+      hover.__avbMove = move;
       hover.addEventListener('pointermove', move);
-      hover.addEventListener('pointerleave', () => hover.classList.remove('active'));
+      hover.addEventListener('pointerleave', () => {
+        hover.classList.remove('active');
+        this._trendHoverClientX = null;
+      });
+    }
+    // A poll re-render under a still pointer: refresh the tooltip against the
+    // new data instead of leaving the previous render's text on screen.
+    if (hover.__avbMove && typeof this._trendHoverClientX === 'number' && hover.classList.contains('active')) {
+      hover.__avbMove({ clientX: this._trendHoverClientX });
+    }
+    // Same for a pinned moment: re-read it from the new data, or drop it once
+    // it has scrolled out of the window.
+    if (typeof this._trendPinTs === 'number') {
+      if (this._trendPinTs >= startTs && this._trendPinTs <= endTs) {
+        this._pinEventDetail('avbTrendEventDetail', this._trendPinTs, this._fleetSweep, windowSec);
+      } else {
+        this._clearTrendHighlight();
+      }
     }
 
     // Domain MUST be the exact [startTs, endTs] this render just drew the
-    // line/ticks against — not the raw, unclamped zoom.lo/zoom.hi. Those two
-    // used to diverge (this passed raw zoom bounds while drawing used the
-    // fullStart/fullEnd-clamped ones) whenever the loaded window shifted
-    // under an already-set zoom — e.g. a rolling "last 24h" range sliding
-    // forward while zoomed into an older slice, or switching period/date
-    // while zoomed. When they diverge, a click's pixel position maps to a
-    // DIFFERENT timestamp than the one the pixel is actually drawn at, so
-    // the closest change found there can belong to a different host/state
-    // entirely than whatever the operator's cursor was actually over.
-    // Passing the same already-clamped values used for `xOf` makes draw and
-    // click agree by construction — there is no second copy of the domain
-    // left to drift out of sync.
+    // line/ticks against — not the raw, unclamped zoom.lo/zoom.hi. Passing the
+    // same already-clamped values used for `xOf` makes draw and click agree
+    // by construction.
     this._attachZoomDrag(
       plot,
       { lo: startTs, hi: endTs },
       (lo, hi) => {
         this._clearTrendHighlight();
-        this._trendZoom = { lo, hi };
+        // A drag ending at the live edge keeps following it.
+        const live = !this.periodEnd && hi >= fullEnd - 1;
+        this._trendZoom = { lo, hi: live ? null : hi };
+        // A drag inside the selected day keeps it selected; one that leaves it
+        // deselects, so the Calendar never claims a day the Trend isn't on.
+        const sel = this._calendarOpenDate;
+        const dayLo = sel ? this._wibDayStartTs(sel) : null;
+        if (sel && !(lo >= dayLo - 1 && hi <= dayLo + 86401)) this._setCalendarSelection(null);
         this._renderAvailabilityTrend(this._lastAvailabilityData, this._trendZoom);
       },
       (ts, clientX) => this._pinEventDetail('avbTrendEventDetail', ts, this._fleetSweep, windowSec, clientX)
@@ -1535,17 +1643,133 @@ class _AvailabilityMethods {
       resetBtn.addEventListener('click', () => {
         this._trendZoom = { lo: null, hi: null };
         this._clearTrendHighlight();
+        this._setCalendarSelection(null);
         this._renderAvailabilityTrend(this._lastAvailabilityData);
       });
     }
     const todayBtn = document.getElementById('avbTrendTodayBtn');
+    if (todayBtn) {
+      const todayStart = this._wibDayStartTs(this._todayWibDateStr());
+      todayBtn.classList.toggle('hidden', !(fullEnd > todayStart && fullStart < todayStart + 86400));
+    }
     if (todayBtn && !todayBtn.dataset.wired) {
       todayBtn.dataset.wired = '1';
       todayBtn.addEventListener('click', () => {
         this._clearTrendHighlight();
-        this._zoomTrendToWibDay(this._todayWibDateStr());
+        const today = this._todayWibDateStr();
+        this._setCalendarSelection((this._calendarDaily || []).some(d => d.date === today) ? today : null);
+        this._zoomTrendToWibDay(today);
       });
     }
+  }
+
+  // The priced trend point whose slot (slotStart, ts] contains `ts` — what
+  // the line shows there — or null when `ts` is in no priced slot (a gap or a
+  // partial slot). Never borrows a neighbouring slot.
+  _trendSlotAt(ts, st) {
+    if (!st || !Array.isArray(st.pts)) return null;
+    const bucket = st.bucketSec || 3600;
+    for (const p of st.pts) {
+      if (ts > this._trendSlotStart(p.ts, bucket) && ts <= p.ts) return p;
+    }
+    return null;
+  }
+
+  // Y (0..100, SVG units) of the drawn line at x-percent `xp`, or null over a
+  // gap. Evaluates the same curve _renderAvailabilityTrend drew.
+  _trendLineY(xp, st) {
+    for (const seg of (st && st.segments) || []) {
+      const c = seg._curve;
+      if (c && xp >= c.x0 - 0.01 && xp <= c.xEnd + 0.01) return Math.max(0, Math.min(100, c.at(xp)));
+    }
+    return null;
+  }
+
+  // Average of the slot containing `ts` (the tooltip's "avg"), shared by hover
+  // and pin; null when `ts` is in no priced slot — never a borrowed or
+  // default value.
+  _trendValueAt(ts, st) {
+    const slot = this._trendSlotAt(ts, st);
+    const v = slot && slot.availability_pct;
+    return typeof v === 'number' && !isNaN(v) ? v : null;
+  }
+
+  // One tooltip line for the hover and the pin: cursor time, then the slot it
+  // falls in and that slot's AVERAGE (the only thing the data knows), then
+  // what changed/was down right there. Outside a priced slot it says why
+  // there is no value instead.
+  _trendTipText(ts, st) {
+    const info = this._trendHoverInfo(ts, st);
+    if (info.kind !== 'value') return this._trendGapText(ts, st, info);
+    const slot = info.p;
+    const cursor = this._trendTsLabel(ts, st.windowSec);
+    const lo = this._trendSlotStart(slot.ts, st.bucketSec || 3600);
+    const slotTxt = `slot ${this._calendarFormatTime(lo)}–${this._calendarFormatTime(slot.ts, true, lo)} avg ${slot.availability_pct.toFixed(2)}%`;
+    return `${cursor} · ${slotTxt}${this._trendWhyText(ts, st, slot)}`;
+  }
+
+  // Identity of the report a zoom detail belongs to: same server + job.
+  _trendDetailScope(data) {
+    const job = (this.selectedJob && this.selectedJob !== 'all') ? this.selectedJob : '';
+    return `${(data && data.scope && data.scope.source) || ''}|${job}`;
+  }
+
+  // The fetched zoom series for [lo, hi], if one covers it. A rolling window
+  // nudges `hi` forward every poll; a detail up to 2 min behind is still used
+  // (a refresh is fetched in the background) so the chart never flickers back
+  // to the coarse blocks between polls.
+  _trendDetailFor(lo, hi, data) {
+    const d = this._trendDetail;
+    if (!d || d.scope !== this._trendDetailScope(data)) return null;
+    return Math.abs(d.lo - lo) < 2 && d.hi <= hi + 2 && d.hi >= hi - 120 ? d.data : null;
+  }
+
+  // A fetched zoom series still answers [lo, hi] without a refetch: same
+  // report scope, same bounds (a rolling hi within a minute), and fetched in
+  // the last 5 minutes — a fixed past zoom used to keep its first answer
+  // forever, even after backfill materialized the hours it showed as gaps.
+  _trendDetailFresh(d, scope, lo, hi, now = Date.now()) {
+    return !!d && d.scope === scope && Math.abs(d.lo - lo) < 2 && Math.abs(d.hi - hi) < 60
+      && typeof d.at === 'number' && now - d.at < 300000;
+  }
+
+  // Fetch the zoomed window's own trend when the report's slots are too coarse
+  // for it (< 90 points across the window). One request in flight at a time;
+  // the latest zoom wins.
+  _ensureTrendDetail(lo, hi, data) {
+    const coarse = typeof data.trend_bucket_seconds === 'number' ? data.trend_bucket_seconds : 3600;
+    if ((hi - lo) / coarse >= 90) return;
+    const d = this._trendDetail;
+    const scope = this._trendDetailScope(data);
+    if (this._trendDetailFresh(d, scope, lo, hi)) return;
+    const key = `${scope}|${Math.round(lo)}|${Math.round(hi)}`;
+    if (this._trendDetailPending === key) return;
+    // A failed fetch (older server without the endpoint, network) is not
+    // retried on every 15s re-render for a minute — and never leaves the
+    // caption stuck on "loading detail…"; the coarse series stays up.
+    const failed = this._trendDetailFailed;
+    if (failed && failed.key === key && Date.now() - failed.at < 60000) return;
+    this._trendDetailPending = key;
+    const job = (this.selectedJob && this.selectedJob !== 'all') ? `&job=${encodeURIComponent(this.selectedJob)}` : '';
+    apiFetch(`/api/availability/trend?start=${Math.floor(lo)}&end=${Math.ceil(hi)}${job}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(res => {
+        if (this._trendDetailPending !== key) return;  // superseded by a newer zoom
+        this._trendDetailPending = null;
+        if (!res || !Array.isArray(res.trend)) {
+          this._trendDetailFailed = { key, at: Date.now() };
+          if (this._lastAvailabilityData) this._renderAvailabilityTrend(this._lastAvailabilityData);
+          return;
+        }
+        this._trendDetail = { scope, lo, hi, data: res, at: Date.now() };
+        if (this._lastAvailabilityData) this._renderAvailabilityTrend(this._lastAvailabilityData);
+      })
+      .catch(() => {
+        if (this._trendDetailPending !== key) return;
+        this._trendDetailPending = null;
+        this._trendDetailFailed = { key, at: Date.now() };
+        if (this._lastAvailabilityData) this._renderAvailabilityTrend(this._lastAvailabilityData);
+      });
   }
 
   // Persistent pin element for cross-highlighting — created once, moved (or
@@ -1571,41 +1795,41 @@ class _AvailabilityMethods {
   // isn't rendered yet or `ts` falls outside the current window — a rail
   // click for a day the Trend line doesn't cover isn't an error, just
   // nothing to point at up there.
-  _highlightTrendAt(ts, pointOverride) {
+  _highlightTrendAt(ts) {
     const st = this._trendHoverState;
     const pin = document.getElementById('avbTrendPin');
     if (!st || !pin || typeof ts !== 'number' || !st.pts || !st.pts.length) { this._clearTrendHighlight(); return; }
-    if (!pointOverride && (ts < st.startTs - 1 || ts > st.startTs + st.windowSec + 1)) { this._clearTrendHighlight(); return; }
-    let best = -1;
-    if (pointOverride && st.pts) {
-      best = st.pts.indexOf(pointOverride);
-    }
-    if (best === -1) {
-      let bd = Infinity;
-      for (let i = 0; i < st.pts.length; i++) {
-        const d = Math.abs(st.pts[i].ts - ts);
-        if (d < bd) { bd = d; best = i; }
-      }
-    }
-    if (best === -1 || !st.coords[best] || !st.pts[best]) { this._clearTrendHighlight(); return; }
-    const [, cy] = st.coords[best];
-    const p = st.pts[best];
+    if (ts < st.startTs - 1 || ts > st.startTs + st.windowSec + 1) { this._clearTrendHighlight(); return; }
     const px = Math.max(0, Math.min(100, ((ts - st.startTs) / st.windowSec) * 100));
+    const info = this._trendHoverInfo(ts, st);
     pin.querySelector('.avb-trend-cross').style.left = `${px}%`;
     const dot = pin.querySelector('.avb-trend-dot');
-    dot.style.left = `${px}%`;
-    dot.style.top = `${cy}%`;
     const tip = pin.querySelector('.avb-trend-tip');
-    tip.textContent = `${this._trendTsLabel(ts, st.windowSec)} · ${p.availability_pct.toFixed(2)}%${this._trendWhyText(ts, st, p)}`;
+    tip.textContent = this._trendTipText(ts, st);
     tip.style.left = `${px}%`;
-    tip.style.top = `${cy}%`;
     tip.classList.toggle('flip-x', px > 62);
     tip.classList.toggle('edge-left', px < 38);
-    tip.classList.toggle('flip-y', cy < 22);
+    if (info.kind !== 'value') {
+      // Pinned inside a gap / partial slot: no dot, no value — same as hover.
+      dot.style.display = 'none';
+      tip.style.top = '50%';
+      tip.classList.remove('flip-y');
+    } else {
+      // Dot on the drawn line at the pinned x.
+      const lineY = this._trendLineY(px, st);
+      const cy = lineY !== null ? lineY
+        : Math.max(0, Math.min(100, ((st.yMax - info.p.availability_pct) / (st.ySpan || 1)) * 100));
+      dot.style.display = '';
+      dot.style.left = `${px}%`;
+      dot.style.top = `${cy}%`;
+      tip.style.top = `${cy}%`;
+      tip.classList.toggle('flip-y', cy < 22);
+    }
     pin.classList.remove('hidden');
   }
 
   _clearTrendHighlight() {
+    this._trendPinTs = null;
     const pin = document.getElementById('avbTrendPin');
     if (pin) pin.classList.add('hidden');
     const evd = document.getElementById('avbTrendEventDetail');
@@ -1653,15 +1877,24 @@ class _AvailabilityMethods {
     };
     plotEl.addEventListener('pointerdown', e => {
       if (e.button !== 0) return;
+      // No pointer capture here: capturing on every press retargeted the
+      // pointer to the plot, so the hover overlay got `pointerleave` and the
+      // tooltip vanished on a plain click. Capture starts only once this is
+      // a real drag (pointermove below).
       dragging = true; dragged = false; startX = e.clientX;
-      try { plotEl.setPointerCapture(e.pointerId); } catch (err) { /* not a pointer target yet — fine */ }
     });
     plotEl.addEventListener('pointermove', e => {
       if (!dragging) return;
       const r = plotEl.getBoundingClientRect();
       const x0 = Math.max(0, Math.min(r.width, startX - r.left));
       const x1 = Math.max(0, Math.min(r.width, e.clientX - r.left));
-      if (Math.abs(x1 - x0) > 3) {
+      // 8px, not 3: ordinary click jitter crossed 3px and turned a click into
+      // a zoom (a 4px wobble is ~7min of a 24h chart) that also cleared the
+      // event-detail panel.
+      if (Math.abs(x1 - x0) > AVB_DRAG_PX) {
+        if (!dragged) {
+          try { plotEl.setPointerCapture(e.pointerId); } catch (err) { /* not capturable — fine */ }
+        }
         dragged = true;
         box.style.left = `${Math.min(x0, x1)}px`;
         box.style.width = `${Math.abs(x1 - x0)}px`;
@@ -1672,16 +1905,14 @@ class _AvailabilityMethods {
       if (!dragging) return;
       dragging = false;
       box.classList.add('hidden');
-      if (dragged) {
-        const a = tsAtClientX(startX), b = tsAtClientX(e.clientX);
-        const lo = Math.min(a, b), hi = Math.max(a, b);
-        if (hi - lo >= 30 && typeof plotEl.__avbOnZoom === 'function') {
-          plotEl.__avbOnZoom(lo, hi); // ignore a near-zero accidental drag
-        }
-      } else {
-        if (typeof plotEl.__avbOnClick === 'function') {
-          plotEl.__avbOnClick(tsAtClientX(e.clientX), e.clientX);
-        }
+      const a = tsAtClientX(startX), b = tsAtClientX(e.clientX);
+      const lo = Math.min(a, b), hi = Math.max(a, b);
+      if (dragged && hi - lo >= 30 && typeof plotEl.__avbOnZoom === 'function') {
+        plotEl.__avbOnZoom(lo, hi);
+      } else if (typeof plotEl.__avbOnClick === 'function') {
+        // A plain click, or a drag too small to zoom into: still a click —
+        // never silently swallowed.
+        plotEl.__avbOnClick(tsAtClientX(e.clientX), e.clientX);
       }
     };
     plotEl.addEventListener('pointerup', finish);
@@ -1695,7 +1926,7 @@ class _AvailabilityMethods {
   // used to scale the click-snap tolerance to the zoom level (see
   // _eventDetailHtml) so "click near a boundary" means the same number of
   // PIXELS whether zoomed to a week or to ten minutes.
-  _pinEventDetail(containerId, ts, sweep, windowSec, clientX) {
+  _pinEventDetail(containerId, ts, sweep, windowSec) {
     const el = document.getElementById(containerId);
     if (!el) return;
     if (ts === null || typeof ts !== 'number') {
@@ -1703,18 +1934,13 @@ class _AvailabilityMethods {
       el.innerHTML = '';
       return;
     }
-    const st = this._trendHoverState;
-    let point = null;
-    if (st && Array.isArray(st.pts) && st.pts.length) {
-      let bd = Infinity;
-      for (let i = 0; i < st.pts.length; i++) {
-        const d = Math.abs(st.pts[i].ts - ts);
-        if (d < bd) { bd = d; point = st.pts[i]; }
-      }
-    }
-    el.innerHTML = this._eventDetailHtml(ts, sweep, windowSec, st, point);
+    el.innerHTML = this._eventDetailHtml(ts, sweep, windowSec);
     el.classList.remove('hidden');
-    if (containerId === 'avbTrendEventDetail') this._highlightTrendAt(ts, point);
+    if (containerId === 'avbTrendEventDetail') {
+      this._highlightTrendAt(ts);
+      // Remembered so a poll re-render re-reads this moment from new data.
+      this._trendPinTs = ts;
+    }
   }
 
   // Stable per-occurrence reference (host + exact start second) so an
@@ -1823,164 +2049,116 @@ class _AvailabilityMethods {
       </div>`;
   }
 
-  // Structured detail for a single pinned moment. The closest change to `ts`
-  // is THE clicked event — authoritative, read directly off its own interval
-  // reference (`c.interval`, attached once in _buildFleetSweep), never
-  // re-derived by searching intervals for a host+timestamp match. That
-  // re-search was the actual bug: it could resolve to a different host's
-  // change, or the wrong occurrence of the same host, whenever two
-  // boundaries fell within the same tolerance window — visually you clicked
-  // Host A's recovery tick, the panel searched for "some interval near this
-  // timestamp" and could come back with Host B's drop instead. A direct
-  // object reference removes the search entirely, so there is nothing left
-  // to resolve incorrectly.
-  //
-  // Everything else within tolerance is real, separate context (other hosts
-  // changing around the same moment) — shown below the primary row, never
-  // blended into it.
-  _eventDetailHtml(ts, sweep, windowSec, stOverride, pointOverride) {
+  // Detail for ONE clicked moment `ts` — never the whole trend slot. Earlier
+  // this listed every change inside the clicked point's bucket (4-5h at a
+  // 30d/MTD resolution): one click near an incident dumped 160+ rows and a
+  // header time that was the slot END, not what was clicked. Now:
+  //   - changes: drops/recoveries within ±TOL of the click (TOL ≈ 1% of the
+  //     visible window, 15s..5m, so it is the same few pixels at any zoom);
+  //     the closest is THE selected event, read off its own interval ref;
+  //   - down now: hosts down AT ts that aren't already a change row.
+  // Rows beyond AVB_EVD_MAX_ROWS collapse behind "+N more", still limited to
+  // this moment. Header state is the fleet AT ts (N down / UP) — a clicked
+  // recovery during a 10-host outage no longer reads "RECOVERED".
+  _eventDetailHtml(ts, sweep, windowSec) {
     if (!sweep) return '';
-    const st = stOverride || this._trendHoverState;
-    let point = pointOverride || null;
-    const bucketSec = (st && typeof st.bucketSec === 'number') ? st.bucketSec : 3600;
-
-    if (!point && st && Array.isArray(st.pts) && st.pts.length) {
-      let bd = Infinity;
-      for (let i = 0; i < st.pts.length; i++) {
-        const d = Math.abs(st.pts[i].ts - ts);
-        if (d < bd) { bd = d; point = st.pts[i]; }
-      }
-    }
-
-    // 1. Changes that occurred inside this point's bucket (the same slice the hover tooltip explains)
-    const bucketStart = point ? (point.ts - bucketSec) : (ts - bucketSec);
-    const bucketEnd = point ? point.ts : ts;
-    const bucketChanges = sweep.changes.filter(c => c.ts >= bucketStart && c.ts <= bucketEnd);
-
-    // 2. Also check if the user clicked very close to an exact change (within snap tolerance)
-    const TOL = Math.max(15, Math.min(300, (windowSec || 86400) * 0.01));
-    const tolChanges = sweep.changes.filter(c => Math.abs(c.ts - ts) <= TOL);
-
-    // Combine and deduplicate
-    const changeMap = new Map();
-    bucketChanges.forEach(c => changeMap.set(c, c));
-    tolChanges.forEach(c => changeMap.set(c, c));
-    const nearby = [...changeMap.values()];
-
-    nearby.sort((a, b) => {
-      const d = Math.abs(a.ts - ts) - Math.abs(b.ts - ts);
-      if (d !== 0) return d;
-      // Recoveries prioritized over drops if distance is equal
-      if (a.type !== b.type) return a.type === 'recovery' ? -1 : 1;
-      return a.host < b.host ? -1 : a.host > b.host ? 1 : 0;
-    });
-
-    const displayTs = point ? Math.min(point.ts, st?.endTs || Infinity) : ts;
-    const timeStr = point ? this._trendTsLabel(displayTs, windowSec) : `${this._calendarFormatTime(ts)} WIB`;
+    const st = this._trendHoverState;
+    const win = windowSec || 86400;
+    const timeStr = this._trendTsLabel(ts, win);
     const entries = this._entriesByHost || new Map();
+    const TOL = Math.max(15, Math.min(300, win * 0.01));
+    const tolTxt = TOL >= 60 ? `${Math.round(TOL / 60)}m` : `${Math.round(TOL)}s`;
 
-    if (!nearby.length) {
-      const evalTs = point ? point.ts : ts;
-      let hostsDown = sweep.hostsDownAt(evalTs);
-      let isBucketLookup = false;
-      if (!hostsDown.length && point && point.ts) {
-        const bucketSec = st?.bucketSec || 3600;
-        const bucketStart = point.ts - bucketSec;
-        const bucketEnd = point.ts;
-        const during = (sweep.intervals || []).filter(iv => iv.s < bucketEnd && iv.e > bucketStart);
-        if (during.length > 0) {
-          const seen = new Set();
-          hostsDown = during.filter(iv => {
-            if (seen.has(iv.host)) return false;
-            seen.add(iv.host);
-            return true;
-          });
-          isBucketLookup = true;
-        }
-      }
+    const near = sweep.changes
+      .filter(c => Math.abs(c.ts - ts) <= TOL)
+      .sort((a, b) => (Math.abs(a.ts - ts) - Math.abs(b.ts - ts))
+        || (a.type !== b.type ? (a.type === 'recovery' ? -1 : 1) : 0)
+        || (a.host < b.host ? -1 : a.host > b.host ? 1 : 0));
+    const inNear = new Set(near.map(c => c.interval));
+    // Most recent drop first — that's what the operator is investigating;
+    // hosts already down when the window opened (chronic) go last.
+    const downNow = sweep.hostsDownAt(ts)
+      .filter(iv => !inNear.has(iv))
+      .sort((a, b) => (Number(a.openStart) - Number(b.openStart)) || (b.s - a.s));
+    const downCount = sweep.hostsDownAt(ts).length;
 
-      if (!hostsDown.length) {
-        const day = this._dayWithoutIntervals(evalTs);
-        const wibDate = day && day.date;
-        if (day) {
-          return `
-            <div class="avb-evd-head">
-              <span class="avb-evd-time">${timeStr}</span>
-              <span class="avb-evd-state is-down">${day.hosts_down} down</span>
-            </div>
-            <p class="avb-evd-sub">${day.hosts_down} host${day.hosts_down === 1 ? '' : 's'} had downtime on ${wibDate} — per-host outage intervals not available yet (history not materialized; backfill pending)</p>`;
-        }
-        if (point && point.availability_pct < 99.995) {
-          return `
-            <div class="avb-evd-head">
-              <span class="avb-evd-time">${timeStr}</span>
-              <span class="avb-evd-state is-down">${point.availability_pct.toFixed(2)}%</span>
-            </div>
-            <p class="avb-evd-sub">Downtime in this period, but per-host outage intervals are not materialized for it yet (history backfill pending)</p>`;
-        }
-        return `
-          <div class="avb-evd-head">
-            <span class="avb-evd-time">${timeStr}</span>
-            <span class="avb-evd-state is-up">UP</span>
-          </div>
-          <p class="avb-evd-sub">All monitored hosts up — no drop or recovery in this period</p>`;
-      }
-      const rows = hostsDown.map(iv => {
-        const isPastRecovery = isBucketLookup && iv.e <= evalTs && !iv.openEnd;
-        return this._evdHostRowHtml({
-          host: iv.host, name: iv.name, job: iv.job, id: iv.id,
-          startTs: iv.s,
-          endTs: iv.e,
-          isOngoing: !isPastRecovery,
-          durationOverride: isPastRecovery ? Math.max(0, iv.e - iv.s) : (evalTs - iv.s),
-          laterRecoveryTs: isPastRecovery ? iv.e : (iv.isRecovery ? iv.e : null),
-          openStart: iv.openStart,
-          entries,
-        });
-      }).join('');
-      const incidentTag = hostsDown.length > 1
-        ? `<span class="avb-evd-incident-badge" title="Multiple hosts down during this period">INCIDENT</span>` : '';
-      return `
-        <div class="avb-evd-head">
-          <span class="avb-evd-time">${timeStr}</span>
-          <span class="avb-evd-state is-down">${hostsDown.length} down</span>
-          ${incidentTag}
-        </div>
-        <p class="avb-evd-sub">Steady — no drop or recovery during this period</p>
-        <div class="avb-evd-rows">${rows}</div>`;
-    }
-
-    const [primary, ...rest] = nearby;
-    const primaryIsOngoing = primary.type === 'recovery' ? false : !primary.interval.isRecovery;
-    const primaryRow = this._evdHostRowHtml({
-      host: primary.host, name: primary.name, job: primary.interval.job,
-      startTs: primary.interval.s, endTs: primary.interval.e,
-      changeType: primary.type, isOngoing: primaryIsOngoing,
-      id: primary.interval.id, isPrimary: true,
-      openStart: primary.interval.openStart,
-      entries,
-    });
-    const restRows = rest.map(c => this._evdHostRowHtml({
-      host: c.host, name: c.name, job: c.interval.job,
-      startTs: c.interval.s, endTs: c.interval.e,
-      changeType: c.type, isOngoing: c.type === 'recovery' ? false : !c.interval.isRecovery,
-      id: c.interval.id,
-      openStart: c.interval.openStart,
-      entries,
-    })).join('');
-    const incidentTag = nearby.length > 1
-      ? `<span class="avb-evd-incident-badge" title="Multiple state changes clustered in this period">INCIDENT</span>` : '';
-    const primaryLabel = primary.type === 'drop' ? 'DOWN' : 'RECOVERED';
-
-    return `
+    const head = (stateHtml, sub) => `
       <div class="avb-evd-head">
         <span class="avb-evd-time">${timeStr}</span>
-        <span class="avb-evd-state ${primary.type === 'drop' ? 'is-down' : 'is-up'}">${primaryLabel}</span>
-        ${incidentTag}
+        ${stateHtml}
+        ${downCount > 1 ? '<span class="avb-evd-incident-badge" title="More than one host down at this moment">INCIDENT</span>' : ''}
       </div>
-      <p class="avb-evd-sub">Selected: ${this._esc(primary.name)} ${primaryLabel.toLowerCase()} at ${this._calendarFormatTime(primary.ts)} WIB${rest.length ? ` · ${rest.length} other change${rest.length === 1 ? '' : 's'} in this period` : ''}</p>
-      <div class="avb-evd-rows">${primaryRow}</div>
-      ${restRows ? `<div class="avb-evd-rows avb-evd-rows-secondary">${restRows}</div>` : ''}`;
+      <p class="avb-evd-sub">${sub}</p>`;
+    const stateHtml = downCount
+      ? `<span class="avb-evd-state is-down">${downCount} down</span>`
+      : '<span class="avb-evd-state is-up">UP</span>';
+
+    if (!near.length && !downNow.length) {
+      // Nothing with exact intervals here. Explain why, per the data we have.
+      const slotPt = this._trendSlotAt(ts, st);
+      const info = st ? this._trendHoverInfo(ts, st) : { kind: 'gap' };
+      const day = this._dayWithoutIntervals(ts);
+      if (day) {
+        const hostsTxt = `${day.hosts_down} host${day.hosts_down === 1 ? '' : 's'}`;
+        const why = this._isBeyondRetention(ts)
+          ? 'older than Prometheus retention, so per-host outage intervals cannot be reconstructed'
+          : day.events_unavailable === 'partial'
+            ? 'some per-host outage intervals for this day are stored, but not for this moment yet (backfill in progress)'
+            : 'per-host outage intervals not available yet (history not materialized; backfill pending)';
+        return head(`<span class="avb-evd-state is-down">${day.hosts_down} down</span>`,
+          `${hostsTxt} had downtime on ${day.date} — ${why}`);
+      }
+      if (slotPt && slotPt.availability_pct < 99.995) {
+        const why = this._isBeyondRetention(ts)
+          ? 'this period is older than Prometheus retention, so they cannot be reconstructed'
+          : 'they are not materialized for it yet (history backfill pending)';
+        return head(`<span class="avb-evd-state is-down">${slotPt.availability_pct.toFixed(2)}%</span>`,
+          `Downtime in this period, but no per-host outage intervals — ${why}`);
+      }
+      if (!slotPt) {
+        return info.kind === 'partial'
+          ? head('<span class="avb-evd-state">PARTIAL</span>',
+            `Only ${info.p.hosts_reporting}/${info.p.hosts_expected} hosts reported this slot — too few to price the fleet, and no per-host outage recorded at this moment`)
+          : head('<span class="avb-evd-state">NO DATA</span>',
+            'No telemetry for this moment — nothing to report either way');
+      }
+      return head(stateHtml, `All monitored hosts up — no drop or recovery within ±${tolTxt}`);
+    }
+
+    const rows = [
+      ...near.map((c, i) => this._evdHostRowHtml({
+        host: c.host, name: c.name, job: c.interval.job,
+        startTs: c.interval.s, endTs: c.interval.e,
+        changeType: c.type, isOngoing: c.type === 'recovery' ? false : !c.interval.isRecovery,
+        id: c.interval.id, isPrimary: i === 0, openStart: c.interval.openStart, entries,
+      })),
+      ...downNow.map(iv => this._evdHostRowHtml({
+        host: iv.host, name: iv.name, job: iv.job, id: iv.id,
+        startTs: iv.s, endTs: iv.e, isOngoing: true,
+        durationOverride: ts - iv.s,
+        laterRecoveryTs: iv.isRecovery ? iv.e : null,
+        openStart: iv.openStart, entries,
+      })),
+    ];
+    const shown = rows.slice(0, AVB_EVD_MAX_ROWS).join('');
+    const extra = rows.length - AVB_EVD_MAX_ROWS;
+    const more = extra > 0
+      ? `<details class="avb-evd-more"><summary>+${extra} more at this moment</summary><div class="avb-evd-rows">${rows.slice(AVB_EVD_MAX_ROWS).join('')}</div></details>`
+      : '';
+
+    let sub;
+    if (near.length) {
+      const p0 = near[0];
+      const label = p0.type === 'drop' ? 'went down' : 'recovered';
+      sub = `Selected: ${this._esc(p0.name)} ${label} at ${this._calendarFormatTime(p0.ts)} WIB`
+        + (near.length > 1 ? ` · ${near.length - 1} other change${near.length === 2 ? '' : 's'} within ±${tolTxt}` : '')
+        + (downNow.length ? ` · ${downNow.length} other host${downNow.length === 1 ? '' : 's'} already down` : '');
+    } else {
+      sub = `No drop or recovery within ±${tolTxt} — ${downNow.length} host${downNow.length === 1 ? '' : 's'} down at this moment`;
+    }
+    return `${head(stateHtml, sub)}
+      <div class="avb-evd-rows">${shown}</div>
+      ${more}`;
   }
 
   /* ── Downtime Calendar (day grid, below the Trend chart) ──
@@ -2115,11 +2293,82 @@ class _AvailabilityMethods {
     return (worstDow < 0 || worstAvg >= 100.0) ? null : names[worstDow];
   }
 
+  _calendarDayDetailHtml(d) {
+    const hasPct = typeof d.availability_pct === 'number';
+    const downSec = this._calendarDayDowntime(d);
+    const hostsTxt = `${d.hosts_down || 0} host${d.hosts_down === 1 ? '' : 's'} down`;
+    const state = hasPct
+      ? `<span class="avb-evd-state ${d.availability_pct >= 99.9 ? 'is-up' : 'is-down'}">${d.availability_pct.toFixed(2)}%</span>`
+      : '<span class="avb-evd-state">unknown %</span>';
+    const limitedNote = d.limited_data === true
+      ? `<p class="avb-evd-sub avb-cal-limited">Limited data — only ${typeof d.coverage_pct === 'number' ? `${d.coverage_pct.toFixed(1)}%` : 'part'} of this day was observed; the % describes that part only.</p>`
+      : '';
+    const head = `
+      <div class="avb-evd-head">
+        <span class="avb-evd-time">${this._calendarDayLabel(d.date)}</span>
+        ${state}
+        <span class="avb-evd-sub avb-cal-day-meta">${hostsTxt}${downSec ? ` · ${this._compactDur(downSec)} total host downtime` : ''}</span>
+      </div>`;
+    const events = Array.isArray(d.events) ? d.events : [];
+    if (!events.length) {
+      if (!d.hosts_down) return `${head}${limitedNote}<p class="avb-evd-sub">${d.limited_data === true ? 'No downtime in the observed part of this day.' : 'No downtime recorded this day.'}</p>`;
+      const dayEnd = this._wibDayStartTs(d.date) + 86400;
+      const why = this._isBeyondRetention(dayEnd - 1)
+        ? 'This day is older than Prometheus retention — per-host outage intervals cannot be reconstructed.'
+        : 'Per-host outage intervals are not materialized for this day yet (history backfill pending).';
+      return `${head}${limitedNote}<p class="avb-evd-sub">${why}</p>`;
+    }
+    const dayStart = this._wibDayStartTs(d.date);
+    const row = e => {
+      const n = e.incident_count || (Array.isArray(e.intervals) ? e.intervals.length : 1);
+      // The actual intervals (up to 3). first-start..last-end read
+      // "00:00–24:00" for a host down 13h in three stretches.
+      const ivs = Array.isArray(e.intervals) && e.intervals.length
+        ? e.intervals
+        : (e.start_ts ? [{ start_ts: e.start_ts, end_ts: e.end_ts }] : []);
+      // "…" before = continued from the previous day, so only at 00:00 (rows
+      // from the old aggregator carry carried_in on mid-day starts too).
+      const fmt = iv => `${iv.carried_in && iv.start_ts - dayStart < 60 ? '…' : ''}${this._calendarFormatTime(iv.start_ts)}–${this._calendarFormatTime(iv.end_ts, true, iv.start_ts)}${iv.still_down ? '…' : ''}`;
+      const range = ivs.length
+        ? `${ivs.slice(0, 3).map(fmt).join(', ')}${ivs.length > 3 ? ` +${ivs.length - 3}` : ''} WIB`
+        : '';
+      return `
+        <button type="button" class="avb-cal-host" data-instance="${this._esc(e.instance)}" title="Open ${this._esc(e.name || e.instance)}">
+          <span class="avb-evd-host">${this._esc(e.name || e.instance)}</span>
+          <span class="avb-cal-host-dur">${this._compactDur(e.duration_sec)}</span>
+          <span class="avb-cal-host-meta">${n}× · ${range}</span>
+        </button>`;
+    };
+    const shown = events.slice(0, AVB_EVD_MAX_ROWS).map(row).join('');
+    const rest = events.slice(AVB_EVD_MAX_ROWS);
+    const more = rest.length
+      ? `<details class="avb-evd-more"><summary>+${rest.length} more host${rest.length === 1 ? '' : 's'}</summary><div class="avb-evd-rows">${rest.map(row).join('')}</div></details>`
+      : '';
+    const partial = d.events_unavailable === 'partial'
+      ? '<p class="avb-evd-sub">Per-host intervals for part of this day are not materialized yet — list may be incomplete.</p>'
+      : '';
+    const trunc = d.truncated_count ? `<p class="avb-evd-sub">${d.truncated_count} shorter outage${d.truncated_count === 1 ? '' : 's'} not listed.</p>` : '';
+    return `${head}${limitedNote}
+      <div class="avb-evd-rows">${shown}</div>
+      ${more}${partial}${trunc}
+      <p class="avb-evd-sub">Longest first · the Trend above is zoomed to this day.</p>`;
+  }
+
+  // Σ duration of the day's per-host outage events (host-seconds).
+  _calendarDayDowntime(d) {
+    return (Array.isArray(d && d.events) ? d.events : []).reduce((s, e) => s + (e.duration_sec || 0), 0);
+  }
+
+  // Ties on availability_pct (2-decimal rounded, so common) are broken by
+  // more hosts down, then more total downtime — not by calendar order.
   _calendarWorstDates(daily, n) {
+    const downtime = d => this._calendarDayDowntime(d);
     return new Set(
       [...daily]
         .filter(d => typeof d.availability_pct === 'number' && (d.availability_pct < 100.0 || (d.hosts_down && d.hosts_down > 0)))
-        .sort((a, b) => a.availability_pct - b.availability_pct)
+        .sort((a, b) => (a.availability_pct - b.availability_pct)
+          || ((b.hosts_down || 0) - (a.hosts_down || 0))
+          || (downtime(b) - downtime(a)))
         .slice(0, n)
         .map(d => d.date)
     );
@@ -2307,10 +2556,21 @@ class _AvailabilityMethods {
   // The `daily` entry for ts's WIB day when the backend had downtime but no
   // per-host intervals for it (priced from Prometheus aggregates, not yet
   // materialized) — null otherwise.
+  // events_unavailable is `true` (no intervals at all for the day) or
+  // `"partial"` (some stored, some not) — callers word the two differently.
   _dayWithoutIntervals(ts) {
     const wibDate = new Date((ts + WIB_OFFSET_SEC) * 1000).toISOString().slice(0, 10);
     const day = ((this._lastAvailabilityData && this._lastAvailabilityData.daily) || []).find(d => d.date === wibDate);
-    return day && day.events_unavailable && day.hosts_down > 0 ? day : null;
+    const unavailable = day && (day.events_unavailable === true || day.events_unavailable === 'partial');
+    return unavailable && day.hosts_down > 0 ? day : null;
+  }
+
+  // Older than the oldest history the backend can ever materialize
+  // (history_floor_ts = now - min(Prometheus retention, backfill depth)):
+  // "backfill pending" would be a promise that never comes true there.
+  _isBeyondRetention(ts) {
+    const floor = this._lastAvailabilityData && this._lastAvailabilityData.history_floor_ts;
+    return typeof floor === 'number' && typeof ts === 'number' && ts < floor;
   }
 
   _trendWhyText(timeOrPoint, st, pointOpt) {
@@ -2326,19 +2586,22 @@ class _AvailabilityMethods {
     if (nearbyChanges.length > 0) {
       nearbyChanges.sort((a, b) => Math.abs(a.ts - hoverTs) - Math.abs(b.ts - hoverTs));
       const primary = nearbyChanges[0];
+      // "at HH:MM" only when it differs from the cursor time the tooltip
+      // already starts with ("21:17 WIB · … — 21:17 · …" said it twice).
       const timeStr = this._calendarFormatTime(primary.ts);
+      const at = timeStr === this._calendarFormatTime(hoverTs) ? '' : ` at ${timeStr}`;
       if (primary.type === 'drop') {
         const dropCount = nearbyChanges.filter(c => c.type === 'drop').length;
         if (dropCount <= 1) {
-          return ` — ${timeStr} · 1 host down (${primary.name || primary.host})`;
+          return ` · 1 host went down${at} (${primary.name || primary.host})`;
         }
-        return ` — ${timeStr} · ${dropCount} hosts down`;
+        return ` · ${dropCount} hosts went down${at}`;
       } else if (primary.type === 'recovery') {
         const recCount = nearbyChanges.filter(c => c.type === 'recovery').length;
         if (recCount <= 1) {
-          return ` — ${timeStr} · 1 host recovered (${primary.name || primary.host})`;
+          return ` · 1 host recovered${at} (${primary.name || primary.host})`;
         }
-        return ` — ${timeStr} · ${recCount} hosts recovered`;
+        return ` · ${recCount} hosts recovered${at}`;
       }
     }
 
@@ -2346,15 +2609,15 @@ class _AvailabilityMethods {
     const hostsDown = st.sweep.hostsDownAt ? st.sweep.hostsDownAt(hoverTs) : [];
     if (hostsDown.length > 0) {
       if (hostsDown.length === 1) {
-        return ` — 1 host down (${hostsDown[0].name || hostsDown[0].host})`;
+        return ` · 1 host down (${hostsDown[0].name || hostsDown[0].host})`;
       }
-      return ` — ${hostsDown.length} hosts down`;
+      return ` · ${hostsDown.length} hosts down`;
     }
 
     // 3. Check bucket if point was provided
     if (p && typeof p.ts === 'number') {
       const bucketSec = st.bucketSec || 3600;
-      const bucketStart = p.ts - bucketSec;
+      const bucketStart = this._trendSlotStart(p.ts, bucketSec);
       const bucketEnd = p.ts;
       const bChanges = (st.sweep.changes || []).filter(c => c.ts >= bucketStart && c.ts <= bucketEnd);
       const bDown = Math.max(st.sweep.downAt(p.ts), st.sweep.downAt(bucketStart));
@@ -2364,17 +2627,17 @@ class _AvailabilityMethods {
         const parts = [];
         if (drops) parts.push(`${drops} host${drops === 1 ? '' : 's'} down`);
         if (recs) parts.push(`${recs} host${recs === 1 ? '' : 's'} recovered`);
-        return ` — ${parts.join(', ')}`;
+        return ` · ${parts.join(', ')}`;
       }
-      if (bDown > 0) return ` — ${bDown} host${bDown === 1 ? '' : 's'} down`;
+      if (bDown > 0) return ` · ${bDown} host${bDown === 1 ? '' : 's'} down`;
       const ivHosts = (st.sweep.intervals || []).filter(iv => iv.s < bucketEnd && iv.e > bucketStart);
       if (ivHosts.length > 0) {
         const uniqueHosts = [...new Set(ivHosts.map(iv => iv.host))];
         if (uniqueHosts.length === 1) {
           const h = ivHosts[0];
-          return ` — 1 host down (${h.name || h.host})`;
+          return ` · 1 host down (${h.name || h.host})`;
         }
-        return ` — ${uniqueHosts.length} hosts down`;
+        return ` · ${uniqueHosts.length} hosts down`;
       }
     }
 
@@ -2392,7 +2655,12 @@ class _AvailabilityMethods {
     const d = this.availabilityBreakdown || {};
     const ws = typeof d.trend_start_ts === 'number' ? d.trend_start_ts : dayStartTs;
     const we = typeof d.trend_end_ts === 'number' ? d.trend_end_ts : dayStartTs + 86400;
-    return { lo: Math.max(dayStartTs, ws), hi: Math.min(dayStartTs + 86400, we) };
+    const lo = Math.max(dayStartTs, ws);
+    // Today on a live range: hi = null follows the window's end on every
+    // poll. A fixed hi froze the zoom at the click (09:27 stayed the end
+    // while polls brought data up to 09:29 and beyond).
+    if (!this.periodEnd && we <= dayStartTs + 86400 && we > dayStartTs) return { lo, hi: null };
+    return { lo, hi: Math.min(dayStartTs + 86400, we) };
   }
 
   _renderDowntimeCalendar(data) {
@@ -2470,18 +2738,45 @@ class _AvailabilityMethods {
           const sevClass = this._calendarSevClass(d.availability_pct);
           const isSelected = d.date === this._calendarOpenDate;
           const isWorst = worstOn && worstDates && worstDates.has(d.date);
-          const availPctTxt = `${d.availability_pct.toFixed(1)}%`;
+          // Floored, not rounded: toFixed(1) showed 99.89% as "99.9%" on a
+          // cell colored as a breach. The thresholds (99.9/99/95) have one
+          // decimal, so a floored label can never contradict the color.
+          const availPctTxt = `${(Math.floor(d.availability_pct * 10) / 10).toFixed(1)}%`;
           const availPctPrecise = `${d.availability_pct.toFixed(2)}%`;
-          const tooltip = `${d.date}: ${availPctPrecise} availability${d.hosts_down ? `, ${d.hosts_down} host${d.hosts_down === 1 ? '' : 's'} down` : ''}`;
+          // Σ per-host downtime: tells "1 host, 5 min" from "1 host, 8 h",
+          // which the host-count badge alone cannot.
+          const downSec = this._calendarDayDowntime(d);
+          const durTxt = downSec > 0 ? this._compactDur(downSec) : '';
+          // Priced from a fraction of the day (backfill gap, Prometheus
+          // retention): hatched and labelled, never a clean green cell.
+          const limited = d.limited_data === true;
+          const covTxt = typeof d.coverage_pct === 'number' ? `${Math.floor(d.coverage_pct)}%` : '?';
+          const tooltip = `${d.date}: ${availPctPrecise} availability${d.hosts_down ? `, ${d.hosts_down} host${d.hosts_down === 1 ? '' : 's'} down` : ''}${durTxt ? `, ${durTxt} total host downtime` : ''}${limited ? ` — limited data: only ${covTxt} of this day was observed` : ''}`;
           cells.push(`
-            <button type="button" class="avb-calendar-cell ${sevClass}${isSelected ? ' is-selected' : ''}${isWorst ? ' is-worst' : ''}"
+            <button type="button" class="avb-calendar-cell ${sevClass}${limited ? ' is-limited' : ''}${isSelected ? ' is-selected' : ''}${isWorst ? ' is-worst' : ''}"
                     data-date="${d.date}"
                     title="${tooltip}"
-                    aria-label="${this._calendarDayLabel(d.date)}, ${availPctPrecise} availability, ${d.hosts_down} host${d.hosts_down === 1 ? '' : 's'} down"
+                    aria-label="${this._calendarDayLabel(d.date)}, ${availPctPrecise} availability, ${d.hosts_down} host${d.hosts_down === 1 ? '' : 's'} down${limited ? `, limited data: ${covTxt} observed` : ''}"
                     aria-pressed="${isSelected}">
               <span class="avb-calendar-date-num">${dayNum}</span>
-              <span class="avb-calendar-avail-pct">${availPctTxt}</span>
+              <span class="avb-calendar-avail-pct">${limited ? '~' : ''}${availPctTxt}</span>
+              ${limited ? `<span class="avb-calendar-cov">${covTxt} observed</span>` : durTxt ? `<span class="avb-calendar-dur">${durTxt}</span>` : ''}
               ${d.hosts_down ? `<span class="avb-calendar-badge" title="${d.hosts_down} host${d.hosts_down === 1 ? '' : 's'} were down at some point on this day">${d.hosts_down}<span class="avb-calendar-badge-unit"> hosts</span></span>` : ''}
+            </button>`);
+        } else if (d && d.hosts_down > 0) {
+          // Downtime is known (hosts_down) but the day's % is not: no coverage
+          // to price it. "No data" would hide a real outage day.
+          const isSelected = d.date === this._calendarOpenDate;
+          const hostsTxt = `${d.hosts_down} host${d.hosts_down === 1 ? '' : 's'}`;
+          cells.push(`
+            <button type="button" class="avb-calendar-cell ara-sev-warning is-unpriced${isSelected ? ' is-selected' : ''}"
+                    data-date="${d.date}"
+                    title="${d.date}: availability unknown (no telemetry coverage to price it), ${hostsTxt} down"
+                    aria-label="${this._calendarDayLabel(d.date)}, availability unknown, ${hostsTxt} down"
+                    aria-pressed="${isSelected}">
+              <span class="avb-calendar-date-num">${dayNum}</span>
+              <span class="avb-calendar-avail-pct">?</span>
+              <span class="avb-calendar-badge" title="${hostsTxt} were down at some point on this day">${d.hosts_down}<span class="avb-calendar-badge-unit"> hosts</span></span>
             </button>`);
         } else {
           cells.push(`
@@ -2496,6 +2791,18 @@ class _AvailabilityMethods {
     }
 
     gridEl.innerHTML = emptyCellsHtml + dayCellsHtml;
+    const rangeDays = startDateStr && endDateStr
+      ? Math.round((Date.parse(`${endDateStr}T00:00:00Z`) - Date.parse(`${startDateStr}T00:00:00Z`)) / 86400000) + 1
+      : daily.length;
+
+    // Selected day's hosts right under the grid: one click (not click, scroll
+    // up, click the Trend again) answers "who was down that day, how long".
+    const dayEl = document.getElementById('avbCalendarDayDetail');
+    if (dayEl) {
+      const sel = this._calendarOpenDate && daily.find(d => d.date === this._calendarOpenDate);
+      dayEl.innerHTML = sel ? this._calendarDayDetailHtml(sel) : '';
+      dayEl.classList.toggle('hidden', !sel);
+    }
 
     const toggleBtn = document.getElementById('avbCalendarWorstToggle');
     if (toggleBtn) {
@@ -2515,10 +2822,10 @@ class _AvailabilityMethods {
     // 5.1). Say what the grid is showing instead of leaving it to be guessed.
     const captionEl = document.getElementById('avbCalendarCaption');
     if (captionEl) {
-      const dayWord = daily.length === 1 ? 'day' : 'days';
-      captionEl.textContent = daily.length < 7
-        ? `Showing ${daily.length} ${dayWord} in the selected range — empty cells are outside it. Badge = hosts down at any point that day.`
-        : 'Badge = hosts down at any point that day (not hosts down now).';
+      const dayWord = rangeDays === 1 ? 'day' : 'days';
+      captionEl.textContent = rangeDays < 7
+        ? `Showing ${rangeDays} ${dayWord} in the selected range — empty cells are outside it. Badge = hosts down at any point that day; time = total host downtime. Click a day for its hosts.`
+        : 'Badge = hosts down at any point that day (not now); time = total host downtime. Click a day for its hosts.';
     }
     const insightEl = document.getElementById('avbCalendarWeekdayInsight');
     if (insightEl) {
@@ -2550,6 +2857,16 @@ class _AvailabilityMethods {
     }
   }
 
+  // Selected Calendar day (and its host panel) must follow the Trend: Today
+  // selects today, Reset zoom / a drag off the day clears it. Before, the
+  // cell stayed selected and its panel said "Trend zoomed to this day" while
+  // the Trend showed something else.
+  _setCalendarSelection(dateStr) {
+    if (this._calendarOpenDate === dateStr) return;
+    this._calendarOpenDate = dateStr;
+    this._renderDowntimeCalendar(this.availabilityBreakdown);
+  }
+
   _toggleCalendarWorst() {
     this._calendarWorstOn = !this._calendarWorstOn;
     this._renderDowntimeCalendar(this.availabilityBreakdown);
@@ -2570,13 +2887,21 @@ class _AvailabilityMethods {
 
   _renderAvailabilityBreakdown(source = 'direct') {
     const data = this.availabilityBreakdown;
-    const expectedMins = Math.round(this.periodMinutes);
-    const currentJobKey = (this.selectedJob && this.selectedJob !== 'all') ? this.selectedJob : 'all';
-    const isMatchingData = data &&
-      Math.round(data.period_minutes || 0) === expectedMins &&
-      ((data.job || 'all') === currentJobKey);
+    const isMatchingData = this._dataMatchesSelection(data);
 
     this._updateAvailLoadingUI(this._availLoading && !isMatchingData);
+    // No report yet (first load in flight or failed): a sort or header click
+    // used to throw on `data.scope` below. Show the waiting state instead.
+    if (!data) {
+      const listEl = document.getElementById('hostsRequiringAttentionList');
+      if (listEl) {
+        listEl.innerHTML = this._availLoading
+          ? '<div class="de-empty" style="padding: 24px; text-align: center; color: var(--text-secondary);"><span class="avail-updating-spinner" style="margin-right:8px;"></span> Loading host availability data...</div>'
+          : '<div class="de-empty" style="padding: 24px; text-align: center; color: var(--text-secondary);">Availability data is not available yet.</div>';
+      }
+      this._renderDowntimeCalendar(null);
+      return;
+    }
 
     const modalSubtitleEl = document.getElementById('availModalSubtitle');
     if (modalSubtitleEl) {

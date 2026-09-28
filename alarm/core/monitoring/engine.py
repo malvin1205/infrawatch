@@ -405,7 +405,12 @@ class FleetStateEngine:
                 try:
                     fn = getattr(self.prom_queries, "fetch_up_since_prom_map", None)
                     if fn:
-                        self._up_since_cache = (time.time(), fn(300.0))
+                        try:
+                            up_map, basis = fn(300.0, with_basis=True)
+                        except TypeError:  # older/mocked signature
+                            up_map, basis = fn(300.0), {}
+                        self._up_since_basis = basis or {}
+                        self._up_since_cache = (time.time(), up_map)
                 except Exception:
                     logger.warning("up-since refresh failed", exc_info=True)
                 finally:
@@ -574,6 +579,9 @@ class FleetStateEngine:
                         "isWeb": False,
                         "downSince": down_since_val,
                         "upSince": up_since_val,
+                        # "telemetry": up at LEAST since upSince — Prometheus has no
+                        # data before it, so nothing earlier is claimed.
+                        "upSinceBasis": (getattr(self, "_up_since_basis", None) or {}).get(inst_name) if up_since_val else None,
                         "active_alerts": matched_alerts,
                     })
 

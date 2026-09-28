@@ -317,6 +317,12 @@
 }
 .avb .avb-trend-plot {
   position: relative;
+  /* Horizontal gestures go to the hover/drag-zoom handlers; vertical still
+     scrolls the modal. Without it touch presses became pointercancel. */
+  touch-action: pan-y;
+  /* Drag-to-zoom must not select the grid labels / empty-state text. */
+  user-select: none;
+  -webkit-user-select: none;
   height: 128px;
   margin-left: 34px;
   border-left: 1px solid var(--border);
@@ -380,13 +386,6 @@
   opacity: 0.08;
   stroke: none;
 }
-.avb .avb-trend-gap-connector {
-  fill: none;
-  stroke: var(--text-low, #8b949e);
-  stroke-width: 1px;
-  stroke-dasharray: 2 3;
-  opacity: 0.45;
-}
 
 /* SLA target reference line (audit 4.6) — dashed and in the critical colour so
    it reads as the threshold being missed, never as another data series. */
@@ -398,10 +397,20 @@
 }
 
 .avb .avb-trend-target-note {
-  margin-top: 2px;
-  color: var(--crit);
-  opacity: 0.85;
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--text-low);
 }
+/* Legend swatches — each mimics the SVG mark it names. */
+.avb .avb-lg { display: inline-flex; align-items: center; gap: 5px; }
+.avb .avb-lg-sw { display: inline-block; width: 14px; height: 9px; flex: 0 0 auto; }
+.avb .avb-lg-sw.is-target { height: 0; border-top: 1px dashed var(--crit); opacity: 0.75; }
+.avb .avb-lg-sw.is-drop { width: 2px; background: var(--crit, #ef4444); opacity: 0.6; }
+.avb .avb-lg-sw.is-recovery { width: 2px; background: var(--ok, #10b981); opacity: 0.7; }
+.avb .avb-lg-sw.is-gap { background: rgba(139, 148, 158, 0.16); }
+.avb .avb-lg-sw.is-partial { background: rgba(139, 148, 158, 0.3); }
 
 .avb .avb-trend-xaxis {
   display: flex;
@@ -486,6 +495,10 @@
   box-shadow: 0 0 0 3px rgba(230, 237, 243, 0.25);
 }
 .avb .avb-trend-pin .avb-trend-tip { border-color: var(--text-hi, #e6edf3); }
+/* While the pointer is over the chart the hover tooltip is the one being read;
+   the pinned one underneath it just overlapped it into an unreadable stack.
+   The pin keeps its crosshair + dot, and its tooltip comes back on leave. */
+.avb .avb-trend-plot:has(.avb-trend-hover.active) .avb-trend-pin .avb-trend-tip { opacity: 0; }
 
 /* Explicit drop/recovery markers on the Trend line — "the trend moved
    because a host went down/came back" should never have to be inferred from
@@ -541,6 +554,10 @@
 .avb .avb-event-detail {
   margin-top: 10px;
   padding: 10px 12px;
+  /* Bounded: opening a detail must not shove the Calendar down the page. */
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--bg-panel);
   border: 1px solid var(--border-soft);
   border-radius: 6px;
@@ -584,6 +601,16 @@
    scroll container (.avb-scroll) rather than a second nested scrollbox —
    a fixed-height inner scroll area cut rows off mid-card at its boundary. */
 .avb .avb-evd-rows-secondary { margin-top: 6px; }
+.avb .avb-evd-more { margin-top: 6px; }
+.avb .avb-evd-more > summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--accent);
+  list-style: none;
+}
+.avb .avb-evd-more > summary::-webkit-details-marker { display: none; }
+.avb .avb-evd-more > summary::before { content: '▸ '; }
+.avb .avb-evd-more[open] > summary::before { content: '▾ '; }
 .avb .avb-evd-row {
   display: flex;
   flex-direction: column;
@@ -726,6 +753,48 @@
   line-height: 1;
   opacity: 0.9;
 }
+/* Σ host downtime for the day, under the %. */
+.avb .avb-calendar-dur {
+  font-family: var(--avb-font-mono);
+  font-size: 8.5px;
+  line-height: 1;
+  opacity: 0.75;
+}
+
+/* A day priced from only part of its hours (limited_data): hatched, with the
+   observed share in place of the downtime line — never a clean severity cell. */
+.avb .avb-calendar-cell.is-limited {
+  background-image: repeating-linear-gradient(135deg, transparent 0 4px, rgba(139, 148, 158, 0.22) 4px 6px);
+  border-style: dashed;
+}
+.avb .avb-calendar-cov {
+  font-family: var(--avb-font-mono);
+  font-size: 8.5px;
+  line-height: 1;
+  opacity: 0.85;
+}
+.avb .avb-cal-limited { color: var(--warn); }
+
+/* Selected-day host list under the Calendar grid. */
+.avb .avb-cal-day-meta { margin: 0 0 0 auto; }
+.avb .avb-cal-host {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.avb .avb-cal-host:hover,
+.avb .avb-cal-host:focus-visible { border-color: var(--accent); outline: none; }
+.avb .avb-cal-host-dur { font-family: var(--avb-font-mono); font-size: 11px; color: var(--crit, #ef4444); }
+.avb .avb-cal-host-meta { font-family: var(--avb-font-mono); font-size: 10px; color: var(--text-low); white-space: nowrap; }
 
 /* Worst-N highlight is a border treatment layered on top of the severity
    background, so it reads on any tier (a "worst day" is very often already
@@ -776,6 +845,9 @@
 }
 
 @media (max-width: 720px) {
+  /* Cells too small for a third line; the day panel still shows durations. */
+  .avb .avb-calendar-dur { display: none; }
+  .avb .avb-cal-host-meta { display: none; }
   .avb .avb-calendar-legend { margin-left: 0; width: 100%; }
   .avb .avb-calendar-cell { min-height: 42px; }
   .avb .avb-calendar-avail-pct { font-size: 8.5px; }
@@ -1173,6 +1245,6 @@
 /* Trend slot where too few hosts reported to price the fleet (availability_pct null). */
 .avb .avb-trend-partial-band {
   fill: var(--text-low, #8b949e);
-  opacity: 0.14;
+  opacity: 0.24; /* clearly darker than the 0.08 no-telemetry band */
   stroke: none;
 }

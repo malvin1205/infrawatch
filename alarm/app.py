@@ -1903,6 +1903,20 @@ def api_availability():
     report = availability_engine.get_availability(query)
     return jsonify(report.to_dict())
 
+@app.route('/api/availability/trend')
+@rate_limit(60, 60)
+def api_availability_trend():
+    """Fleet trend re-sliced for one window (the Trend chart's zoom)."""
+    try:
+        start_ts = float(request.args.get('start', ''))
+        end_ts = float(request.args.get('end', ''))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "start and end (epoch seconds) are required"}), 400
+    if not (end_ts > start_ts) or end_ts - start_ts > 400 * 86400:
+        return jsonify({"ok": False, "error": "invalid window"}), 400
+    job = (request.args.get('job') or DEFAULT_JOB_FILTER).strip() or DEFAULT_JOB_FILTER
+    return jsonify(availability_engine.get_trend(job, start_ts, end_ts))
+
 @app.route('/api/availability/cache/invalidate', methods=['POST'])
 @rate_limit(20, 60)
 def invalidate_availability_cache_api():
@@ -1946,12 +1960,20 @@ def target_history_api():
     
     # Every candidate is scoped by instance label — no bare 'probe_success'/'up'
     # fallback, which would pull every target's whole series just to find one.
-    candidate_queries = [
-        f'probe_success{{instance="{safe_target_url}"}}',
-        f'probe_success{{instance=~".*{re.escape(clean_target)}.*"}}',
-        f'up{{instance="{safe_target_url}"}}',
-        f'up{{instance=~".*{re.escape(clean_target)}.*"}}',
+    # Exact instance first, then the same host with/without scheme or trailing
+    # slash. The regex MUST be a backtick (raw) string: re.escape's "\." inside
+    # a double-quoted PromQL string is a parse error ("unknown escape
+    # sequence"), so that fallback always 400'd and the latency lookup fell
+    # through to EVERY series matched by substring — 1.0.0.1 picking up 1.0.0.10.
+    inst_selectors = [
+        f'instance="{safe_target_url}"',
+        f'instance=~`(https?://)?{re.escape(clean_target)}/?`',
     ]
+    candidate_queries = [f'{m}{{{sel}}}' for m in ('probe_success', 'up') for sel in inst_selectors]
+
+    def _same_target(inst):
+        norm = re.sub(r'^https?://', '', inst or '').rstrip('/')
+        return inst == target_url or norm == clean_target
 
     values = []
     # The active server's own series only — no failover to another server's copy of this target.
@@ -1964,7 +1986,7 @@ def target_history_api():
             for r in results:
                 metric = r.get('metric', {})
                 inst = metric.get('instance') or metric.get('target') or metric.get('url') or ''
-                if inst == target_url or clean_target in inst:
+                if _same_target(inst):
                     values = r.get('values', [])
                     if values:
                         break
@@ -2141,31 +2163,68 @@ def target_history_api():
     deduped_events.sort(key=get_event_sort_key, reverse=True)
     events = deduped_events
 
-    # Fetch latency range history for sparkline graph
+    # Latency series for the Response Time Trend. avg_over_time per step, not
+    # the raw instant value at each step: at 7d (~33 min steps) a point used to
+    # be ONE probe sampled every 33 min, so spikes between steps vanished and
+    # MAX/p95 were computed from those few samples.
     latency_points = []
     dur_step = max(15, int((end_ts - start_ts) / 300))
-    dur_queries = [
-        f'probe_duration_seconds{{instance="{target_url}"}} * 1000',
-        f'probe_duration_seconds{{instance=~".*{re.escape(clean_target)}.*"}} * 1000',
-        'probe_duration_seconds * 1000'
-    ]
-    for dq in dur_queries:
+    latency_sel = None
+    for sel in inst_selectors:
+        # Successful probes only: a failed probe's duration is its timeout
+        # (5000ms here), not a response time — it drew fake 5s spikes and
+        # inflated MAX. Subquery at the 15s probe cadence, averaged per step.
+        dq = (f'avg_over_time((probe_duration_seconds{{{sel}}} and probe_success{{{sel}}} == 1)'
+              f'[{dur_step}s:15s]) * 1000')
         dur_path = f"/api/v1/query_range?query={quote(dq)}&start={start_ts}&end={end_ts}&step={dur_step}"
         raw_dur, _ = promclient.fetch_prometheus_json(dur_path, source=active_source)
         if raw_dur and raw_dur.get('status') == 'success':
             for r in raw_dur.get('data', {}).get('result', []):
                 metric = r.get('metric', {})
                 inst = metric.get('instance') or metric.get('target') or metric.get('url') or ''
-                if dq != 'probe_duration_seconds * 1000' or inst == target_url or clean_target in inst:
-                    for tv in r.get('values', []):
+                if not _same_target(inst):
+                    continue
+                for tv in r.get('values', []):
+                    try:
+                        latency_points.append([int(tv[0]), round(float(tv[1]), 1)])
+                    except (ValueError, TypeError):
+                        pass
+                if latency_points:
+                    latency_sel = sel
+                    break
+        if latency_points:
+            break
+
+    # Window stats from the RAW samples of successful probes only (a failed
+    # probe's duration is a timeout, not a response time) — not from the
+    # plotted per-step averages.
+    latency_stats = None
+    if latency_sel:
+        win = max(60, end_ts - start_ts)
+        # 15s = the probe cadence here: a coarser subquery step skips samples
+        # and under-reports MAX (a 30d window at 235s read 167ms; the real max
+        # was 821ms). Measured ~0.5s for 30d on one series.
+        res = 15
+        ok_expr = f'(probe_duration_seconds{{{latency_sel}}} and probe_success{{{latency_sel}}} == 1)[{win}s:{res}s]'
+        stat_q = {
+            "avg": f'avg_over_time({ok_expr}) * 1000',
+            "p95": f'quantile_over_time(0.95, {ok_expr}) * 1000',
+            "max": f'max_over_time({ok_expr}) * 1000',
+        }
+        latency_stats = {}
+        for k, q in stat_q.items():
+            raw_s, _ = promclient.fetch_prometheus_json(
+                f"/api/v1/query?query={quote(q)}&time={end_ts}", source=active_source)
+            v = None
+            if raw_s and raw_s.get('status') == 'success':
+                for r in raw_s.get('data', {}).get('result', []):
+                    if _same_target((r.get('metric') or {}).get('instance', '')):
                         try:
-                            latency_points.append([int(tv[0]), round(float(tv[1]), 1)])
-                        except (ValueError, TypeError):
-                            pass
-                    if latency_points:
+                            v = round(float(r['value'][1]), 1)
+                        except (KeyError, ValueError, TypeError, IndexError):
+                            v = None
                         break
-            if latency_points:
-                break
+            latency_stats[k] = v
 
     if not latency_points:
         logs = json_store.load_json(json_store.LOGS_FILE, [])
@@ -2177,6 +2236,8 @@ def target_history_api():
             if ts and lat is not None and (inst == target_url or clean_target in inst):
                 if start_ts <= ts <= end_ts:
                     log_points.append([int(ts), round(float(lat), 1)])
+        # (logs.json fallback keeps the old substring match: log entries carry
+        # free-form instance strings)
         log_points.sort(key=lambda x: x[0])
         latency_points = log_points
 
@@ -2192,10 +2253,7 @@ def target_history_api():
     failed_points = []
     if values:
         status_by_ts = {}
-        code_queries = [
-            f'probe_http_status_code{{instance="{safe_target_url}"}}',
-            f'probe_http_status_code{{instance=~".*{re.escape(clean_target)}.*"}}',
-        ]
+        code_queries = [f'probe_http_status_code{{{sel}}}' for sel in inst_selectors]
         for cq in code_queries:
             code_path = f"/api/v1/query_range?query={quote(cq)}&start={start_ts}&end={end_ts}&step={step}"
             raw_code, _ = promclient.fetch_prometheus_json(code_path, source=active_source)
@@ -2203,7 +2261,7 @@ def target_history_api():
                 for r in raw_code.get('data', {}).get('result', []):
                     metric = r.get('metric', {})
                     inst = metric.get('instance') or metric.get('target') or metric.get('url') or ''
-                    if inst == target_url or clean_target in inst:
+                    if _same_target(inst):
                         for tv in r.get('values', []):
                             try:
                                 status_by_ts[int(tv[0])] = int(float(tv[1]))
@@ -2273,6 +2331,12 @@ def target_history_api():
         "period_minutes": minutes,
         "events": events,
         "latency_points": latency_points,
+        "latency_stats": latency_stats,
+        # The window the series was drawn for and its step, so the chart plots
+        # against [range_start, range_end] and can tell a gap from a sample.
+        "range_start": int(start_ts),
+        "range_end": int(end_ts),
+        "latency_step": dur_step,
         "failed_points": failed_points,
         "intervals_summary": intervals_summary,
         # First probe_success sample in the window (None = no samples at all).

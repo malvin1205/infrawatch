@@ -21,9 +21,43 @@ except (ImportError, ValueError):
 _SHARED_EXECUTOR = _pc._SHARED_EXECUTOR
 
 
-def fetch_prom_query_map(query_expr, cache_ttl=5.0, timeout=None, source=None):
+def job_selector(job):
+    """PromQL label matcher (no braces) scoping a query to one job view — the
+    same job -> rows mapping AvailabilityBucketRepository.get_bucket_records
+    applies to stored buckets, so a live query and a stored row for the same
+    view always describe the same series. "" for the all-jobs view."""
+    if not job or job == "all":
+        return ""
+    j = job.lower()
+    if j == "blackbox":
+        return 'job=~"blackbox.*"'
+    if j == "node":
+        return 'job=~"node.*"'
+    return 'job="%s"' % job.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def with_job(metric, job):
+    """`metric{job...}` for a job view, bare `metric` for all jobs."""
+    sel = job_selector(job)
+    return f"{metric}{{{sel}}}" if sel else metric
+
+
+def pick_series(store, inst, labels, value, prefer_job=None):
+    """One value per instance from a result that may hold several series for
+    it (e.g. `up` of four gitlab jobs). The series of the instance's own job
+    (`prefer_job[inst]`) wins; without one, the last series wins as before.
+    Every availability query goes through this, so the headline, the Trend and
+    the Calendar can never price the same host from different series."""
+    want = (prefer_job or {}).get(inst)
+    job = labels.get("job")
+    if want and inst in store and store[inst][0] == want and job != want:
+        return
+    store[inst] = (job, value)
+
+
+def fetch_prom_query_map(query_expr, cache_ttl=5.0, timeout=None, source=None, prefer_job=None):
     raw, base = _pc.fetch_prometheus_json(f"/api/v1/query?query={quote(query_expr)}", use_cache=True, cache_ttl=cache_ttl, timeout=timeout, source=source)
-    val_map = {}
+    picked = {}
     if raw and raw.get('status') == 'success':
         results = raw.get('data', {}).get('result', [])
         for r in results:
@@ -31,11 +65,11 @@ def fetch_prom_query_map(query_expr, cache_ttl=5.0, timeout=None, source=None):
             inst = labels.get('instance') or labels.get('target') or labels.get('url')
             val = r.get('value', [None, None])[1]
             if inst and val is not None:
-                val_map[inst] = val
-    return val_map
+                pick_series(picked, inst, labels, val, prefer_job)
+    return {inst: v for inst, (_, v) in picked.items()}
 
 
-def fetch_prom_range_map(query_expr, start_ts, end_ts, step_sec, cache_ttl=5.0, timeout=None, source=None):
+def fetch_prom_range_map(query_expr, start_ts, end_ts, step_sec, cache_ttl=5.0, timeout=None, source=None, prefer_job=None):
     """Range query -> {instance: [(ts_float, 0|1), ...]} sorted by ts.
 
     Used by the availability aggregator to feed raw probe samples straight
@@ -57,9 +91,9 @@ def fetch_prom_range_map(query_expr, start_ts, end_ts, step_sec, cache_ttl=5.0, 
         f"&time={int(end_ts)}"
     )
     raw, _ = _pc.fetch_prometheus_json(path, use_cache=True, cache_ttl=cache_ttl, timeout=timeout, source=source)
-    series = {}
+    picked = {}
     if not raw or raw.get('status') != 'success':
-        return series
+        return {}
     for r in raw.get('data', {}).get('result', []):
         labels = r.get('metric', {})
         inst = labels.get('instance') or labels.get('target') or labels.get('url')
@@ -75,8 +109,8 @@ def fetch_prom_range_map(query_expr, start_ts, end_ts, step_sec, cache_ttl=5.0, 
                 continue
         if pts:
             pts.sort(key=lambda p: p[0])
-            series[inst] = pts
-    return series
+            pick_series(picked, inst, labels, pts, prefer_job)
+    return {inst: v for inst, (_, v) in picked.items()}
 
 
 def fetch_down_since_prom_map(cache_ttl=300.0, source=None):
@@ -142,9 +176,17 @@ def fetch_down_since_prom_map(cache_ttl=300.0, source=None):
     return last_up_map
 
 
-def fetch_up_since_prom_map(cache_ttl=300.0, source=None):
-    """Maps instance -> timestamp (epoch seconds) when current continuous UP state started."""
+def fetch_up_since_prom_map(cache_ttl=300.0, source=None, with_basis=False):
+    """Maps instance -> timestamp (epoch seconds) when current continuous UP state started.
+
+    Never older than the start of the instance's current unbroken run of
+    telemetry: "no DOWN sample seen" across a stretch Prometheus has no data
+    for is not "up". with_basis=True also returns {instance: "telemetry"} for
+    instances whose value is bounded by that (uptime is at LEAST this long;
+    what happened before is unknown) rather than by an observed DOWN.
+    """
     up_since_map = {}
+    basis = {}
 
     # 1. PromQL query for exact last DOWN timestamp for targets that were previously DOWN
     query_down = 'max_over_time(timestamp(probe_success == 0)[1d:1m])'
@@ -164,11 +206,13 @@ def fetch_up_since_prom_map(cache_ttl=300.0, source=None):
                 except ValueError:
                     pass
 
-    # 2. Targets with no DOWN sample in the last day: outage ended at the last DOWN sample in 32d
-    query_down_wide = 'max_over_time(timestamp(probe_success == 0)[32d:1h])'
+    # 2. Targets with no DOWN sample in the last day: outage ended at the last DOWN sample in 32d.
+    #    1m resolution: at 1h an outage ending at 17:58 was dated 17:00 (and a
+    #    short one between two hour marks missed entirely). ~0.6s, cached.
+    query_down_wide = 'max_over_time(timestamp(probe_success == 0)[32d:1m])'
     raw_down_wide, _ = _pc.fetch_prometheus_json(f"/api/v1/query?query={quote(query_down_wide)}", use_cache=True, cache_ttl=cache_ttl, source=source)
     if not raw_down_wide or not raw_down_wide.get('data', {}).get('result'):
-        query_down_wide = 'max_over_time(timestamp(up == 0)[32d:1h])'
+        query_down_wide = 'max_over_time(timestamp(up == 0)[32d:1m])'
         raw_down_wide, _ = _pc.fetch_prometheus_json(f"/api/v1/query?query={quote(query_down_wide)}", use_cache=True, cache_ttl=cache_ttl, source=source)
     if raw_down_wide and raw_down_wide.get('status') == 'success':
         for r in raw_down_wide.get('data', {}).get('result', []):
@@ -195,10 +239,30 @@ def fetch_up_since_prom_map(cache_ttl=300.0, source=None):
             if inst and val is not None and inst not in up_since_map:
                 try:
                     up_since_map[inst] = float(val)
+                    basis[inst] = "telemetry"  # up since monitoring began: at least
                 except ValueError:
                     pass
 
-    return up_since_map
+    # 4. Start of the current unbroken telemetry run (series present, but not
+    #    15m earlier). Uptime can't be claimed across that gap.
+    query_run = 'max_over_time(timestamp(probe_success unless probe_success offset 15m)[32d:5m])'
+    raw_run, _ = _pc.fetch_prometheus_json(f"/api/v1/query?query={quote(query_run)}", use_cache=True, cache_ttl=cache_ttl, source=source)
+    if not raw_run or not raw_run.get('data', {}).get('result'):
+        query_run = 'max_over_time(timestamp(up unless up offset 15m)[32d:5m])'
+        raw_run, _ = _pc.fetch_prometheus_json(f"/api/v1/query?query={quote(query_run)}", use_cache=True, cache_ttl=cache_ttl, source=source)
+    if raw_run and raw_run.get('status') == 'success':
+        for r in raw_run.get('data', {}).get('result', []):
+            metric = r.get('metric', {})
+            inst = metric.get('instance') or metric.get('target') or metric.get('url')
+            try:
+                run_start = float(r.get('value', [None, None])[1])
+            except (TypeError, ValueError):
+                continue
+            if inst in up_since_map and run_start > up_since_map[inst]:
+                up_since_map[inst] = run_start
+                basis[inst] = "telemetry"
+
+    return (up_since_map, basis) if with_basis else up_since_map
 
 
 def fetch_all_probe_metrics(cache_ttl=3.0, timeout=None):

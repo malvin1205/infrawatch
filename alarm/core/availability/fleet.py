@@ -570,6 +570,124 @@ def maintenance_overlap_seconds(
     return total
 
 
+def subtract_windows(
+    start: float,
+    end: float,
+    windows: Optional[List[Tuple[float, float]]],
+) -> List[Tuple[float, float]]:
+    """[start, end] minus the union of `windows`, as sorted disjoint pieces."""
+    pieces = [(float(start), float(end))] if end > start else []
+    for w in sorted(windows or []):
+        try:
+            ws, we = float(w[0]), float(w[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        nxt = []
+        for a, b in pieces:
+            if we <= a or ws >= b:
+                nxt.append((a, b))
+                continue
+            if ws > a:
+                nxt.append((a, ws))
+            if we < b:
+                nxt.append((we, b))
+        pieces = nxt
+    return [(a, b) for a, b in pieces if b > a]
+
+
+def sla_carve_seconds(
+    uptime: float,
+    downtime: float,
+    coverage: float,
+    excused_down: float,
+    maint_cov: float,
+) -> Tuple[float, float, float]:
+    """(sla_uptime, sla_downtime, sla_coverage) of one host's slice with planned
+    maintenance removed: `maint_cov` leaves the denominator, and of the
+    downtime only `excused_down` (bounded by maint_cov) is forgiven. The ONE
+    formula behind the headline, every Trend slot (stored or Prometheus-filled)
+    and every Calendar day."""
+    maint_cov = max(0.0, min(coverage, maint_cov))
+    if maint_cov <= 0:
+        return uptime, downtime, coverage
+    cov = max(0.0, coverage - maint_cov)
+    down = min(max(0.0, downtime - min(downtime, max(0.0, excused_down), maint_cov)), cov)
+    return max(0.0, cov - down), down, cov
+
+
+def slice_bucket(
+    bucket: Dict[str, Any],
+    clip_start: float,
+    clip_end: float,
+    maintenance_windows: Optional[List[Tuple[float, float]]] = None,
+    now: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
+    """One stored bucket restricted to [clip_start, clip_end], priced the same
+    way for the headline, the Trend and the Calendar.
+
+    Where the row carries per-outage intervals (outage_json["i"]) the clipped
+    downtime is EXACT — an outage at 09:05 in the 09:00 bucket no longer leaks
+    into a window that opens at 09:30, the way the proportional clip spread it
+    across the hour. Rows without intervals keep the proportional clip.
+
+    Adds to clip_hourly_bucket's dict:
+      maint_cov / maint_down — planned coverage / downtime to carve out
+      sla_uptime/_downtime/_coverage — the maintenance-excluded seconds
+      outages — exact outage pieces left after clipping AND after removing
+                 maintenance, as (start, end, open_start, open_end); None when
+                 the row has no per-outage intervals. open_* is True where the
+                 piece's edge is not a real drop/recovery (it was cut by the
+                 bucket, the window or a maintenance window).
+    """
+    clipped = clip_hourly_bucket(bucket, clip_start, clip_end, now=now)
+    if not clipped:
+        return None
+    s0, e0 = clipped["bucket_start"], clipped["bucket_end"]
+    oj = _outage_json(bucket)
+    raw_ivs = oj.get("i")
+    outages = None
+    if isinstance(raw_ivs, list):
+        last_idx = len(raw_ivs) - 1
+        cut = []
+        for idx, iv in enumerate(raw_ivs):
+            try:
+                s, e = float(iv[0]), float(iv[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            a, b = max(s, s0), min(e, e0)
+            if b <= a:
+                continue
+            cut.append((a, b,
+                        (bool(oj.get("ongoing_start")) and idx == 0) or s < s0,
+                        (bool(oj.get("ongoing_end")) and idx == last_idx) or e > e0))
+        down = sum(b - a for a, b, _, _ in cut)
+        cov = min(e0 - s0, max(clipped["coverage_seconds"], down))
+        down = min(down, cov)
+        clipped["downtime_seconds"] = round(down, 2)
+        clipped["coverage_seconds"] = round(cov, 2)
+        clipped["uptime_seconds"] = round(cov - down, 2)
+        clipped["unknown_seconds"] = round(max(0.0, (e0 - s0) - cov), 2)
+        clipped["availability_pct"] = round(_clamp_pct(100.0 * (cov - down) / cov), 2) if cov > 0 else None
+        outages = []
+        for a, b, os_, oe in cut:
+            for pa, pb in subtract_windows(a, b, maintenance_windows):
+                outages.append((pa, pb, os_ or pa > a, oe or pb < b))
+    up, down, cov = clipped["uptime_seconds"], clipped["downtime_seconds"], clipped["coverage_seconds"]
+    maint_cov = maint_down = 0.0
+    if maintenance_windows:
+        bm = maintenance_overlap_seconds(maintenance_windows, s0, e0)
+        if bm > 0:
+            maint_cov = min(cov, bm)
+            # Exact where the row has intervals (only downtime that actually
+            # overlapped a window is excused); coarse otherwise (audit M3).
+            exact_md = _bucket_outage_downtime_in_maintenance(bucket, s0, e0, maintenance_windows)
+            maint_down = min(down, bm) if exact_md is None else min(down, exact_md)
+    sla_up, sla_down, sla_cov = sla_carve_seconds(up, down, cov, maint_down, maint_cov)
+    clipped.update(maint_cov=maint_cov, maint_down=maint_down, sla_uptime=sla_up,
+                   sla_downtime=sla_down, sla_coverage=sla_cov, outages=outages)
+    return clipped
+
+
 def merge_hybrid_target_availability(
     req_start: float,
     req_end: float,
@@ -792,7 +910,9 @@ def merge_hybrid_target_availability(
             except (ValueError, TypeError):
                 pass
 
-            clipped = clip_hourly_bucket(b, sqlite_clip_start, sqlite_clip_end, now=req_end)
+            # slice_bucket: exact outage clipping + the maintenance carve-out,
+            # the same helper the Trend and the Calendar price buckets with.
+            clipped = slice_bucket(b, sqlite_clip_start, sqlite_clip_end, maintenance_windows, now=req_end)
             if clipped:
                 sqlite_up_sec += clipped["uptime_seconds"]
                 sqlite_down_sec += clipped["downtime_seconds"]
@@ -800,25 +920,8 @@ def merge_hybrid_target_availability(
                 sqlite_samples += clipped["sample_count"]
                 sqlite_inc += clipped["incident_count"]
                 sqlite_lat_weighted += clipped["avg_latency_ms"] * clipped["coverage_seconds"]
-                if maintenance_windows:
-                    bm = maintenance_overlap_seconds(
-                        maintenance_windows, clipped["bucket_start"], clipped["bucket_end"])
-                    if bm > 0:
-                        maint_cov_sec += min(clipped["coverage_seconds"], bm)
-                        # Excuse only the downtime that ACTUALLY fell inside a
-                        # maintenance window, from the bucket's per-outage
-                        # intervals — not `min(bucket_downtime, bm)`, which
-                        # assumed every second of downtime in the hour was
-                        # planned even when the outage and the window never
-                        # overlapped in time (audit M3). Legacy / approximate
-                        # buckets carry no intervals -> fall back to the coarse
-                        # estimate for those.
-                        exact_md = _bucket_outage_downtime_in_maintenance(
-                            b, clipped["bucket_start"], clipped["bucket_end"], maintenance_windows)
-                        if exact_md is None:
-                            maint_down_sec += min(clipped["downtime_seconds"], bm)
-                        else:
-                            maint_down_sec += min(clipped["downtime_seconds"], exact_md)
+                maint_cov_sec += clipped["maint_cov"]
+                maint_down_sec += clipped["maint_down"]
 
     sqlite_lat = (sqlite_lat_weighted / sqlite_cov_sec) if sqlite_cov_sec > 0 else 0.0
 
@@ -929,19 +1032,14 @@ def merge_hybrid_target_availability(
     # The Prometheus scalar segment has no timestamps, so it stays proportional.
     # `availability_pct` above stays the raw number; SLA status uses `sla_avail`.
     maint_excluded_sec = round(min(total_cov_sec, maint_cov_sec), 2)
-    maint_down_excused = round(min(total_down_sec, maint_down_sec, maint_excluded_sec), 2)
     if maint_excluded_sec > 0:
-        sla_cov_sec = round(max(0.0, total_cov_sec - maint_excluded_sec), 2)
-        sla_down_sec = round(max(0.0, total_down_sec - maint_down_excused), 2)
-        # `maint_down_excused` (exact, from outage_json["i"]) can under-excuse
-        # relative to `maint_excluded_sec` (coarse coverage carve-out) for an
-        # outage still in progress — the freshest bucket's interval list lags
-        # "now" by up to one aggregator tick, so a fully-down host's excluded
-        # window isn't yet 100% reflected as excused downtime. Downtime can
-        # never legitimately exceed coverage; clamp rather than let a
-        # transient lag surface as sla_downtime_seconds > sla_observed_seconds.
-        sla_down_sec = min(sla_down_sec, sla_cov_sec)
-        sla_up_sec = round(max(0.0, sla_cov_sec - sla_down_sec), 2)
+        # Same carve as every Trend slot / Calendar day (sla_carve_seconds).
+        # It also clamps downtime to the remaining coverage: the exact excused
+        # downtime can lag the coarse coverage carve for an outage still in
+        # progress (the freshest bucket's intervals trail "now" by a tick).
+        sla_up_sec, sla_down_sec, sla_cov_sec = (
+            round(v, 2) for v in sla_carve_seconds(
+                total_up_sec, total_down_sec, total_cov_sec, maint_down_sec, maint_excluded_sec))
         sla_avail = round(_clamp_pct((sla_up_sec / sla_cov_sec) * 100.0), 2) if sla_cov_sec > 0 else total_avail
     else:
         sla_up_sec, sla_down_sec, sla_cov_sec = total_up_sec, total_down_sec, total_cov_sec

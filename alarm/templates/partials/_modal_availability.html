@@ -26,6 +26,7 @@
               <option value="10080">Last 7 Days</option>
               <option value="43200">Last 30 Days</option>
               <option value="mtd">Month to date</option>
+              <option value="custom" hidden disabled>Custom range</option>
             </select>
           </div>
 
@@ -214,6 +215,7 @@
             <div class="avb-calendar-grid" id="avbCalendarGrid" aria-label="Daily availability">
               <div class="de-empty">Loading downtime calendar...</div>
             </div>
+            <div class="avb-event-detail avb-calendar-day-detail hidden" id="avbCalendarDayDetail"></div>
             <p class="stat-caption avb-calendar-caption" id="avbCalendarCaption"></p>
           </div>
         </section>

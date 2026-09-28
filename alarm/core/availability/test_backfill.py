@@ -24,7 +24,7 @@ class FakeRepo:
     def __init__(self, coverage):
         self.coverage = dict(coverage)
 
-    def get_instance_bucket_coverage(self, instances=None, source=None):
+    def get_instance_bucket_coverage(self, instances=None, source=None, since=None):
         if not instances:
             return dict(self.coverage)
         return {k: v for k, v in self.coverage.items() if k in set(instances)}
@@ -44,7 +44,7 @@ def _engine(coverage):
     return AvailabilityEngine(bucket_repo=FakeRepo(coverage))
 
 
-def _walk(eng, insts, now, limit=500):
+def _walk(eng, insts, now, limit=int(DEPTH / AVAIL_BACKFILL_CHUNK_SECONDS) + 50):
     """Drive the cursor to exhaustion, returning every window it emitted."""
     out = []
     for _ in range(limit):

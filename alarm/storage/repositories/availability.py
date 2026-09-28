@@ -302,7 +302,8 @@ class AvailabilityBucketRepository:
 
     @staticmethod
     def get_instance_bucket_coverage(
-        instances: Optional[List[str]] = None, db_path: Optional[str] = None, *, source: str
+        instances: Optional[List[str]] = None, db_path: Optional[str] = None, *, source: str,
+        since: Optional[float] = None,
     ) -> Dict[str, Tuple[float, int]]:
         """`{instance: (earliest_bucket_start, distinct_hours_materialized)}`.
 
@@ -315,6 +316,13 @@ class AvailabilityBucketRepository:
         credited twice. An instance absent from the map has no buckets at all.
         A fleet-wide aggregate would let one long-lived target hide every newer
         target's missing history, so this is deliberately per-instance.
+
+        An hour holding downtime WITHOUT per-host outage intervals (scalar
+        fallback after a failed raw fetch, or rows older than the outage_json
+        column) is not counted: it is a hole the depth sweep must re-fetch,
+        otherwise the calendar reports "history not materialized" forever.
+        Mirrors AvailabilityEngine._row_is_materialized. `since` limits the
+        count to buckets starting at/after it (the backfill floor).
         """
         # Past ~900 placeholders SQLite starts refusing the IN list, so filter
         # in Python instead of binding one parameter per instance.
@@ -322,9 +330,13 @@ class AvailabilityBucketRepository:
         with db_read(db_path) as conn:
             query = (
                 "SELECT instance, MIN(bucket_start) AS min_start, "
-                "COUNT(DISTINCT bucket_start) AS hours FROM availability_buckets WHERE source = ?"
+                "COUNT(DISTINCT bucket_start) AS hours FROM availability_buckets WHERE source = ? "
+                "AND NOT (downtime_seconds > 0 AND (outage_json IS NULL OR outage_json = ''))"
             )
             params: List[Any] = [norm_source(source)]
+            if since is not None:
+                query += " AND bucket_start >= ?"
+                params.append(float(since))
             if inline:
                 query += " AND instance IN (%s)" % ",".join("?" for _ in instances)
                 params.extend(instances)

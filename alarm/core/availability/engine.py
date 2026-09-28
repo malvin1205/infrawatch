@@ -2,6 +2,7 @@ from __future__ import annotations
 """AvailabilityEngine: the deep domain module for fleet availability,
 hybrid TSDB/SQLite reconciliation, SLA error budgets, and bucket aggregation.
 """
+import bisect
 import logging
 import math
 import os
@@ -54,6 +55,7 @@ try:
         get_instance_cadence_map,
     )
     from core.monitoring.primitives import _parse_epoch_ts
+    from core.monitoring.queries import with_job
     from core.alerts.engine import (
         load_maintenance_windows,
         maintenance_windows_by_instance,
@@ -82,6 +84,7 @@ except (ImportError, ValueError):
         get_instance_cadence_map,
     )
     from alarm.core.monitoring.primitives import _parse_epoch_ts
+    from alarm.core.monitoring.queries import with_job
     from alarm.core.alerts.engine import (
         load_maintenance_windows,
         maintenance_windows_by_instance,
@@ -89,17 +92,36 @@ except (ImportError, ValueError):
 
 logger = logging.getLogger("infrawatch.availability")
 
-# How deep materialized history should reach. Must track bucket retention: a
-# 30d dashboard window can only be served from buckets if the backfill actually
-# goes that far back, and the old hardcoded 7d meant 30d never could be.
+# How deep materialized history should reach — an upper bound. The effective
+# floor is min(this, the source Prometheus's own retention): history older than
+# what Prometheus holds can never be reconstructed, so sweeping it only writes
+# empty placeholder rows (see _prom_retention_seconds).
 AVAIL_BACKFILL_SECONDS = float(
     os.environ.get("AVAIL_BACKFILL_SECONDS", os.environ.get("AVAIL_BUCKET_RETENTION_SECONDS", str(35 * 86400)))
 )
-# Depth is filled by walking backwards one chunk per aggregation cycle rather
-# than in a single pass. A fleet-wide 30d Prometheus query has been measured at
-# ~50s here, so the whole span at once would stall the aggregator and hammer
-# Prometheus; one 6h chunk per 60s tick reaches 35d in a couple of hours.
-AVAIL_BACKFILL_CHUNK_SECONDS = float(os.environ.get("AVAIL_BACKFILL_CHUNK", str(6 * 3600)))
+# Depth is filled by walking backwards one chunk per aggregation cycle. The
+# exact path fetches RAW samples for the whole chunk (`probe_success[Ns]`, every
+# series): at a 2s scrape a 6h chunk was ~10.8k samples/series — tens of MB that
+# routinely timed out, silently leaving hours without outage intervals. 1h keeps
+# each fetch small; 35d still completes in ~14h of 60s ticks.
+AVAIL_BACKFILL_CHUNK_SECONDS = float(os.environ.get("AVAIL_BACKFILL_CHUNK", "3600"))
+# A completed sweep that left instances under-materialized is not re-run for
+# this long (Prometheus may simply have nothing there) — but it IS re-run after,
+# so a sweep that failed transiently is never abandoned for good.
+AVAIL_BACKFILL_RETRY_SECONDS = float(os.environ.get("AVAIL_BACKFILL_RETRY", str(6 * 3600)))
+# A depth chunk whose raw-sample fetch fails is retried on the next cycles; after
+# this many consecutive failures it is persisted from the scalar fallback (and
+# stays a "hole" for the next sweep to retry) so one bad hour can't pin the walk.
+AVAIL_BACKFILL_MAX_CHUNK_FAILURES = int(os.environ.get("AVAIL_BACKFILL_MAX_CHUNK_FAILURES", "3"))
+
+
+def _parse_prom_duration(text: Optional[str]) -> Optional[float]:
+    """'15d', '1y2w', '720h30m' -> seconds. None/0/unparseable -> None."""
+    import re
+    units = {"ms": 0.001, "s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800, "y": 31536000}
+    parts = re.findall(r"(\d+)(ms|[smhdwy])", (text or "").strip())
+    total = sum(int(n) * units[u] for n, u in parts)
+    return float(total) if total > 0 else None
 # Forward repair (aggregator was down, process restarted) is capped so a long
 # outage can't emit hundreds of windows in one cycle — the backward walk above
 # picks up anything older.
@@ -130,6 +152,36 @@ class AvailabilityEngine:
         # forever would never terminate).
         self._deep_cursor: Optional[float] = None
         self._deep_swept_stale: frozenset = frozenset()
+        self._deep_swept_at: float = 0.0
+        # Stale set of the sweep in flight; committed to _deep_swept_stale only
+        # when the sweep actually reaches the floor.
+        self._deep_sweep_pending: Optional[frozenset] = None
+        self._deep_chunk_failures: Dict[Tuple[float, float], int] = {}
+        # Effective depth (seconds) for the current source — see _backfill_depth.
+        self._backfill_depth_sec: Optional[float] = None
+        self._retention_cache: Dict[str, Tuple[float, Optional[float]]] = {}
+
+    def _prom_retention_seconds(self, source: str) -> Optional[float]:
+        """`storage.tsdb.retention.time` of server `source` (cached 1h), or None
+        when unknown/size-only. Never raises."""
+        now = time.time()
+        hit = self._retention_cache.get(source)
+        if hit and now - hit[0] < 3600.0:
+            return hit[1]
+        ret = None
+        try:
+            raw, _ = self.prom_client.fetch_prometheus_json(
+                "/api/v1/status/flags", use_cache=True, cache_ttl=3600.0, timeout=5.0, source=source)
+            if raw and raw.get("status") == "success":
+                ret = _parse_prom_duration((raw.get("data") or {}).get("storage.tsdb.retention.time"))
+        except Exception:
+            ret = None
+        self._retention_cache[source] = (now, ret)
+        return ret
+
+    def _backfill_depth(self, source: str) -> float:
+        ret = self._prom_retention_seconds(source)
+        return min(AVAIL_BACKFILL_SECONDS, ret) if ret else AVAIL_BACKFILL_SECONDS
 
     def invalidate_cache(self, job: Optional[str] = None, instance: Optional[str] = None) -> int:
         """Evict matching cached availability queries and clear module-level trend caches."""
@@ -288,11 +340,35 @@ class AvailabilityEngine:
                 source=source,
             )
 
-            # Downtime Calendar section — derived from the SAME db_bucket_records
-            # already fetched above for this request, regardless of which path
-            # ran. Missing historical days are reconstructed from Prometheus.
+            # Hosts folded back into the headline must be in the Trend, its
+            # ticks and the Calendar too — otherwise a removed, chronically
+            # down host made the headline 50% over an all-green chart.
+            removed_rows = payload.pop("_removed_rows", None) or {}
+            all_records = list(db_bucket_records)
+            if removed_rows:
+                maint_by_inst = dict(maint_by_inst or {}, **(payload.pop("_removed_maint", None) or {}))
+                for rows in removed_rows.values():
+                    all_records.extend(rows)
+                spans = {i: (min(float(r["bucket_start"]) for r in rows), max(float(r["bucket_end"]) for r in rows))
+                         for i, rows in removed_rows.items()}
+                trend_insts = list(monitored_instances) + sorted(removed_rows)
+                trend_series, trend_slot = _build_fleet_trend(
+                    req_end, query.minutes * 60.0, trend_insts, db_bucket_records=all_records, job=query.job,
+                    maint_by_inst=maint_by_inst, source=source, prefer_job=instance_job_map, host_spans=spans,
+                )
+                payload["trend"] = trend_series
+                payload["trend_bucket_seconds"] = trend_slot
+                payload["trend_incidents"] = _build_fleet_incidents(
+                    db_bucket_records=all_records, req_start=req_start, req_end=req_end,
+                    instances=trend_insts, job=query.job, source=source, maint_by_inst=maint_by_inst,
+                )
+            payload.pop("_removed_maint", None)
+
+            # Downtime Calendar section — derived from the SAME bucket rows the
+            # headline was priced from, regardless of which path ran. Missing
+            # historical days are reconstructed from Prometheus.
             payload["daily"] = _build_daily_downtime(
-                db_bucket_records=db_bucket_records,
+                db_bucket_records=all_records,
                 req_start=req_start,
                 req_end=req_end,
                 instances=monitored_instances,
@@ -307,12 +383,80 @@ class AvailabilityEngine:
                 "whitelist_enforced": AVAIL_TARGET_WHITELIST is not None and bool(set(monitored_instances) & AVAIL_TARGET_WHITELIST),
                 "instances": len(monitored_instances),
             }
+            # Oldest instant materialized history can reach (Prometheus
+            # retention, capped by AVAIL_BACKFILL_SECONDS). The UI uses it to
+            # tell "outside retention, never reconstructable" apart from
+            # "backfill pending".
+            payload["history_floor_ts"] = int(now - self._backfill_depth(source))
 
             if not query.debug:
                 payload.pop("_trace", None)
 
             self.cache.set(cache_key, payload, now=now_under_lock)
             return AvailabilityReport(payload)
+
+    def get_trend(self, job: str, start_ts: float, end_ts: float, max_points: int = 180) -> Dict[str, Any]:
+        """Fleet trend for an arbitrary [start, end] — the Trend chart's zoom.
+
+        The full report's trend is sized for its whole range (a 30d report has
+        4h slots), so zooming into a few days only magnified 4h blocks. This
+        re-slices just the zoomed window: sub-hour slots from Prometheus where
+        it still has the data, hourly stored buckets otherwise.
+        """
+        now = time.time()
+        end_ts = min(float(end_ts), now)
+        start_ts = max(0.0, min(float(start_ts), end_ts - 60.0))
+        try:
+            source = norm_source(self.prom_client.load_endpoints().get("active"))
+        except Exception:
+            source = ""
+        key = f"trend:{source}:{(job or '').lower()}:{int(start_ts) // 60}:{int(end_ts) // 60}:{max_points}"
+        hit = self.cache.get(key, 60.0, now=now)
+        if hit is not None:
+            return hit
+
+        try:
+            monitored = sorted(self._scoped_job_map(job, source)) if source else []
+        except Exception:
+            monitored = []
+        out = {
+            "ok": True, "job": job, "trend": [], "trend_bucket_seconds": 3600,
+            "trend_start_ts": int(start_ts), "trend_end_ts": int(end_ts),
+            "trend_min_reporting_pct": round(AVAIL_TREND_MIN_REPORTING_RATIO * 100.0, 1),
+        }
+        if monitored:
+            maint = self._resolve_maintenance_windows(start_ts, end_ts, job, monitored, source)
+            try:
+                job_map = self._scoped_job_map(job, source)
+            except Exception:
+                job_map = None
+            win = end_ts - start_ts
+            # Stored hourly buckets (+ Prometheus where they're missing) are
+            # ALWAYS the baseline: a zoom's own series must never show less
+            # than the report it came from. A wide zoom (>= 180h) used to be
+            # Prometheus-only and went blank beyond retention.
+            try:
+                records = self.bucket_repo.get_bucket_records(job, start_ts, end_ts, instances=monitored, source=source)
+            except Exception:
+                records = []
+            series, slot = _build_fleet_trend(end_ts, win, monitored, max_points=max_points,
+                                              db_bucket_records=records, job=job, maint_by_inst=maint,
+                                              source=source, prefer_job=job_map)
+            if win / max_points < 3600:
+                # Finer sub-hour slots only come from Prometheus. Use them only
+                # when they cover every hour the hourly series has — a partly
+                # retained window would otherwise trade stored history for gaps.
+                sub, sub_slot = _build_fleet_trend(end_ts, win, monitored, max_points=max_points, job=job,
+                                                   maint_by_inst=maint, source=source, allow_subhour=True,
+                                                   prefer_job=job_map)
+                hour_of = lambda ts: int((ts - 1) // 3600)
+                hourly_hours = {hour_of(p["ts"]) for p in series if p.get("availability_pct") is not None}
+                sub_hours = {hour_of(p["ts"]) for p in sub if p.get("availability_pct") is not None}
+                if sub_slot < 3600 and sub_hours and hourly_hours <= sub_hours:
+                    series, slot = sub, sub_slot
+            out.update(trend=series, trend_bucket_seconds=slot)
+        self.cache.set(key, out, now=now)
+        return out
 
     def aggregate_hourly_buckets(self, now: Optional[float] = None) -> int:
         """Roll up completed historical 1-hour availability buckets and persist to SQLite.
@@ -345,6 +489,7 @@ class AvailabilityEngine:
 
         latest_end = self.bucket_repo.get_latest_bucket_end("all", source=source)
         windows_to_aggregate = self._availability_aggregation_windows(curr_time, latest_end)
+        self._backfill_depth_sec = self._backfill_depth(source)
         depth_window = self._next_depth_backfill_window(monitored, curr_time, source)
         if depth_window is not None:
             windows_to_aggregate = [depth_window] + windows_to_aggregate
@@ -376,7 +521,8 @@ class AvailabilityEngine:
             }
 
             if executor:
-                futures = {k: executor.submit(self.prom_queries.fetch_prom_query_map, q, 10.0, 15.0, source) for k, q in queries.items()}
+                futures = {k: executor.submit(self.prom_queries.fetch_prom_query_map, q, 10.0, 15.0, source,
+                                              prefer_job=instance_job_map) for k, q in queries.items()}
                 results = {}
                 for k, f in futures.items():
                     try:
@@ -387,17 +533,17 @@ class AvailabilityEngine:
                 results = {}
                 for k, q in queries.items():
                     try:
-                        results[k] = self.prom_queries.fetch_prom_query_map(q, 10.0, 15.0, source)
+                        results[k] = self.prom_queries.fetch_prom_query_map(q, 10.0, 15.0, source, prefer_job=instance_job_map)
                     except Exception:
                         results[k] = {}
 
             range_step = 15.0
             try:
-                probe_range_map = self.prom_queries.fetch_prom_range_map("probe_success", w_start, w_end, range_step, cache_ttl=10.0, timeout=20.0, source=source)
+                probe_range_map = self.prom_queries.fetch_prom_range_map("probe_success", w_start, w_end, range_step, cache_ttl=10.0, timeout=20.0, source=source, prefer_job=instance_job_map)
             except Exception:
                 probe_range_map = {}
             try:
-                up_range_map = self.prom_queries.fetch_prom_range_map("up", w_start, w_end, range_step, cache_ttl=10.0, timeout=20.0, source=source)
+                up_range_map = self.prom_queries.fetch_prom_range_map("up", w_start, w_end, range_step, cache_ttl=10.0, timeout=20.0, source=source, prefer_job=instance_job_map)
             except Exception:
                 up_range_map = {}
 
@@ -412,6 +558,35 @@ class AvailabilityEngine:
                 "incidents": results.get("up_incidents", {}),
             }
             merged_maps = derive_bucket_inputs(monitored, probe_results_raw, up_results_raw)
+
+            # Prometheus has samples for this window (count > 0) but the raw
+            # fetch came back empty: a timeout/oversized response, not "no data".
+            # Persisting the scalar fallback here would store downtime without
+            # outage intervals and the chunk would read as done forever. For a
+            # depth chunk, rewind the cursor and retry on a later cycle instead.
+            raw_fetch_failed = (not probe_range_map and not up_range_map
+                                and any(merged_maps["count"].get(i) for i in monitored))
+            is_depth = depth_window is not None and (w_start, w_end) == depth_window
+            if is_depth:
+                if raw_fetch_failed:
+                    fails = self._deep_chunk_failures.get(depth_window, 0) + 1
+                    self._deep_chunk_failures[depth_window] = fails
+                    if fails < AVAIL_BACKFILL_MAX_CHUNK_FAILURES:
+                        logger.warning(
+                            "Availability depth backfill: raw sample fetch failed for [%.0f, %.0f] "
+                            "(attempt %d/%d); will retry",
+                            w_start, w_end, fails, AVAIL_BACKFILL_MAX_CHUNK_FAILURES)
+                        self._deep_cursor = w_end
+                        continue
+                    logger.warning(
+                        "Availability depth backfill: raw sample fetch failed %d times for [%.0f, %.0f]; "
+                        "storing scalar fallback (left as a hole for the next sweep)",
+                        fails, w_start, w_end)
+                self._deep_chunk_failures.pop(depth_window, None)
+            elif raw_fetch_failed:
+                logger.warning(
+                    "Availability aggregator: raw sample fetch failed for [%.0f, %.0f]; "
+                    "storing scalar fallback without outage intervals", w_start, w_end)
             avail_map = merged_maps["avail"]
             count_map = merged_maps["count"]
             first_ts_map = merged_maps["first_ts"]
@@ -456,11 +631,18 @@ class AvailabilityEngine:
                         estimate_instance_cadence(inst, count_map, first_ts_map, last_ts_map)
                         or (fleet_median_cadence if fleet_median_cadence > 0 else range_step)
                     )
+                    sample_ts = [ts for ts, _ in samples]
                     cur_h = h_start
                     while cur_h < h_end:
                         nxt_h = cur_h + 3600.0
                         if cur_h >= curr_time:
                             break  # never materialize a bucket for an hour that has not started
+                        # Carried in = the host was already down AT cur_h, i.e. the
+                        # last sample BEFORE the hour (the fetch keeps a lead-in) is 0.
+                        # hour_pts[0] == 0 alone also flagged an outage that began
+                        # at the hour's first scrape.
+                        lead_idx = bisect.bisect_left(sample_ts, cur_h) - 1
+                        carried_in = lead_idx >= 0 and samples[lead_idx][1] == 0
                         eff_end = min(nxt_h, curr_time)
                         rec = reconstruct_time_series_intervals(
                             samples, window_start_ts=cur_h, window_end_ts=eff_end,
@@ -485,7 +667,7 @@ class AvailabilityEngine:
                                 "d": [round(float(x), 1) for x in rec.get("outage_durations_sec", [])],
                                 "i": [[round(float(s), 1), round(float(e), 1)]
                                       for s, e in rec.get("outage_intervals_sec", [])],
-                                "ongoing_start": bool(hour_pts and hour_pts[0] == 0),
+                                "ongoing_start": bool(carried_in),
                                 "ongoing_end": bool(rec.get("is_ongoing_outage")),
                             },
                         })
@@ -534,8 +716,14 @@ class AvailabilityEngine:
                     up_rate = min(1.0, max(0.0, raw_avail_float / 100.0))
                     down_rate = max(0.0, 1.0 - up_rate)
                 else:
+                    # No availability ratio (avg_over_time failed or absent):
+                    # samples existed but their up/down split is unknown. With
+                    # down_rate=0 the covered seconds used to be booked as pure
+                    # uptime — a fabricated 100%. Record the hour as unknown.
                     up_rate = 0.0
                     down_rate = 0.0
+                    cov_sec = 0.0
+                    f_ts = l_ts = 0.0
                 down_sec = round(cov_sec * down_rate, 2)
 
                 inc_count = 0
@@ -756,6 +944,10 @@ class AvailabilityEngine:
                 removed_buckets_by_inst.setdefault(inst, []).append(b)
         if not removed_buckets_by_inst:
             return payload
+        # Planned maintenance of a removed host is excluded like anyone else's.
+        removed_maint = self._resolve_maintenance_windows(
+            req_start, req_end, query.job, sorted(removed_buckets_by_inst), source) or {}
+        maint_by_inst = dict(maint_by_inst or {}, **removed_maint)
 
         empty_prom = {"first_ts": None, "last_ts": None, "count": None, "avail": None, "incidents": None, "duration": None}
         removed_entries = []
@@ -786,6 +978,8 @@ class AvailabilityEngine:
                 maintenance_windows=(maint_by_inst or {}).get(inst),
             ))
 
+        if not removed_entries:
+            return payload
         combined_entries = list(payload.get("entries") or []) + removed_entries
         combined_summary = summarize_entries(
             combined_entries, period_minutes=query.minutes, sla_threshold=query.sla_target_pct,
@@ -831,6 +1025,9 @@ class AvailabilityEngine:
             "offline": counts["offline"],
             "removed": len(removed_entries),
         }
+        kept = {e["id"] for e in removed_entries}
+        payload["_removed_rows"] = {i: rows for i, rows in removed_buckets_by_inst.items() if i in kept}
+        payload["_removed_maint"] = {i: w for i, w in removed_maint.items() if i in kept}
         return payload
 
     def _compute_fast_path_payload(
@@ -871,7 +1068,8 @@ class AvailabilityEngine:
         hybrid_meta = summary_dict.get("hybrid", {})
 
         if any(e.get("availability_pct") is None for e in entries):
-            counts = _availability_status_counts(entries, self.prom_queries.fetch_prom_query_map("probe_success", source=source))
+            counts = _availability_status_counts(entries, self.prom_queries.fetch_prom_query_map(
+                with_job("probe_success", query.job), source=source, prefer_job=instance_job_map))
         else:
             counts = _availability_status_counts(entries)
 
@@ -886,7 +1084,7 @@ class AvailabilityEngine:
 
         trend_series, trend_slot_sec = _build_fleet_trend(
             req_end, query.minutes * 60.0, monitored_instances, db_bucket_records=db_bucket_records, job=query.job,
-            maint_by_inst=maint_by_inst, source=source,
+            maint_by_inst=maint_by_inst, source=source, prefer_job=instance_job_map,
         )
         trend_incidents = _build_fleet_incidents(
             db_bucket_records=db_bucket_records,
@@ -895,6 +1093,7 @@ class AvailabilityEngine:
             instances=monitored_instances,
             job=query.job,
             source=source,
+            maint_by_inst=maint_by_inst,
         )
         t_done = time.perf_counter()
 
@@ -966,7 +1165,17 @@ class AvailabilityEngine:
         prom_query_minutes = query.minutes_int
         prom_head_sec = None
 
-        if len(instance_spans) >= len(monitored_instances) * 0.85:
+        # Head-only needs SQLite to hold the window's HISTORY too, not just a
+        # recent tail: with only the last ~18h materialized (backfill still
+        # walking back), checking the end alone dropped the other 29 days of
+        # a 30d window from the headline — "Unmonitored 697h" for hosts
+        # Prometheus had watched the whole time, while the Trend and the
+        # Calendar filled those days from Prometheus. Otherwise query
+        # Prometheus for the full window (merge_hybrid then uses SQLite only
+        # where Prometheus has no samples).
+        reaches_start = sum(1 for sp in instance_spans.values() if sp[0] <= req_start + 3600.0)
+        if (len(instance_spans) >= len(monitored_instances) * 0.85
+                and reaches_start >= len(monitored_instances) * 0.85):
             min_end = min(sp[1] for sp in instance_spans.values())
             # If SQLite covers historical data ending within 24 hours of req_end:
             # Query Prometheus ONLY for the un-materialized live head!
@@ -982,29 +1191,36 @@ class AvailabilityEngine:
         req_timeout = 8.0 if sqlite_head_only else max(5.0, min(30.0, query.minutes / 300.0))
         avail_cache_ttl = 15.0 if query.minutes_int >= 1440 else 5.0
 
+        # Scoped to the view's job (the same matcher the stored rows, the Trend
+        # and the Calendar use) — unscoped, `up{instance=X}` of another job
+        # (node exporter down) priced a gitlab-rails view at 0%.
+        probe = with_job("probe_success", query.job)
+        upm = with_job("up", query.job)
+        durm = with_job("probe_duration_seconds", query.job)
         queries = {
-            "probe_avail": f"avg_over_time(probe_success[{prom_query_minutes}m]{at_suffix}) * 100",
-            "up_avail": f"avg_over_time(up[{prom_query_minutes}m]{at_suffix}) * 100",
-            "probe_count": f"count_over_time(probe_success[{prom_query_minutes}m]{at_suffix})",
-            "up_count": f"count_over_time(up[{prom_query_minutes}m]{at_suffix})",
-            "duration": f"avg_over_time(probe_duration_seconds[{prom_query_minutes}m]{at_suffix}) * 1000",
-            "probe_incidents": f"changes(probe_success[{prom_query_minutes}m]{at_suffix})" if prom_query_minutes <= 1440 else None,
-            "up_incidents": f"changes(up[{prom_query_minutes}m]{at_suffix})" if prom_query_minutes <= 1440 else None,
-            "live_probe": "probe_success" if query.end_ts is None else None,
-            "live_up": "up" if query.end_ts is None else None,
+            "probe_avail": f"avg_over_time({probe}[{prom_query_minutes}m]{at_suffix}) * 100",
+            "up_avail": f"avg_over_time({upm}[{prom_query_minutes}m]{at_suffix}) * 100",
+            "probe_count": f"count_over_time({probe}[{prom_query_minutes}m]{at_suffix})",
+            "up_count": f"count_over_time({upm}[{prom_query_minutes}m]{at_suffix})",
+            "duration": f"avg_over_time({durm}[{prom_query_minutes}m]{at_suffix}) * 1000",
+            "probe_incidents": f"changes({probe}[{prom_query_minutes}m]{at_suffix})" if prom_query_minutes <= 1440 else None,
+            "up_incidents": f"changes({upm}[{prom_query_minutes}m]{at_suffix})" if prom_query_minutes <= 1440 else None,
+            "live_probe": probe if query.end_ts is None else None,
+            "live_up": upm if query.end_ts is None else None,
         }
         if prom_query_minutes <= 60:
-            queries["probe_first_ts"] = f"min_over_time(timestamp(probe_success)[{prom_query_minutes}m:]{at_suffix})"
-            queries["probe_last_ts"] = f"max_over_time(timestamp(probe_success)[{prom_query_minutes}m:]{at_suffix})"
-            queries["up_first_ts"] = f"min_over_time(timestamp(up)[{prom_query_minutes}m:]{at_suffix})"
-            queries["up_last_ts"] = f"max_over_time(timestamp(up)[{prom_query_minutes}m:]{at_suffix})"
+            queries["probe_first_ts"] = f"min_over_time(timestamp({probe})[{prom_query_minutes}m:]{at_suffix})"
+            queries["probe_last_ts"] = f"max_over_time(timestamp({probe})[{prom_query_minutes}m:]{at_suffix})"
+            queries["up_first_ts"] = f"min_over_time(timestamp({upm})[{prom_query_minutes}m:]{at_suffix})"
+            queries["up_last_ts"] = f"max_over_time(timestamp({upm})[{prom_query_minutes}m:]{at_suffix})"
 
         t_prom_start = time.perf_counter()
         executor = getattr(self.prom_client, "_SHARED_EXECUTOR", None)
 
         def _call_q(expr):
             t_s = time.perf_counter()
-            res = self.prom_queries.fetch_prom_query_map(expr, cache_ttl=avail_cache_ttl, timeout=req_timeout, source=source)
+            res = self.prom_queries.fetch_prom_query_map(expr, cache_ttl=avail_cache_ttl, timeout=req_timeout, source=source,
+                                                         prefer_job=instance_job_map)
             return res, (time.perf_counter() - t_s) * 1000.0
 
         results = {}
@@ -1101,7 +1317,7 @@ class AvailabilityEngine:
 
         trend_series, trend_slot_sec = _build_fleet_trend(
             req_end, query.minutes * 60.0, monitored_instances, db_bucket_records=db_bucket_records, job=query.job,
-            maint_by_inst=maint_by_inst, source=source,
+            maint_by_inst=maint_by_inst, source=source, prefer_job=instance_job_map,
         )
         trend_incidents = _build_fleet_incidents(
             db_bucket_records=db_bucket_records,
@@ -1110,6 +1326,7 @@ class AvailabilityEngine:
             instances=monitored_instances,
             job=query.job,
             source=source,
+            maint_by_inst=maint_by_inst,
         )
         t_done = time.perf_counter()
 
@@ -1285,18 +1502,34 @@ class AvailabilityEngine:
         if min_start > floor_start + AVAIL_BACKFILL_CHUNK_SECONDS + 3600.0:
             return True
         expected_hours = max(1.0, (hour_end - min_start) / 3600.0)
-        # 5% slack: the newest hour is still filling, and a target legitimately
-        # absent from Prometheus for a scrape or two shouldn't read as a hole.
-        return hours < expected_hours * 0.95
+        # One hour of slack for the newest, still-aggregating hour. The old 5%
+        # slack hid up to ~42h of holes per host over 35d. A target briefly
+        # absent from Prometheus doesn't leave a hole: the sweep writes an
+        # (unknown-coverage) row for every monitored instance-hour.
+        return hours < expected_hours - 1.0
+
+    @staticmethod
+    def _row_is_materialized(r: Dict[str, Any]) -> bool:
+        """A stored hour counts as done unless it holds downtime without the
+        per-host outage intervals (scalar fallback / pre-outage_json rows) —
+        those are holes the sweep must re-fetch. Mirrors the SQL filter in
+        AvailabilityBucketRepository.get_instance_bucket_coverage."""
+        return not (float(r.get("downtime_seconds") or 0.0) > 0 and not r.get("outage_json"))
 
     def _chunk_materialized(self, monitored: List[str], start: float, end: float, source: str) -> bool:
-        """True when >=95% of monitored instance-hours in [start, end) are stored."""
+        """True when EVERY monitored instance has every hour of [start, end)
+        materialized. Per host, not a fleet-wide 95%: that let one host's hole
+        hide behind 19 complete ones and never be swept."""
         try:
             rows = self.bucket_repo.get_bucket_records("all", start, end, instances=monitored, source=source)
-            have = len({(r["instance"], r["bucket_start"]) for r in rows})
         except Exception:
             return False
-        return have >= len(monitored) * ((end - start) / 3600.0) * 0.95
+        hours: Dict[str, set] = {}
+        for r in rows:
+            if start <= float(r["bucket_start"]) < end and self._row_is_materialized(r):
+                hours.setdefault(r["instance"], set()).add(r["bucket_start"])
+        need = int(round((end - start) / 3600.0))
+        return all(len(hours.get(i, ())) >= need for i in monitored)
 
     def _next_depth_backfill_window(
         self, monitored: List[str], now: float, source: str
@@ -1314,10 +1547,13 @@ class AvailabilityEngine:
         span that is already materialized is wasted work but never wrong.
         """
         hour_end = math.floor(now / 3600.0) * 3600.0
-        floor_start = hour_end - AVAIL_BACKFILL_SECONDS
+        floor_start = hour_end - (self._backfill_depth_sec or AVAIL_BACKFILL_SECONDS)
 
         try:
-            coverage = self.bucket_repo.get_instance_bucket_coverage(monitored, source=source)
+            # Only history inside the floor counts: older rows (kept by the 35d
+            # prune while Prometheus retains less) can never be re-fetched, so
+            # counting their gaps would re-trigger a useless sweep forever.
+            coverage = self.bucket_repo.get_instance_bucket_coverage(monitored, source=source, since=floor_start)
         except Exception:
             logger.exception("Availability depth backfill: bucket coverage lookup failed")
             return None
@@ -1336,17 +1572,25 @@ class AvailabilityEngine:
             # tiled downward. Progress must be monotonic.
             pass
         else:
-            # Idle. Start a sweep only for work that is genuinely new: anything
-            # still stale after the last completed sweep is stale because
-            # Prometheus has nothing there, and re-sweeping it every cycle would
-            # never terminate. A newly monitored target is not a subset, so it
-            # does start one.
-            if not stale or stale <= self._deep_swept_stale:
+            # Idle. A sweep that just reached the floor is committed only now —
+            # recording it at START made a sweep whose chunks failed count as
+            # done, and nothing ever retried it.
+            if self._deep_sweep_pending is not None:
+                self._deep_swept_stale = self._deep_sweep_pending
+                self._deep_swept_at = now
+                self._deep_sweep_pending = None
+            # Anything still stale after the last completed sweep is most likely
+            # stale because Prometheus has nothing there; re-sweeping it every
+            # cycle would never terminate, so wait out a backoff — but retry
+            # after it, since a transient failure looks exactly the same. A newly
+            # monitored target is not a subset, so it starts one immediately.
+            if not stale or (stale <= self._deep_swept_stale
+                             and now - self._deep_swept_at < AVAIL_BACKFILL_RETRY_SECONDS):
                 return None
             # Sweep from the top of the window, not from the thinnest instance's
             # earliest bucket: a *hole* (aggregator down for a stretch) sits
             # above that point, so starting there would walk straight past it.
-            self._deep_swept_stale = stale
+            self._deep_sweep_pending = stale
             cursor = hour_end
             logger.info(
                 "Availability depth backfill: starting sweep, %d/%d instances under-materialized",
