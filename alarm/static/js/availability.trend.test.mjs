@@ -443,12 +443,24 @@ console.log('availability trend interaction + calendar ranking: ok');
   p._lastAvailabilityData = { daily: [] };
   const html = p._eventDetailHtml(T, sweep, 86400, { lo: T, hi: T + 900 });
   assert.match(html, /3 went down/, 'distinct hosts that went down, same as the node card');
-  assert.match(html, /INCIDENT · PEAK 4/, 'chronic + flap + a + b down at T+610');
+  assert.match(html, /INCIDENT · PEAK 4 DOWN \(\+3\)/, 'chronic + flap + a + b down at T+610; +3 over the chronic one');
   assert.match(html, /3 hosts went down \(4 drops\)/);
   assert.match(html, /1 already down before/);
   assert.equal(html.split('avb-evd-row-top').length - 1, 4, 'one row per host (flap once), plus chronic');
   assert.match(html, /2 outages · 2m down in span/, 'flapping host summarised on its row');
   assert.match(html, /avb-evd-zoom/, 'span panel offers zoom');
+
+  // Chronic hosts alone never make an INCIDENT; a span over midnight shows dates.
+  const quiet = p._buildFleetSweep([
+    { instance: 'c1', intervals: [{ start_ts: T - 86400, end_ts: T + 3 * 86400, carried_in: true, still_down: true }] },
+    { instance: 'c2', intervals: [{ start_ts: T - 86400, end_ts: T + 3 * 86400, carried_in: true, still_down: true }] },
+    { instance: 'x', intervals: [{ start_ts: T + 100, end_ts: T + 200 }] },
+  ], T - 86400, T + 3 * 86400);
+  const q = p._eventDetailHtml(T, quiet, 30 * 86400, { lo: T, hi: T + 86400 + 3600 });
+  assert.ok(!/INCIDENT/.test(q), '2 chronic + 1 blip is +1, not an incident');
+  const day = ts => `${new Date((ts + 7 * 3600) * 1000).getUTCDate()},`;
+  assert.match(q, new RegExp(`avb-evd-time">\\w+ ${day(T)} \\d\\d:\\d\\d – \\w+ ${day(T + 90000)} \\d\\d:\\d\\d WIB`), 'both ends dated');
+  assert.equal(q.split('avb-evd-strip-ticks">')[1].split('</div>')[0].match(/<span/g).length, 5, 'five time ticks');
 }
 console.log('availability node span panel: ok');
 

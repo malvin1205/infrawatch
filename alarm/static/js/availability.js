@@ -2078,6 +2078,23 @@ class _AvailabilityMethods {
         this._renderAvailabilityTrend(this._lastAvailabilityData, this._trendZoom);
       });
     }
+    // Strip hover: read the down-count at any point of the span.
+    const plot = el.querySelector('.avb-evd-strip-plot');
+    const cur = plot && plot.querySelector('.avb-evd-strip-cursor');
+    if (cur) {
+      const lo = Number(plot.dataset.lo), hi = Number(plot.dataset.hi);
+      const multi = plot.dataset.multi === '1';
+      plot.addEventListener('pointermove', e => {
+        const r = plot.getBoundingClientRect();
+        const f = Math.min(1, Math.max(0, (e.clientX - r.left) / (r.width || 1)));
+        const t = lo + f * (hi - lo);
+        cur.style.left = `${f * 100}%`;
+        cur.classList.toggle('is-flip', f > 0.5);
+        cur.firstElementChild.textContent = `${this._spanTime(t, multi)} WIB · ${sweep.downAt(t)} down`;
+        cur.hidden = false;
+      });
+      plot.addEventListener('pointerleave', () => { cur.hidden = true; });
+    }
     if (containerId === 'avbTrendEventDetail') {
       this._highlightTrendAt(ts);
       // Remembered so a poll re-render re-reads this moment (and node span)
@@ -2212,8 +2229,12 @@ class _AvailabilityMethods {
     const st = this._trendHoverState;
     const win = windowSec || 86400;
     const isRange = !!range;
+    const multiDay = isRange && this._spansWibDays(range.lo, range.hi);
     const timeStr = isRange && range.hi > range.lo
-      ? `${this._trendTsLabel(range.lo, win).replace(/ WIB$/, '')} – ${this._calendarFormatTime(range.hi)} WIB`
+      ? (multiDay
+        // A node can cover 30h+ at MTD: "Sep 10, 00:34 – 10:16" read as 10h.
+        ? `${this._spanTime(range.lo, true)} – ${this._spanTime(range.hi, true)} WIB`
+        : `${this._trendTsLabel(range.lo, win).replace(/ WIB$/, '')} – ${this._calendarFormatTime(range.hi)} WIB`)
       : this._trendTsLabel(ts, win);
     const entries = this._entriesByHost || new Map();
     const TOL = Math.max(15, Math.min(300, win * 0.01));
@@ -2330,13 +2351,17 @@ class _AvailabilityMethods {
   // second ("10 down" under a "59 Hosts Down" card), so operators zoomed in
   // and summed by hand.
   _rangeDetailHtml({ lo, hi }, near, sweep, entries, timeStr) {
-    const hm = ts => this._calendarFormatTime(ts);
+    const multiDay = this._spansWibDays(lo, hi);
+    const hm = ts => this._spanTime(ts, multiDay);
     const before = sweep.hostsDownAt(lo - 1);
     const startDown = before.length;
     const endDown = sweep.downAt(hi);
     let peak = startDown, peakTs = lo;
     const inSpan = sweep.steps.filter(st => st.ts >= lo && st.ts <= hi);
     inSpan.forEach(st => { if (st.down > peak) { peak = st.down; peakTs = st.ts; } });
+    // INCIDENT = 2+ hosts down TOGETHER on top of what was already down.
+    // Absolute peak > 1 fired on every node once a few hosts were chronic.
+    const rise = peak - startDown;
 
     const byHost = new Map();
     near.forEach(c => {
@@ -2381,18 +2406,27 @@ class _AvailabilityMethods {
     let d = `M0 ${py(startDown)}`;
     inSpan.forEach(st => { d += `H${px(st.ts)}V${py(st.down)}`; });
     d += 'H100';
+    // Ticks at 0/25/50/75/100%; the ends also carry the down-count.
+    const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => {
+      const t = lo + f * (hi - lo);
+      const txt = f === 0 ? `${hm(t)} · ${startDown} down` : f === 1 ? `${hm(t)} · ${endDown} down` : hm(t);
+      return `<span style="left:${f * 100}%">${txt}</span>`;
+    }).join('');
     const strip = hi > lo ? `
-      <div class="avb-evd-strip" title="Hosts down across this span">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-          <path class="area" d="${d}V100H0Z"></path>
-          <path class="line" d="${d}" vector-effect="non-scaling-stroke"></path>
-          <line class="peak" x1="${px(peakTs)}" y1="0" x2="${px(peakTs)}" y2="100" vector-effect="non-scaling-stroke"></line>
-        </svg>
-        <div class="avb-evd-strip-lbl">
-          <span>${hm(lo)} · ${startDown} down</span>
-          <span class="is-peak">peak ${peak} at ${hm(peakTs)}</span>
-          <span>${hm(hi)} · ${endDown} down</span>
+      <div class="avb-evd-strip">
+        <div class="avb-evd-strip-peak" style="left:${px(peakTs)}%;transform:translateX(${px(peakTs) < 15 ? 0 : px(peakTs) > 85 ? -100 : -50}%)">peak ${peak} · ${hm(peakTs)}</div>
+        <div class="avb-evd-strip-body">
+          <div class="avb-evd-strip-y" title="Hosts down (scale ${floor}–${peak})"><span>${peak}</span><span>${floor}</span></div>
+          <div class="avb-evd-strip-plot" data-lo="${lo}" data-hi="${hi}" data-multi="${multiDay ? 1 : 0}">
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+              <path class="area" d="${d}V100H0Z"></path>
+              <path class="line" d="${d}" vector-effect="non-scaling-stroke"></path>
+              <line class="peak" x1="${px(peakTs)}" y1="0" x2="${px(peakTs)}" y2="100" vector-effect="non-scaling-stroke"></line>
+            </svg>
+            <div class="avb-evd-strip-cursor" hidden><span></span></div>
+          </div>
         </div>
+        <div class="avb-evd-strip-ticks">${ticks}</div>
       </div>` : '';
 
     const shown = rows.slice(0, AVB_EVD_MAX_ROWS).join('');
@@ -2410,9 +2444,9 @@ class _AvailabilityMethods {
       <div class="avb-evd-head">
         <span class="avb-evd-time">${timeStr}</span>
         ${wentDown
-          ? `<span class="avb-evd-state is-down">${wentDown} went down</span>`
+          ? `<span class="avb-evd-state is-down" title="Distinct hosts that went down at least once in this span">${wentDown} went down</span>`
           : `<span class="avb-evd-state is-up">${recs} recovered</span>`}
-        ${peak > 1 ? `<span class="avb-evd-incident-badge" title="Peak concurrent hosts down in this span">INCIDENT · PEAK ${peak}</span>` : ''}
+        ${rise >= 2 ? `<span class="avb-evd-incident-badge" title="Most hosts down at the same time: ${peak}, of which ${startDown} were already down when the span began">INCIDENT · PEAK ${peak} DOWN (+${rise})</span>` : ''}
         ${hi > lo ? `<button type="button" class="avb-evd-zoom" data-lo="${lo}" data-hi="${hi}">Zoom to span</button>` : ''}
       </div>
       <p class="avb-evd-sub">${sub}</p>
@@ -2450,6 +2484,19 @@ class _AvailabilityMethods {
 
   _calendarStartLabel(ts) {
     return this._calendarFormatTime(ts);
+  }
+
+  // True when lo and hi fall on different WIB calendar days.
+  _spansWibDays(lo, hi) {
+    return Math.floor((lo + WIB_OFFSET_SEC) / 86400) !== Math.floor((hi + WIB_OFFSET_SEC) / 86400);
+  }
+
+  // "HH:MM", or "Sep 11, HH:MM" when the span it labels crosses midnight.
+  _spanTime(ts, withDate) {
+    if (!withDate) return this._calendarFormatTime(ts);
+    const d = new Date((ts + WIB_OFFSET_SEC) * 1000);
+    const mon = d.toLocaleString(undefined, { month: 'short', timeZone: 'UTC' });
+    return `${mon} ${d.getUTCDate()}, ${this._calendarFormatTime(ts)}`;
   }
 
   _calendarFormatTime(ts, isEnd = false, startTs = 0) {
