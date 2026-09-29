@@ -99,7 +99,7 @@ Dashboard NOC real-time untuk memantau ketersediaan server, website, dan jaringa
     </td>
     <td width="50%" valign="top">
       <img src="docs/assets/screenshots/dashboard-light.png" alt="Light theme"><br>
-      <b>Light theme</b> — tema terang untuk ruangan terang.
+      <b>Light theme</b> — tema terang.
     </td>
   </tr>
 </table>
