@@ -31,7 +31,9 @@ window.trapModalFocus = function (modalEl) {
 };
 
 /* ── Modern Confirmation Dialog Helper ─────────────── */
-window.showConfirmDialog = function ({ title, message, confirmText = 'Yes, Delete', cancelText = 'Cancel', isDanger = true }) {
+// `input` ({ type, placeholder, minLength, autocomplete }) adds a field:
+// resolves its value on confirm (null on cancel) instead of true/false.
+window.showConfirmDialog = function ({ title, message, confirmText = 'Yes, Delete', cancelText = 'Cancel', isDanger = true, input = null }) {
   return new Promise((resolve) => {
     const modal = document.getElementById('confirmModal');
     const titleEl = document.getElementById('confirmModalTitle');
@@ -53,21 +55,47 @@ window.showConfirmDialog = function ({ title, message, confirmText = 'Yes, Delet
       actionBtn.style.background = isDanger ? '#EF4444' : 'var(--accent)';
     }
 
+    let field = null, errEl = null;
+    if (input && msgEl) {
+      field = document.createElement('input');
+      field.className = 'form-input';
+      field.style.width = '100%';
+      field.type = input.type || 'text';
+      field.placeholder = input.placeholder || '';
+      field.autocomplete = input.autocomplete || 'off';
+      errEl = document.createElement('div');
+      errEl.className = 'form-error hidden';
+      errEl.style.margin = '8px 0 16px';
+      msgEl.after(field, errEl);
+      field.addEventListener('keydown', e => { if (e.key === 'Enter') onConfirm(); });
+    }
+
     modal.classList.remove('hidden');
     const untrap = window.trapModalFocus(modal);
-    setTimeout(() => { if (cancelBtn) cancelBtn.focus(); }, 50);
+    setTimeout(() => { (field || cancelBtn)?.focus(); }, 50);
 
     const cleanup = (result) => {
       untrap();
       modal.classList.add('hidden');
+      if (field) { field.remove(); errEl.remove(); }
       if (cancelBtn) cancelBtn.removeEventListener('click', onCancel);
       if (actionBtn) actionBtn.removeEventListener('click', onConfirm);
       if (closeBtn) closeBtn.removeEventListener('click', onCancel);
       resolve(result);
     };
 
-    const onCancel = () => cleanup(false);
-    const onConfirm = () => cleanup(true);
+    const onCancel = () => cleanup(field ? null : false);
+    const onConfirm = () => {
+      if (!field) return cleanup(true);
+      const min = input.minLength || 0;
+      if (field.value.length < min) {
+        errEl.textContent = `Must be at least ${min} characters.`;
+        errEl.classList.remove('hidden');
+        field.focus();
+        return;
+      }
+      cleanup(field.value);
+    };
 
     if (cancelBtn) cancelBtn.addEventListener('click', onCancel);
     if (actionBtn) actionBtn.addEventListener('click', onConfirm);

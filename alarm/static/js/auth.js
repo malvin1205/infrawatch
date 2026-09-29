@@ -189,13 +189,22 @@ function initUsersListActions() {
     const resetBtn = e.target.closest('.user-reset-pw-btn');
     if (resetBtn) {
       if (resetBtn.disabled) return;
-      const newPassword = prompt('New password (min 12 chars):');
+      const newPassword = await window.showConfirmDialog({
+        title: 'Reset Password',
+        message: 'Enter a new password (min 12 characters).',
+        confirmText: 'Update Password',
+        isDanger: false,
+        input: { type: 'password', placeholder: '••••••••••••', minLength: 12, autocomplete: 'new-password' },
+      });
       if (newPassword === null) return;
-      if (newPassword.length < 12) { alert('Password must be at least 12 characters'); return; }
       resetBtn.disabled = true;
       const ok = await patchUser(resetBtn.dataset.userId, { password: newPassword });
       resetBtn.disabled = false;
-      if (ok) alert('Password updated.');
+      if (ok) {
+        const label = resetBtn.textContent;
+        resetBtn.textContent = 'Password updated ✓';
+        setTimeout(() => { resetBtn.textContent = label; }, 2500);
+      }
     }
   });
 }
