@@ -70,14 +70,16 @@ def fetch_prom_query_map(query_expr, cache_ttl=5.0, timeout=None, source=None, p
     return {inst: v for inst, (_, v) in picked.items()}
 
 
-def fetch_prom_range_map(query_expr, start_ts, end_ts, step_sec, cache_ttl=5.0, timeout=None, source=None, prefer_job=None):
+def fetch_prom_range_map(query_expr, start_ts, end_ts, step_sec, cache_ttl=5.0, timeout=None, source=None, prefer_job=None,
+                         strict=False):
     """Range query -> {instance: [(ts_float, 0|1), ...]} sorted by ts.
 
     Used by the availability aggregator to feed raw probe samples straight
     into reconstruct_time_series_intervals() (the exact engine) instead of
     approximating from avg_over_time(). Values are coerced to 0/1 the same
     way reconstruct_time_series_intervals does. Returns {} on any failure so
-    callers can fall back to the scalar path per-instance.
+    callers can fall back to the scalar path per-instance — or None with
+    `strict`, for a caller that must tell a failed fetch from "no series".
 
     Raw TSDB samples via a range-vector instant query (`expr[Ns] @ end`), NOT
     query_range: query_range resamples at `step`, so a failed scrape between
@@ -94,7 +96,7 @@ def fetch_prom_range_map(query_expr, start_ts, end_ts, step_sec, cache_ttl=5.0, 
     raw, _ = _pc.fetch_prometheus_json(path, use_cache=True, cache_ttl=cache_ttl, timeout=timeout, source=source)
     picked = {}
     if not raw or raw.get('status') != 'success':
-        return {}
+        return None if strict else {}
     for r in raw.get('data', {}).get('result', []):
         labels = r.get('metric', {})
         inst = labels.get('instance') or labels.get('target') or labels.get('url')

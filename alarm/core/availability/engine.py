@@ -589,13 +589,30 @@ class AvailabilityEngine:
 
             range_step = 15.0
             try:
-                probe_range_map = self.prom_queries.fetch_prom_range_map("probe_success", w_start, w_end, range_step, cache_ttl=10.0, timeout=20.0, source=source, prefer_job=instance_job_map)
+                probe_range_map = self.prom_queries.fetch_prom_range_map("probe_success", w_start, w_end, range_step, cache_ttl=10.0, timeout=20.0, source=source, prefer_job=instance_job_map, strict=True)
             except Exception:
-                probe_range_map = {}
-            try:
-                up_range_map = self.prom_queries.fetch_prom_range_map("up", w_start, w_end, range_step, cache_ttl=10.0, timeout=20.0, source=source, prefer_job=instance_job_map)
-            except Exception:
-                up_range_map = {}
+                probe_range_map = None
+            is_depth = depth_window is not None and (w_start, w_end) == depth_window
+            probe_failed = probe_range_map is None
+            if probe_failed:
+                # A blackbox target's `up` stays 1 while its probe fails, so filling
+                # a failed probe_success fetch in from `up` (raw or scalar) booked
+                # down hosts as fully up. Leave what is stored and retry: a head
+                # window is re-aggregated next cycle (stop here so no later
+                # window moves the watermark past it); a depth chunk goes
+                # through the raw-fetch retry below with no `up` to fall back on.
+                if not is_depth:
+                    logger.warning(
+                        "Availability aggregator: probe_success fetch failed for [%.0f, %.0f]; "
+                        "keeping stored buckets, will retry", w_start, w_end)
+                    break
+                probe_range_map, up_range_map = {}, {}
+                results = {k: v for k, v in results.items() if not k.startswith("up_")}
+            else:
+                try:
+                    up_range_map = self.prom_queries.fetch_prom_range_map("up", w_start, w_end, range_step, cache_ttl=10.0, timeout=20.0, source=source, prefer_job=instance_job_map)
+                except Exception:
+                    up_range_map = {}
 
             probe_results_raw = {
                 "avail": results.get("probe_avail", {}), "count": results.get("probe_count", {}),
@@ -614,9 +631,8 @@ class AvailabilityEngine:
             # Persisting the scalar fallback here would store downtime without
             # outage intervals and the chunk would read as done forever. For a
             # depth chunk, rewind the cursor and retry on a later cycle instead.
-            raw_fetch_failed = (not probe_range_map and not up_range_map
-                                and any(merged_maps["count"].get(i) for i in monitored))
-            is_depth = depth_window is not None and (w_start, w_end) == depth_window
+            raw_fetch_failed = probe_failed or (not probe_range_map and not up_range_map
+                                                and any(merged_maps["count"].get(i) for i in monitored))
             if is_depth:
                 if raw_fetch_failed:
                     fails = self._deep_chunk_failures.get(depth_window, 0) + 1

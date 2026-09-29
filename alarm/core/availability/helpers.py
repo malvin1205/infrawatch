@@ -481,9 +481,9 @@ def _query_prometheus_trend(job, instances, start, end, slot, timeout, source=No
             raw, _ = promclient.fetch_prometheus_json(path, use_cache=True, cache_ttl=45.0, timeout=timeout, source=source)
         except Exception:
             logger.warning("fleet trend query_range failed for expr: %s", expr[:60], exc_info=True)
-            return {}
+            return None
         if not raw or raw.get("status") != "success":
-            return {}
+            return None
         picked = {}
         for r in raw.get("data", {}).get("result", []):
             labels = r.get("metric") or {}
@@ -505,9 +505,15 @@ def _query_prometheus_trend(job, instances, start, end, slot, timeout, source=No
     if job_selector(job):
         matchers.append(job_selector(job))
     sel = "{" + ",".join(matchers) + "}"
+    # A failed probe_success fetch must not leave `up` standing in for it: a
+    # blackbox target's `up` is 1 while its probe fails, so every down host
+    # would chart as up. No probe answer -> no data (the hourly rows serve).
+    probe = _fetch(f"avg_over_time(probe_success{sel}[{window}s])")
+    if probe is None:
+        return {}
     ratio_by_ts = {}
-    for metric in ("up", "probe_success"):  # probe_success last so it wins
-        for ts, per_inst in _fetch(f"avg_over_time({metric}{sel}[{window}s])").items():
+    for per_by_ts in (_fetch(f"avg_over_time(up{sel}[{window}s])") or {}, probe):  # probe last so it wins
+        for ts, per_inst in per_by_ts.items():
             ratio_by_ts.setdefault(ts, {}).update(per_inst)
     return {ts: {i: (float(window) * r, float(window)) for i, r in per.items()} for ts, per in ratio_by_ts.items()}
 

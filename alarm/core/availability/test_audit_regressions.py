@@ -356,3 +356,45 @@ def test_open_end_at_hour_edge_closes_when_next_hour_is_up():
     with _incidents([]):
         ivs = _build_fleet_incidents(rows2, t0, t0 + 2 * H, source=SRC)[0]["intervals"]
     assert len(ivs) == 1 and ivs[0]["end_ts"] == int(t0 + H + 600)
+
+
+# ── a failed probe_success fetch must never be filled in from `up` ──
+
+class ProbeDown(Prom):
+    """Prometheus flaky: every probe_success query fails, `up` (the blackbox
+    exporter's own scrape, 1 while the probe itself fails) answers."""
+
+    def fetch_prom_query_map(self, q, *a, **k):
+        return {"h1": "100", "h2": "100"} if "(up[" in q else {}
+
+    def fetch_prom_range_map(self, expr, start, end, *a, **k):
+        if expr == "probe_success":
+            return None if k.get("strict") else {}
+        return {i: [(start - 15, 1)] + [(t, 1) for t in range(int(start), int(end), 60)] for i in ("h1", "h2")}
+
+
+def test_failed_probe_fetch_never_books_up_as_uptime():
+    now = _now()
+    h0 = math.floor((now - 3 * H) / H) * H
+    down = _row("h1", h0, down=H, outage={"i": [[h0, h0 + H]]})
+    eng = _agg_engine(ProbeDown(), windows=[(h0, h0 + H), (h0 + H, h0 + 2 * H)])
+    with patch.object(repo_mod, "AVAIL_TARGET_WHITELIST", None):
+        eng.bucket_repo.save_buckets([down], SRC)
+        eng.aggregate_hourly_buckets(now=now)
+        kept = eng.bucket_repo.get_bucket_records("all", h0, h0 + H, instances=["h1"], source=SRC)
+        later = eng.bucket_repo.get_bucket_records("all", h0 + H, h0 + 2 * H, source=SRC)
+    assert kept and kept[0]["downtime_seconds"] == H and kept[0]["uptime_seconds"] == 0, kept
+    assert later == [], "no later window may move the watermark past the failed one"
+
+
+def test_live_trend_failed_probe_fetch_is_no_data_not_up():
+    from alarm.core.availability import helpers as helpers_mod
+
+    def fake(path, *a, **k):
+        if "probe_success" in path:
+            return None, None
+        return {"status": "success", "data": {"result": [
+            {"metric": {"instance": "h1", "job": "blackbox"}, "values": [[1000, "1"], [1060, "1"]]}]}}, SRC
+
+    with patch.object(helpers_mod.promclient, "fetch_prometheus_json", side_effect=fake):
+        assert helpers_mod._query_prometheus_trend("blackbox", ["h1"], 1000, 1060, 60, 5.0, source=SRC) == {}
