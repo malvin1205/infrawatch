@@ -1885,7 +1885,9 @@ class _AvailabilityMethods {
       .then(res => {
         if (this._trendDetailPending !== key) return;  // superseded by a newer zoom
         this._trendDetailPending = null;
-        if (!res || !Array.isArray(res.trend)) {
+        // An empty detail never replaces the coarse series: a real gap is empty
+        // there too, and a transient server-side miss blanked a chart that had data.
+        if (!res || !Array.isArray(res.trend) || !res.trend.length) {
           this._trendDetailFailed = { key, at: Date.now() };
           if (this._lastAvailabilityData) this._renderAvailabilityTrend(this._lastAvailabilityData);
           return;

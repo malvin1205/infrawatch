@@ -258,6 +258,19 @@ def test_s1_zoom_detail_prefers_hourly_when_subhour_leaves_holes():
     assert out["trend_bucket_seconds"] == 3600 and len(priced) == 24, (out["trend_bucket_seconds"], len(priced))
 
 
+def test_zoom_detail_survives_empty_prometheus_targets():
+    # /api/v1/targets timed out -> empty job map; the hosts are still in SQLite.
+    start = DAY0
+    end = start + 5 * H
+    eng, _ = _trend_engine([row("h1", start + h * H) for h in range(5)])
+    eng._scoped_job_map = lambda job, src: {}
+    with patch.object(AvailabilityEngine, "_resolve_maintenance_windows", return_value=None), \
+         patch.object(helpers, "_query_prometheus_trend", return_value={}), \
+         patch("alarm.core.availability.engine.time.time", return_value=end + 60):
+        out = eng.get_trend("all", start, end)
+    assert len([p for p in out["trend"] if p["availability_pct"] is not None]) == 5, out
+
+
 # ── H4: a mostly-unobserved day is never a clean 100% ──
 
 def test_h4_mostly_unobserved_day_carries_coverage_and_limited_flag():

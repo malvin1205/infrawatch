@@ -463,9 +463,22 @@ class AvailabilityEngine:
             return hit
 
         try:
-            monitored = sorted(self._scoped_job_map(job, source)) if source else []
+            job_map = self._scoped_job_map(job, source) if source else {}
         except Exception:
-            monitored = []
+            job_map = {}
+        # Stored hourly buckets (+ Prometheus where they're missing) are
+        # ALWAYS the baseline: a zoom's own series must never show less
+        # than the report it came from. A wide zoom (>= 180h) used to be
+        # Prometheus-only and went blank beyond retention.
+        try:
+            records = self.bucket_repo.get_bucket_records(job, start_ts, end_ts, instances=sorted(job_map) or None,
+                                                          source=source) if source else []
+        except Exception:
+            records = []
+        # A slow/unreachable Prometheus /targets gives an empty job map; the
+        # hosts are still in SQLite. Returning an empty trend then blanked the
+        # zoomed chart ("No telemetry") while the report above it had data.
+        monitored = sorted(job_map) or sorted({r["instance"] for r in records if r.get("instance")})
         out = {
             "ok": True, "job": job, "trend": [], "trend_bucket_seconds": 3600,
             "trend_start_ts": int(start_ts), "trend_end_ts": int(end_ts),
@@ -473,19 +486,8 @@ class AvailabilityEngine:
         }
         if monitored:
             maint = self._resolve_maintenance_windows(start_ts, end_ts, job, monitored, source)
-            try:
-                job_map = self._scoped_job_map(job, source)
-            except Exception:
-                job_map = None
+            job_map = job_map or None
             win = end_ts - start_ts
-            # Stored hourly buckets (+ Prometheus where they're missing) are
-            # ALWAYS the baseline: a zoom's own series must never show less
-            # than the report it came from. A wide zoom (>= 180h) used to be
-            # Prometheus-only and went blank beyond retention.
-            try:
-                records = self.bucket_repo.get_bucket_records(job, start_ts, end_ts, instances=monitored, source=source)
-            except Exception:
-                records = []
             series, slot = _build_fleet_trend(end_ts, win, monitored, max_points=max_points,
                                               db_bucket_records=records, job=job, maint_by_inst=maint,
                                               source=source, prefer_job=job_map)
@@ -502,7 +504,8 @@ class AvailabilityEngine:
                 if sub_slot < 3600 and sub_hours and hourly_hours <= sub_hours:
                     series, slot = sub, sub_slot
             out.update(trend=series, trend_bucket_seconds=slot)
-        self.cache.set(key, out, now=now)
+        if out["trend"]:  # an empty answer is usually transient — don't pin it for 60s
+            self.cache.set(key, out, now=now)
         return out
 
     def aggregate_hourly_buckets(self, now: Optional[float] = None) -> int:
