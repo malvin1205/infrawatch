@@ -4,6 +4,15 @@ html, body {
   overflow: hidden;
 }
 
+/* Dashboard renders at 90% (the density operators ran the browser at).
+   Only the top bar + dashboard: modals/drawer/tour stay at 1x, since their
+   pointer math sets px offsets from clientX, which a zoomed ancestor skews.
+   Zoom shrinks the 100vh height too, so it is divided back out. */
+@supports (zoom: 0.9) {
+  .topnav, .main-wrap { zoom: 0.9; }
+  .main-wrap.main-wrap { height: calc(100vh / 0.9); height: calc(100dvh / 0.9); }
+}
+
 .main-wrap {
   width: 100%;
   max-width: 100%;
