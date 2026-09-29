@@ -163,6 +163,7 @@ class IncidentRepository:
                         status = 'firing',
                         severity = excluded.severity,
                         summary = excluded.summary,
+                        job = COALESCE(NULLIF(excluded.job, ''), incidents.job),
                         started_at = excluded.started_at,
                         first_seen = COALESCE(incidents.first_seen, excluded.first_seen),
                         occurrences = incidents.occurrences + 1,
@@ -221,7 +222,8 @@ class EventLogRepository:
         limit: int = 50,
         instance: Optional[str] = None,
         since_time: Optional[float] = None,
-        db_path: Optional[str] = None
+        db_path: Optional[str] = None,
+        job: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         with db_read(db_path) as conn:
             query = "SELECT * FROM event_logs WHERE 1=1"
@@ -229,6 +231,9 @@ class EventLogRepository:
             if instance:
                 query += " AND instance = ?"
                 params.append(instance)
+            if job:
+                query += " AND job = ?"
+                params.append(job)
             if since_time is not None:
                 query += " AND time >= ?"
                 params.append(since_time)

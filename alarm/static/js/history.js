@@ -3,6 +3,7 @@ import { escapeHtml, formatDuration } from './ui/format.js';
 import { apiFetch } from './net.js';
 import { isAdminLike } from './auth.js';
 import { LogsPage } from './logs.js';
+import { addJobs, bindJobSelect, currentJob } from './ui/job-filter.js';
 
 // Fixed UTC+7 offset for Asia/Jakarta (WIB) — 25200 seconds.
 export const WIB_OFFSET_SEC = 25200;
@@ -13,7 +14,7 @@ export class HistoryPage {
     this.data = [];
     this.severityFilter = 'all';
     this.statusFilter = 'all';
-    this.jobFilter = 'all';
+    this.jobFilter = currentJob();
     this.dateRange = 'month';
     this.sortBy = 'last_seen';
     this.searchQ = '';
@@ -73,8 +74,9 @@ export class HistoryPage {
       this._render();
     });
 
-    this.jobSelectEl.addEventListener('change', () => {
-      this.jobFilter = this.jobSelectEl.value;
+    // Shared with the Live Alert Log tab (ui/job-filter.js).
+    bindJobSelect(this.jobSelectEl, job => {
+      this.jobFilter = job;
       this._resetPaging();
       this._render();
     });
@@ -171,7 +173,7 @@ export class HistoryPage {
       const data = await res.json();
       this.data = data;
       this._loaded = true;
-      this._syncJobOptions();
+      addJobs(this.data.map(r => r.job));
       this._updateStats();
       this._render();
     } catch (e) {
@@ -181,21 +183,6 @@ export class HistoryPage {
     } finally {
       if (this._loadAbortController === controller) this._loadAbortController = null;
     }
-  }
-
-  // Job dropdown only ever offers jobs that actually appear in the data —
-  // same idea as InstancesPage's job select, applied to the history dataset.
-  _syncJobOptions() {
-    const jobs = [...new Set(this.data.map(r => r.job).filter(Boolean))].sort();
-    const existing = new Set(Array.from(this.jobSelectEl.options).map(o => o.value));
-    jobs.forEach(j => {
-      if (!existing.has(j)) {
-        const opt = document.createElement('option');
-        opt.value = j;
-        opt.textContent = j;
-        this.jobSelectEl.appendChild(opt);
-      }
-    });
   }
 
   _renderLoading() {

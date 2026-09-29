@@ -867,7 +867,7 @@ def logs():
     limit = max(1, min(limit, json_store.MAX_LOGS))
     try:
         # A legitimately empty log list is not a read failure (audit F20).
-        data = EventLogRepository.get_logs(limit=limit)
+        data = EventLogRepository.get_logs(limit=limit, job=(request.args.get('job') or '').strip() or None)
         _annotate_logs_with_acknowledgment(data)
         return jsonify(data)
     except Exception:

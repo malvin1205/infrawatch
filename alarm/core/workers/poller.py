@@ -141,6 +141,10 @@ class MonitoringStateAdapter:
         """
         return self._state.get_monitored_instances(include_alert_only=False)
 
+    def get_instance_job_map(self) -> Dict[str, str]:
+        """Instance -> its real Prometheus job, for labelling poller alerts."""
+        return self._state.get_instance_job_map("all", include_alert_only=False)
+
 
 # ── Pure Transition Functions ─────────────────────────────────────────────────
 
@@ -322,7 +326,7 @@ class TargetPoller:
                     severity=a.get('severity', 'critical'),
                     instance=inst,
                     summary=f"{inst} auto-resolved (no longer monitored)",
-                    job='',
+                    job=a.get('job') or '',
                     event_time=time.time(),
                     is_now_firing=False,
                     receiver="prometheus-poller-reconcile",
@@ -374,6 +378,14 @@ class TargetPoller:
         if not success_map:
             return  # Prometheus unreachable this tick
 
+        # Real job per target: a hardcoded "blackbox" left History's and the
+        # Live Log's job filters with one option, and never matched a
+        # maintenance window scoped to the target's actual job.
+        try:
+            job_map = self.state_adapter.get_instance_job_map() or {}
+        except Exception:
+            job_map = {}
+
         windows = self.maintenance_loader()
         active_now = {inst for inst in instances if self.maintenance_checker(inst, windows=windows)}
         just_ended = self._maintenance_active_prev - active_now
@@ -402,7 +414,7 @@ class TargetPoller:
                         severity="critical",
                         instance=inst,
                         summary=f"{inst} recovered (confirmed after maintenance window ended)",
-                        job="blackbox",
+                        job=job_map.get(inst, "blackbox"),
                         event_time=curr_time,
                         is_now_firing=False,
                         receiver="prometheus-poller",
@@ -453,7 +465,7 @@ class TargetPoller:
                 severity="critical",
                 instance=inst,
                 summary=summary,
-                job="blackbox",
+                job=job_map.get(inst, "blackbox"),
                 event_time=curr_time,
                 is_now_firing=(not is_up),
                 receiver="prometheus-poller",
@@ -497,7 +509,7 @@ class TargetPoller:
                 severity="warning",
                 instance=inst,
                 summary=summary,
-                job="blackbox",
+                job=job_map.get(inst, "blackbox"),
                 event_time=curr_time,
                 is_now_firing=is_now_firing,
                 receiver="prometheus-poller",

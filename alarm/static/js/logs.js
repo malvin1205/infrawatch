@@ -1,5 +1,6 @@
 /* Alert Logs / Incident History list page. */
 import { escapeHtml, formatDuration } from './ui/format.js';
+import { addJobs, bindJobSelect, currentJob } from './ui/job-filter.js';
 
 export class LogsPage {
   // One place the feed's cap is defined, so the fetch and the "newest N only"
@@ -57,6 +58,15 @@ export class LogsPage {
       });
     });
 
+    // Shared with Incident History (ui/job-filter.js). Filtered server-side,
+    // so a job's newest LOG_FETCH_LIMIT events show, not whatever of it made
+    // the fleet-wide newest 100.
+    bindJobSelect(document.getElementById('logsJobFilter'), () => {
+      this.data = [];
+      this._renderLoading();
+      this.load();
+    });
+
     this.searchEl.addEventListener('input', () => {
       this.searchQ = this.searchEl.value.toLowerCase();
       this._render();
@@ -104,9 +114,12 @@ export class LogsPage {
     this._loadAbortController = controller;
 
     try {
-      const res = await fetch(`/logs?limit=${LogsPage.LOG_FETCH_LIMIT}`, { signal: controller.signal });
+      const job = currentJob();
+      const jobQ = job === 'all' ? '' : `&job=${encodeURIComponent(job)}`;
+      const res = await fetch(`/logs?limit=${LogsPage.LOG_FETCH_LIMIT}${jobQ}`, { signal: controller.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const logs = await res.json();
+      addJobs(logs.map(r => r.job));
 
       const prevCount = this.data.length;
       this.data = logs;
