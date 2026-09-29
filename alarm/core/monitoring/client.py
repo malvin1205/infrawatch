@@ -297,8 +297,16 @@ def fetch_prometheus_json(path, use_cache=True, cache_ttl=None, timeout=None, so
     endpoints_data = load_endpoints()
     active_url = endpoints_data.get("active")
 
+    # Active endpoint down and a failover answered: read (and single-flight) on
+    # the failover's key, where its answers are stored. Keyed on the dead active
+    # instead, every call missed the cache and re-waited its connect timeout.
+    read_base = active_url
+    if (active_url and _tripped(active_url)
+            and LAST_WORKING_PROMETHEUS_URL
+            and LAST_WORKING_PROMETHEUS_URL.rstrip('/') != active_url.rstrip('/')):
+        read_base = LAST_WORKING_PROMETHEUS_URL
     # Same normalisation the write side uses, so a read can hit what a fetch stored.
-    cache_key = f"{(active_url or '').rstrip('/')}:{path}"
+    cache_key = f"{(read_base or '').rstrip('/')}:{path}"
     if use_cache:
         with PROMETHEUS_CACHE_LOCK:
             if cache_key in PROMETHEUS_CACHE:
