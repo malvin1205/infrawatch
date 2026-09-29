@@ -94,6 +94,17 @@ _DNS_CHECK_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="infr
 _FAILED_CANDIDATES = {}
 _FAILED_CANDIDATES_LOCK = threading.Lock()
 _FAILED_CANDIDATE_TTL = 5.0
+# After an endpoint fails, a caller that already holds an answer for its key
+# (even past TTL) gets it at once instead of waiting out another timeout: a
+# flaky link used to park every gunicorn thread on 6s timeouts, CSS included.
+# One poll interval, so a down host is at most one beat late while it's open.
+_BREAKER_SEC = 15.0
+
+
+def _tripped(base_url):
+    with _FAILED_CANDIDATES_LOCK:
+        failed_at = _FAILED_CANDIDATES.get(base_url)
+    return failed_at is not None and time.time() - failed_at < _BREAKER_SEC
 
 # Single-flight locks: when several requests need the same (endpoint, PromQL)
 # result at once (e.g. /instances and /api/availability both polling
@@ -242,18 +253,29 @@ def _fetch_from_source(path, source, use_cache, cache_ttl, timeout):
     if not base or not _filter_safe_candidates([base]):
         return None, None
     cache_key = f"{base}:{path}"
+    hit = None
     if use_cache:
         with PROMETHEUS_CACHE_LOCK:
             hit = PROMETHEUS_CACHE.get(cache_key)
-        if hit and time.time() - hit[0] < cache_ttl:
+        if hit and (time.time() - hit[0] < cache_ttl or _tripped(base)):
             return hit[1], hit[2]
     raw = fetch_url(f"{base}{path}", timeout=6.0 if timeout is None else timeout)
-    if not raw:
-        return None, None
     try:
-        data = json.loads(raw)
+        data = json.loads(raw) if raw else None
     except Exception:
+        data = None
+    if data is None:
+        with _FAILED_CANDIDATES_LOCK:
+            _FAILED_CANDIDATES[base] = time.time()
+        # Same last-good fallback as the failover path: an empty answer here
+        # (e.g. /targets) emptied the host list and blanked the zoom trend.
+        if hit:
+            logger.warning("Prometheus unreachable for %s; serving stale cache (%.0fs old)",
+                           path, time.time() - hit[0])
+            return hit[1], hit[2]
         return None, None
+    with _FAILED_CANDIDATES_LOCK:
+        _FAILED_CANDIDATES.pop(base, None)
     if use_cache and (data.get('status') == 'success' or 'data' in data):
         with PROMETHEUS_CACHE_LOCK:
             PROMETHEUS_CACHE[cache_key] = (time.time(), data, base)
@@ -292,6 +314,12 @@ def fetch_prometheus_json(path, use_cache=True, cache_ttl=None, timeout=None, so
                     cached_ts, cached_data, cached_base = PROMETHEUS_CACHE[cache_key]
                     if time.time() - cached_ts < cache_ttl:
                         return cached_data, cached_base
+            # Active endpoint just failed: last good answer now, not another timeout.
+            if active_url and _tripped(active_url):
+                with PROMETHEUS_CACHE_LOCK:
+                    stale = PROMETHEUS_CACHE.get(cache_key)
+                if stale:
+                    return stale[1], stale[2]
 
         # Primary candidates: active endpoint + last known working endpoint.
         # LAST_WORKING_PROMETHEUS_URL only counts while it is still a
