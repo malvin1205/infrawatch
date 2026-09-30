@@ -308,30 +308,6 @@
           </div>
         </div>
 
-        <!-- Section: Calculations Details Drawer (Collapsible) -->
-        <div id="calcExplanationPanel" class="avail-calc-panel hidden">
-          <div class="avail-calc-card">
-            <div class="avail-calc-title">How Availability & Coverage are Calculated</div>
-            <div class="avail-calc-grid">
-              <div class="avail-calc-item">
-                <strong>Observed Duration</strong>
-                <span>Total time a host was actively monitored by Prometheus in the selected window.</span>
-              </div>
-              <div class="avail-calc-item">
-                <strong>Availability</strong>
-                <span><code>(Uptime / Observed Duration) × 100%</code>. Unmonitored time is excluded so newly added hosts are not penalized.</span>
-              </div>
-              <div class="avail-calc-item">
-                <strong>Coverage</strong>
-                <span><code>(Observed Duration / Selected Window) × 100%</code>. Hosts with &lt;50% coverage display a <span class="badge-limited-data-sample">Limited data</span> indicator.</span>
-              </div>
-              <div class="avail-calc-item">
-                <strong>Fleet Availability</strong>
-                <span><code>(Total Uptime across Fleet / Total Observed Duration) × 100%</code>.</span>
-              </div>
-            </div>
-          </div>
-        </div>
         </div>
         <!-- ── END TAB PANE 1 ── -->
 
@@ -443,6 +419,72 @@
           </div>
         </div>
         <!-- ── END TAB PANE 2 ── -->
+
+        <!-- How-it's-calculated reference. Outside both tab panes so the footer
+             link reaches it from either tab (it used to sit at the bottom of
+             the Ranking pane: opened off-screen, or inside a hidden pane when
+             on the SLA tab — the link looked dead). Every formula mirrors
+             core/availability/fleet.py. -->
+        <div id="calcExplanationPanel" class="avail-calc-panel hidden" tabindex="-1" aria-labelledby="calcExplanationTitle">
+          <div class="avail-calc-card">
+            <div class="avail-calc-head">
+              <div class="avail-calc-title" id="calcExplanationTitle">How availability &amp; SLA are calculated</div>
+              <button type="button" class="avail-calc-close" id="btnCloseCalculations" aria-label="Hide calculation details">&times;</button>
+            </div>
+
+            <div class="avail-calc-group">Measurement</div>
+            <div class="avail-calc-grid">
+              <div class="avail-calc-item">
+                <strong>Observed time</strong>
+                <span>Time Prometheus actually has probe results for a host in the selected window. A gap longer than 3× the scrape interval is <em>unmonitored</em> — never counted as downtime.</span>
+              </div>
+              <div class="avail-calc-item">
+                <strong>Availability (per host)</strong>
+                <span><code>Uptime ÷ Observed time × 100%</code>. Unmonitored time is left out, so a newly added host is not penalised.</span>
+              </div>
+              <div class="avail-calc-item">
+                <strong>Data completeness (coverage)</strong>
+                <span><code>Observed time ÷ Selected window × 100%</code>. Below 50% a host shows <span class="badge-limited-data-sample">Limited data</span>; 95% and up counts as complete.</span>
+              </div>
+              <div class="avail-calc-item">
+                <strong>Fleet Availability</strong>
+                <span><code>Σ Uptime ÷ Σ Observed time × 100%</code> over every host, excluding planned maintenance. Weighted by observed time: a host watched all window weighs more than one added an hour ago.</span>
+              </div>
+              <div class="avail-calc-item">
+                <strong>Healthy Hosts</strong>
+                <span><code>Hosts with zero downtime ÷ Hosts with data in this range</code>. Includes hosts removed later in the range, so it can differ from the dashboard's live host count.</span>
+              </div>
+            </div>
+
+            <div class="avail-calc-group">SLA</div>
+            <div class="avail-calc-grid">
+              <div class="avail-calc-item">
+                <strong>SLA availability</strong>
+                <span><code>(Uptime outside maintenance) ÷ (Observed time − Maintenance) × 100%</code>. Downtime inside a planned window is forgiven, and the window leaves the denominator.</span>
+              </div>
+              <div class="avail-calc-item">
+                <strong>Planned maintenance</strong>
+                <span><b>Exclude from SLA</b> (default): the window is carved out as above. <b>Include in SLA</b>: alarms are still muted, but downtime in the window counts like any other. Ending a window early keeps the time already spent excluded.</span>
+              </div>
+              <div class="avail-calc-item">
+                <strong>SLA status</strong>
+                <span><b>Compliant</b> when SLA availability ≥ target (default 99.9%, per-host override possible). <b>Insufficient data</b> when completeness is below 50% — the number is shown but not judged.</span>
+              </div>
+              <div class="avail-calc-item">
+                <strong>Downtime budget</strong>
+                <span><code>Allowed = (1 − Target ÷ 100) × Window</code>; <code>Used % = SLA downtime ÷ Allowed</code>; <em>still allowed</em> = Allowed − SLA downtime. Example: 99.9% over 30 days allows 43.2 min.</span>
+              </div>
+              <div class="avail-calc-item">
+                <strong>30-day projection</strong>
+                <span>Current downtime rate (<code>SLA downtime ÷ Observed time</code>) × 30 days, compared with the 30-day budget — warns before a short window actually breaches.</span>
+              </div>
+              <div class="avail-calc-item">
+                <strong>Trend &amp; calendar</strong>
+                <span>Every trend point and calendar day uses the same SLA formula on its own slice of time, so they add up to the headline figure.</span>
+              </div>
+            </div>
+          </div>
+        </div>
         </div><!-- /.avail-modal-body -->
       </div><!-- /.avb-scroll -->
 

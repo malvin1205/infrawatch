@@ -706,12 +706,22 @@ export class InstancesPage {
 
     const btnLearnCalculations = document.getElementById('btnLearnCalculations');
     if (btnLearnCalculations) {
-      btnLearnCalculations.addEventListener('click', () => {
-        const panel = document.getElementById('calcExplanationPanel');
-        if (panel) {
-          const isHidden = panel.classList.toggle('hidden');
-          btnLearnCalculations.setAttribute('aria-expanded', !isHidden);
+      const panel = document.getElementById('calcExplanationPanel');
+      const setOpen = (open) => {
+        if (!panel) return;
+        panel.classList.toggle('hidden', !open);
+        btnLearnCalculations.setAttribute('aria-expanded', String(open));
+        if (open) {
+          // Always open + bring into view: a plain toggle opened it below the
+          // fold, so the link looked like it did nothing.
+          panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          panel.focus({ preventScroll: true });
         }
+      };
+      btnLearnCalculations.addEventListener('click', () => setOpen(true));
+      document.getElementById('btnCloseCalculations')?.addEventListener('click', () => {
+        setOpen(false);
+        btnLearnCalculations.focus();
       });
     }
 
