@@ -31,7 +31,7 @@ Dashboard NOC real-time untuk memantau ketersediaan server, website, dan jaringa
 - **Pagination adaptif & Auto Rotate** — jumlah kartu per halaman menyesuaikan ukuran layar; Auto Rotate memutar halaman otomatis untuk TV.
 - **Filter & pencarian** — filter status (Online, Offline, Unacknowledged, Maintenance, Slow >500 ms), filter Job dengan **Default Job** per endpoint, sort prioritas/nama/job/latency, dan pencarian IP/host/job.
 - **Bulk actions** — mode Select untuk memilih banyak host sekaligus lalu menjadwalkan maintenance atau menyembunyikan target.
-- **Host detail drawer** — tab Overview (status, tren response time 5m–30d/MTD/custom dengan zoom, bar availability 24 jam, info target, event terbaru, ringkasan probe), History, Events, Maintenance, dan Settings (parent host).
+- **Host detail drawer** — tab Overview (status, tren response time 5m–30d/MTD/custom dengan zoom, bar availability 24 jam, info target, event terbaru, ringkasan probe, dan telemetri CPU/RAM/Disk live via Node Exporter), History, Events, Maintenance, dan Settings (parent host).
 - **Light / Dark theme** dan dukungan tombol **Back** remote TV (Esc/GoBack/Backspace menutup panel).
 - **Guided Tour** — tur interaktif 70 langkah dari menu akun yang menyorot dan menjelaskan setiap tombol & panel.
 
@@ -50,6 +50,7 @@ Dashboard NOC real-time untuk memantau ketersediaan server, website, dan jaringa
 - **Hosts Requiring Attention** — ranking host berdasarkan availability dan dampak (jumlah insiden, total downtime).
 - **Data Completeness & SLA** — SLA vs target (tidak termasuk maintenance), error budget + proyeksi breach, coverage observed/unmonitored, dan telemetri per host.
 - **Incident History** — riwayat insiden dengan filter severity/status/job/rentang, force-resolve, dan **Export CSV**.
+- **Panduan Operasional SLA (PDF)** — panduan mendalam arsitektur availability, kalkulasi tren, dan downtime calendar tersedia di [docs/user-guide-availability-trend-calendar.pdf](docs/user-guide-availability-trend-calendar.pdf).
 
 ### Platform
 - **RBAC** — Owner (akun pendiri, diproteksi permanen), Administrator, dan Read-Only Viewer.
@@ -119,6 +120,29 @@ Dashboard NOC real-time untuk memantau ketersediaan server, website, dan jaringa
    Verifikasi: `docker compose version` harus mencetak v2.x.
 2. **Prometheus & Blackbox Exporter** yang aktif menjalankan probe target (`probe_success`, `probe_duration_seconds`, `probe_http_status_code`).
 
+   <details>
+   <summary><b>Contoh konfigurasi scrape <code>prometheus.yml</code> (Blackbox Exporter)</b></summary>
+
+   ```yaml
+   scrape_configs:
+     - job_name: 'blackbox-http'
+       metrics_path: /probe
+       params:
+         module: [http_2xx]
+       static_configs:
+         - targets:
+             - https://example.com
+             - http://192.168.1.50
+       relabel_configs:
+         - source_labels: [__address__]
+           target_label: __param_target
+         - source_labels: [__param_target]
+           target_label: instance
+         - target_label: __address__
+           replacement: 127.0.0.1:9115  # Alamat Blackbox Exporter
+   ```
+   </details>
+
 ---
 
 ## Setup & Cara Menjalankan
@@ -158,12 +182,33 @@ Container berjalan sebagai user non-root dengan filesystem read-only; seluruh st
 5. Klik **Masuk & Aktifkan Audio Alarm** di splash screen agar browser TV mengizinkan sirine berbunyi.
 6. Buka **menu akun → Guided Tour** untuk tur singkat seluruh fitur.
 
+### 4. Backup & Restore Data
+
+Seluruh database SQLite (`infrawatch.db`), key, dan sound kustom disimpan di named volume Docker `infrawatch-data` (`/app/data`).
+
+- **Backup data ke file tar.gz**:
+  ```bash
+  docker run --rm -v infrawatch-data:/data -v "$(pwd)":/backup alpine tar czf /backup/infrawatch-backup.tar.gz -C /data .
+  ```
+- **Restore data dari file backup**:
+  ```bash
+  docker run --rm -v infrawatch-data:/data -v "$(pwd)":/backup alpine sh -c "tar xzf /backup/infrawatch-backup.tar.gz -C /data"
+  ```
+
 ### Menjalankan tanpa Docker (development)
 
 ```bash
 cd alarm
+python3 -m venv venv
+source venv/bin/activate       # Di Windows: .\venv\Scripts\activate
 pip install -r requirements.txt
-python app.py        # Flask dev server di http://127.0.0.1:5000
+python app.py                  # Flask dev server di http://127.0.0.1:5000
+```
+
+Untuk menjalankan test suite:
+
+```bash
+pytest
 ```
 
 ---
@@ -180,7 +225,7 @@ Variabel utama (lihat `.env.example`):
 | `INFRAWATCH_API_KEY` | *(auto)* | API key mesin; kosong = dibuat otomatis di `/app/data/.api_key`. |
 | `WEBHOOK_SECRET` | *(auto)* | Secret header `X-Webhook-Secret` untuk `/webhook`. |
 | `SESSION_COOKIE_SECURE` | `0` | Set `1` hanya jika di belakang reverse proxy HTTPS. |
-| `AVAIL_TARGET_WHITELIST_FILE` | `alarm/data/target_whitelist.txt` | Daftar target yang dihitung ke SLA; `none` = hitung semua target. File kosong/hilang = tidak ada yang dihitung. |
+| `AVAIL_TARGET_WHITELIST_FILE` | `alarm/data/target_whitelist.txt` | Path file whitelist SLA. Secara default whitelist dinonaktifkan (`none`) sehingga seluruh target yang di-scrape otomatis dihitung ke SLA. |
 
 Tuning lanjutan (tambahkan ke blok `environment:` di `docker-compose.yml` bila perlu):
 
@@ -228,6 +273,7 @@ Tuning lanjutan (tambahkan ke blok `environment:` di `docker-compose.yml` bila p
 | `/api/alerts/firing` | `GET` | Insiden yang sedang firing (per endpoint aktif, atau `?source=`) |
 | `/api/jobs` | `GET` | Daftar job Prometheus |
 | `/api/prometheus-targets` | `GET` | Target hasil discovery Prometheus (dropdown Add Target) |
+| `/api/host-resources` | `GET` | Telemetri CPU, RAM, & Disk dari Node Exporter untuk drawer host |
 
 **Availability & SLA**
 
@@ -266,6 +312,7 @@ Tuning lanjutan (tambahkan ke blok `environment:` di `docker-compose.yml` bila p
 | `/api/maintenance/bulk` | `POST` 🔒 | Maintenance massal untuk banyak host |
 | `/api/maintenance/<id>` | `DELETE` 🔒 | Akhiri / hapus maintenance window |
 | `/api/dependencies` | `GET` / `POST` 🔒 | Daftar & buat relasi parent-child |
+| `/api/dependencies/bulk` | `POST` 🔒 / `DELETE` 🔒 | Buat / hapus relasi parent-child massal untuk banyak host |
 | `/api/dependencies/<id>` | `DELETE` 🔒 | Hapus relasi dependency |
 | `/api/endpoints` | `GET` / `POST` 🔒 / `DELETE` 🔒 | Daftar endpoint Prometheus (failover) |
 | `/api/endpoints/select` | `POST` 🔒 | Ganti endpoint aktif |
@@ -299,7 +346,7 @@ Semua target dideteksi otomatis dari Prometheus (`/api/v1/targets`) — cukup ko
 - **Auto-Discovery** — poller & dashboard membaca target aktif beserta `probe_success` / `probe_duration_seconds` dari endpoint Prometheus aktif. Tidak ada file YAML lokal.
 - **Sembunyikan target (tombstone reversibel)** — dari mode Select (bulk) atau `DELETE /api/targets`. Target disimpan di tabel `deleted_targets`; scraping di Prometheus tidak dihentikan.
 - **Pulihkan target** — lewat tombol **+ Add Target** di dashboard (`POST /api/targets`).
-- **Whitelist SLA** — hanya target di `AVAIL_TARGET_WHITELIST_FILE` yang dihitung ke SLA/Trend/Calendar.
+- **Kalkulasi SLA & Whitelist** — secara default seluruh target aktif yang di-scrape dari Prometheus otomatis dihitung ke SLA, Tren, dan Kalender Downtime. Opsi whitelist (`AVAIL_TARGET_WHITELIST_FILE`) dapat diaktifkan kembali jika armada hanya ingin menghitung target tertentu.
 
 ---
 
