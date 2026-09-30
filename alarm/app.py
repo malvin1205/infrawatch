@@ -8,7 +8,7 @@ import uuid
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -930,6 +930,16 @@ def add_endpoint_api():
     is_safe, err_msg = is_safe_endpoint_url(url)
     if not is_safe:
         return jsonify({"ok": False, "error": err_msg or "Invalid endpoint URL"}), 400
+
+    # Bare host typed ("192.168.40.141") → port 80, where Prometheus usually
+    # isn't. Saved as-is it reads as a dead server: the live grid silently
+    # fails over to ANOTHER server's fleet and availability goes NO_DATA.
+    # Use Prometheus's default :9090 when only that one answers.
+    parsed = urlparse(url)
+    if parsed.port is None and parsed.path in ('', '/'):
+        probe = lambda base: promclient.fetch_url(f"{base}/api/v1/status/buildinfo", timeout=2.0) is not None
+        if not probe(url) and probe(f"{url}:9090"):
+            url = f"{url}:9090"
 
     with _WEBHOOK_LOCK:
         set_active = bool(body.get('set_active', True))
