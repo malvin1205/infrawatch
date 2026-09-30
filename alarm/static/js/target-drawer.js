@@ -5,6 +5,7 @@
 import { calculateNiceScale, buildMSGradientDefs } from './ui/charts.js';
 import { escapeHtml, slowThresholdMs, latencySeverity, latencyColor, DATE_LOCALE } from './ui/format.js';
 import { apiFetch } from './net.js';
+import { renderHostResources, renderHostDetail } from './ui/host-resources.js';
 
 // Response Time Trend presets (minutes). 'mtd' and 'custom' are computed.
 const RT_PRESET_MIN = { '5m': 5, '15m': 15, '1h': 60, '6h': 360, '24h': 1440, '7d': 10080, '30d': 43200 };
@@ -632,6 +633,7 @@ class _DrawerMethods {
     this._renderDrawerDependency(target);
     this._renderDrawerAvailabilityBars(target);
     this._renderDrawerProbeSummary(target, []);
+    this._loadHostResources(target);
 
     // Open
     if (this.sideDrawerOverlay) {
@@ -647,6 +649,65 @@ class _DrawerMethods {
       const closeBtn = document.getElementById('closeDrawerBtn');
       if (closeBtn) closeBtn.focus();
     }, 320);
+  }
+
+  // "Host resources": asked only when a host's detail opens (the grid poll
+  // never carries it). Port 9100 check + Prometheus numbers, both cached
+  // server-side; Recheck forces both.
+  async _loadHostResources(target, refresh = false) {
+    const box = document.getElementById('drawerHostResources');
+    if (!box || !target) return;
+    if (!box._hrWired) {
+      box._hrWired = true;
+      box.addEventListener('click', e => {
+        if (e.target.closest && e.target.closest('[data-hr-recheck]') && this.selectedTarget) {
+          this._loadHostResources(this.selectedTarget, true);
+        }
+      });
+      // <details> "toggle" doesn't bubble: listen in the capture phase.
+      box.addEventListener('toggle', e => {
+        const d = e.target;
+        if (d && d.matches && d.matches('[data-hr-more]') && d.open && this.selectedTarget) {
+          this._loadHostResourcesDetail(this.selectedTarget, d);
+        }
+      }, true);
+    }
+    if (this._hrAbort) this._hrAbort.abort();
+    const ctrl = this._hrAbort = new AbortController();
+    const instance = target.instance;
+    const q = new URLSearchParams({ instance });
+    if (target.health !== 'up') q.set('down', '1');
+    if (refresh) {
+      q.set('refresh', '1');
+      const btn = box.querySelector('[data-hr-recheck]');
+      if (btn) { btn.textContent = 'Rechecking…'; btn.disabled = true; }
+    } else {
+      box.innerHTML = '<p class="hr-note">Checking port 9100…</p>';
+    }
+    try {
+      const res = await fetch(`/api/host-resources?${q}`, { signal: ctrl.signal });
+      const data = await res.json();
+      if (!this.selectedTarget || this.selectedTarget.instance !== instance) return;
+      box.innerHTML = renderHostResources(data);
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+      box.innerHTML = renderHostResources({ ok: false, error: 'Host resources could not be loaded.' });
+    }
+  }
+
+  async _loadHostResourcesDetail(target, detailsEl) {
+    if (detailsEl.dataset.loaded) return;
+    const body = detailsEl.querySelector('.hr-more-body');
+    const q = new URLSearchParams({ instance: target.instance, detail: '1' });
+    if (target.health !== 'up') q.set('down', '1');
+    try {
+      const data = await (await fetch(`/api/host-resources?${q}`)).json();
+      if (!this.selectedTarget || this.selectedTarget.instance !== target.instance) return;
+      detailsEl.dataset.loaded = '1';
+      if (body) body.innerHTML = renderHostDetail(data.detail);
+    } catch (e) {
+      if (body) body.innerHTML = '<p class="hr-note">Detail could not be loaded.</p>';
+    }
   }
 
   // Toggles the drawer between "schedule maintenance" and "maintenance

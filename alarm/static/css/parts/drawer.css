@@ -867,3 +867,30 @@
   border-color: var(--border-strong);
 }
 
+/* ── Host resources (node exporter on :9100) ─────────── */
+.hr-section { margin-top: 14px; }
+.hr-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.hr-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex: none; }
+.hr-dot.is-ok { background: var(--success); }
+.hr-recheck { margin-left: auto; font-size: 11px; color: var(--accent); background: none; border: none; padding: 0; cursor: pointer; }
+.hr-note { font-size: 11px; color: var(--text-muted); margin: 0; }
+.hr-grid { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.hr-row { display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 10px; font-size: 12px; }
+.hr-label { color: var(--text-muted); }
+.hr-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.hr-bar-fill { display: block; height: 100%; background: var(--success); }
+.hr-bar.is-warn .hr-bar-fill { background: #F59E0B; }
+.hr-bar.is-crit .hr-bar-fill { background: var(--critical); }
+.hr-val { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hr-val.is-warn, .hr-table .is-warn { color: #F59E0B; }
+.hr-val.is-crit, .hr-table .is-crit { color: var(--critical); }
+.hr-facts { font-size: 11px; color: var(--text-muted); }
+.hr-facts b { color: var(--text-primary); font-weight: 600; }
+/* Stale numbers: greyed whatever their level. */
+.hr-stale .hr-bar .hr-bar-fill { background: var(--text-muted); }
+.hr-stale .hr-val { color: var(--text-muted); }
+.hr-more summary { cursor: pointer; font-size: 11px; color: var(--accent); }
+.hr-table { width: 100%; font-size: 11px; border-collapse: collapse; margin-top: 6px; }
+.hr-table th { text-align: left; color: var(--text-muted); font-weight: 500; }
+.hr-table td, .hr-table th { padding: 2px 6px 2px 0; }
+

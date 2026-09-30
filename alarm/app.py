@@ -1985,6 +1985,35 @@ def instances():
 # calls them as bare names.
 
 
+@app.route('/api/host-resources')
+@rate_limit(60, 60)
+def api_host_resources():
+    """CPU / RAM / disk of one host for the target drawer (see
+    core/monitoring/host_resources.py). Only for a monitored target or an alias
+    key, so this public read can't be used to probe arbitrary addresses.
+    refresh=1: re-probe :9100 and re-read Prometheus; down=1: the host's ping
+    is down, don't probe; detail=1: add per-partition / per-interface data."""
+    try:
+        from core.monitoring import host_resources
+        from core.monitoring.state import get_instance_job_map
+        from storage.repositories.availability import norm_source
+    except ImportError:
+        from alarm.core.monitoring import host_resources
+        from alarm.core.monitoring.state import get_instance_job_map
+        from alarm.storage.repositories.availability import norm_source
+    instance = (request.args.get('instance') or '').strip()
+    if not instance:
+        return jsonify({"ok": False, "error": "instance is required"}), 400
+    source = norm_source(load_endpoints().get("active"))
+    known = instance in get_instance_job_map("all", source=source) \
+        or instance.lower() in host_resources.load_aliases()
+    if not known:
+        return jsonify({"ok": False, "error": "unknown instance"}), 404
+    flag = lambda k: request.args.get(k) in ('1', 'true')
+    return jsonify(host_resources.host_report(
+        instance, source, host_down=flag('down'), refresh=flag('refresh'), detail=flag('detail')))
+
+
 @app.route('/api/availability')
 @rate_limit(120, 60)
 def api_availability():
