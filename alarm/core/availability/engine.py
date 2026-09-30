@@ -1130,10 +1130,15 @@ class AvailabilityEngine:
         instance_spans = {}
         newest_bucket_update = 0.0
 
+        # A row with zero coverage counts too: the aggregator writes one for
+        # an hour Prometheus has no samples of (host added later, exporter
+        # off). Requiring coverage sent the whole 30d report of a job with
+        # one such host to the hybrid path — ~45s re-querying Prometheus for
+        # hours it has nothing for. Same "materialized" as the depth sweep.
+        monitored_set = set(monitored_instances)
         for b in db_bucket_records:
             inst = b.get("instance")
-            cov_sec = float(b.get("coverage_seconds", 0) or 0)
-            if inst in monitored_instances and cov_sec > 0:
+            if inst in monitored_set:
                 instances_in_db.add(inst)
                 st = float(b.get("bucket_start", 0))
                 en = float(b.get("bucket_end", 0))

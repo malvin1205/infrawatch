@@ -622,6 +622,28 @@ def slice_bucket(
     maintenance_windows: Optional[List[Tuple[float, float]]] = None,
     now: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
+    """_slice_bucket, memoized on the row for the common case: the whole
+    completed hour, no maintenance. The headline, the Calendar and the Trend
+    each slice every row of a report — the same hour three times (~530k
+    slices for a 30d all-jobs report). The result is shared: read-only."""
+    b_s, b_e = bucket.get("bucket_start"), bucket.get("bucket_end")
+    whole = (not maintenance_windows and b_s is not None and b_e is not None
+             and clip_start <= b_s and clip_end >= b_e and (now is None or now >= b_e))
+    if whole and "_whole_slice" in bucket:
+        return bucket["_whole_slice"]
+    out = _slice_bucket(bucket, clip_start, clip_end, maintenance_windows, now)
+    if whole:
+        bucket["_whole_slice"] = out
+    return out
+
+
+def _slice_bucket(
+    bucket: Dict[str, Any],
+    clip_start: float,
+    clip_end: float,
+    maintenance_windows: Optional[List[Tuple[float, float]]] = None,
+    now: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
     """One stored bucket restricted to [clip_start, clip_end], priced the same
     way for the headline, the Trend and the Calendar.
 

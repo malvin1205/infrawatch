@@ -673,3 +673,37 @@ def test_backfill_status_reports_filling_then_complete():
         eng.invalidate_range(top - 10 * H, top)
         st = eng.backfill_status(SRC, ["h1", "h2"], now=now)
         assert st["state"] == "complete" and st["materialized_from_ts"] == top - 10 * H == st["floor_ts"]
+
+
+def test_host_without_telemetry_for_part_of_window_keeps_the_fast_path():
+    """A host added mid-window has zero-coverage "no data" rows before it
+    existed. They are materialized history (Prometheus has nothing there
+    either), so the report must stay on SQLite instead of re-querying the
+    whole window from Prometheus."""
+    now = _now()
+    top = math.floor(now / H) * H
+    hours = [top - k * H for k in range(1, 25)]
+    rows = [dict(_row("h1", h), updated_at=now) for h in hours]
+    rows += [dict(_row("h2", h), updated_at=now) if h >= top - 6 * H else
+             dict(_row("h2", h), uptime_seconds=0.0, coverage_seconds=0.0, unknown_seconds=H,
+                  availability_pct=None, updated_at=now)
+             for h in hours]
+    eng = AvailabilityEngine(prom_client=Client, bucket_repo=DbRepo())
+    assert eng._check_sqlite_coverage(rows, ["h1", "h2"], top - 24 * H, top, None, now)
+    assert not eng._check_sqlite_coverage(rows[:-3], ["h1", "h2"], top - 24 * H, top, None, now), \
+        "a host missing rows is still a hole"
+
+
+def test_whole_hour_slice_is_memoized_but_partial_clips_are_not():
+    from alarm.core.availability.fleet import slice_bucket
+    h0 = 1_790_000_000.0 // H * H
+    row = _row("h1", h0, down=600.0, outage=json.dumps({"d": [600.0], "i": [[h0 + 60, h0 + 660]],
+                                                        "ongoing_start": False, "ongoing_end": False}))
+    whole = slice_bucket(row, h0, h0 + H, None, now=h0 + 2 * H)
+    assert slice_bucket(row, h0 - H, h0 + 2 * H, None, now=h0 + 2 * H) is whole
+    half = slice_bucket(row, h0 + 1800, h0 + H, None, now=h0 + 2 * H)
+    assert half is not whole and half["coverage_seconds"] == 1800.0 and half["downtime_seconds"] == 0.0
+    maint = slice_bucket(row, h0, h0 + H, [(h0, h0 + 300)], now=h0 + 2 * H)
+    assert maint is not whole and maint["maint_down"] == 240.0
+    live = slice_bucket(row, h0, h0 + H, None, now=h0 + 1800)
+    assert live is not whole, "an hour still in progress is not the cached whole hour"
