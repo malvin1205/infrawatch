@@ -1917,8 +1917,16 @@ class AvailabilityEngine:
                 sample_ts = [ts for ts, _ in samples]
                 job = instance_job_map.get(inst, "blackbox")
                 for h in group:
+                    # Cadence as the head path (and the old 1h-chunk backfill)
+                    # estimates it: this hour's own span / (samples - 1). A
+                    # chunk-wide 3600/densest-hour count moves the 3x gap
+                    # tolerance and booked up to ~170s/hour differently.
+                    lo = bisect.bisect_left(sample_ts, h)
+                    hi = bisect.bisect_left(sample_ts, h + 3600.0)
+                    span = sample_ts[hi - 1] - sample_ts[lo] if hi - lo >= 2 else 0.0
+                    h_cad = span / (hi - lo - 1) if span > 0 else cad
                     rows.append(_raw_hour_record(
-                        inst, job, samples, sample_ts, h, curr_time, cad, latency_at(inst, h + 3600.0)))
+                        inst, job, samples, sample_ts, h, curr_time, h_cad, latency_at(inst, h + 3600.0)))
                     stats["raw_hours"] += 1
         return rows, complete, stats
 
