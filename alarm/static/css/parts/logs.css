@@ -238,7 +238,7 @@
   grid-template-columns: 1fr 1.4fr 140px 90px;
 }
 
-/* List body — thin custom scrollbar */
+/* List body (thin scrollbar comes from base.css) */
 .log-stream,
 .history-full-table {
   flex: 1;
@@ -247,8 +247,6 @@
   display: flex;
   flex-direction: column;
   padding: 10px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
 }
 
 /* One wrapper per row (header + its expanded detail, when open) so spacing
@@ -261,27 +259,6 @@
 .al-entry:last-child,
 .history-entry:last-child {
   margin-bottom: 0;
-}
-
-.log-stream::-webkit-scrollbar,
-.history-full-table::-webkit-scrollbar {
-  width: 6px;
-}
-
-.log-stream::-webkit-scrollbar-track,
-.history-full-table::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.log-stream::-webkit-scrollbar-thumb,
-.history-full-table::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: var(--r-pill);
-}
-
-.log-stream::-webkit-scrollbar-thumb:hover,
-.history-full-table::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
 }
 
 /* Maintenance rows keep the original dense grid-table look (out of scope

@@ -7,6 +7,20 @@
   padding: 0;
 }
 
+/* One thin, themed scrollbar everywhere (modals, drawer, lists, page),
+   instead of the browser's default bar with arrow buttons. Standard
+   properties for Chrome/Edge/Firefox; ::-webkit-scrollbar for Safari. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--r-pill); }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
 html {
   font-size: 14px;
   -webkit-font-smoothing: antialiased;

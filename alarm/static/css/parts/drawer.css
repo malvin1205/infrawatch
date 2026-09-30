@@ -217,17 +217,6 @@
   flex-direction: column;
   gap: 16px;
   background: var(--bg);
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.drawer-body::-webkit-scrollbar {
-  width: 6px;
-}
-
-.drawer-body::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 3px;
 }
 
 /* Drawer tab panes */
@@ -795,8 +784,6 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
 }
 
 /* Events */
@@ -806,8 +793,6 @@
   gap: 6px;
   max-height: 450px;
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
 }
 
 .de-empty {
