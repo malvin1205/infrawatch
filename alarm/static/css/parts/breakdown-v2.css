@@ -257,7 +257,7 @@
   border-radius: 8px 8px 0 0;
   background: linear-gradient(90deg, var(--accent) 0%, rgba(56, 189, 248, 0.35) 45%, transparent 100%);
 }
-.avb .avb-fleet-body { display: flex; flex: 1; align-items: center; justify-content: center; gap: 14px; }
+.avb .avb-fleet-body { display: flex; flex: 1; align-items: center; gap: 14px; }
 .avb .avb-fleet-figures { min-width: 0; }
 .avb .avb-ring { flex: 0 0 auto; display: block; }
 .avb .avb-ring-track { stroke: var(--border); }
