@@ -1,0 +1,29 @@
+  <!-- Bulk Parent Host Modal — links every host selected on the dashboard
+       (Select mode) to one parent, instead of the drawer's Settings tab one
+       host at a time. Same correlation behavior as the drawer form
+       (target-drawer.js _setDependency), via /api/dependencies/bulk. -->
+  <div id="bulkParentModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="bulkParentModalTitle">
+    <div class="modal-card modal-card-narrow">
+      <div class="modal-header">
+        <h3 class="modal-title" id="bulkParentModalTitle">Parent Host</h3>
+        <button id="closeBulkParentModal" class="modal-close" type="button" aria-label="Close modal">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div id="bulkParentPreview" style="font-size:12px; color:var(--text-secondary); margin-bottom:14px;"></div>
+
+        <form id="bulkParentForm" style="display:flex; flex-direction:column; gap:10px;">
+          <div class="form-group">
+            <label class="form-label" for="bulkParentSelect">Parent host</label>
+            <!-- Native datalist = type-to-search over the active server's hosts. -->
+            <input id="bulkParentSelect" class="form-input" list="bulkParentOptions" placeholder="Search IP / host…" autocomplete="off" spellcheck="false">
+            <datalist id="bulkParentOptions"></datalist>
+          </div>
+          <div id="bulkParentError" class="form-error hidden"></div>
+          <p class="form-help" style="margin: 0 0 8px;">If the parent is also down, these hosts are dimmed on the wallboard so one failure upstream does not look like many separate outages. Their alerts still fire and are still logged. Replaces any parent they already had.</p>
+          <button id="bulkParentSubmitBtn" type="submit" class="btn btn-primary btn-sm btn-block">Link to parent</button>
+          <button id="bulkParentRemoveBtn" type="button" class="btn btn-secondary btn-sm btn-block">Remove parent from selected</button>
+        </form>
+      </div>
+    </div>
+  </div>

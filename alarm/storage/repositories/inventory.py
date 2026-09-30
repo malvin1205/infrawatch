@@ -96,6 +96,29 @@ class DependencyRepository:
         return {"id": dep_id, "parent": parent, "child": child, "created_at": int(now)}
 
     @staticmethod
+    def create_dependencies(parent: str, children: List[str], db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Bulk create_dependency in one transaction. Index-suffixed ids: the
+        ms timestamp alone would collide on the PRIMARY KEY within one batch."""
+        base = int(time.time() * 1000)
+        now = time.time()
+        deps = [{"id": f"dep_{base}_{i}", "parent": parent, "child": c, "created_at": int(now)} for i, c in enumerate(children)]
+        with db_transaction(db_path) as conn:
+            for d in deps:
+                conn.execute("DELETE FROM dependencies WHERE child = ?", (d["child"],))
+                conn.execute("INSERT INTO dependencies (id, parent, child, created_at) VALUES (?, ?, ?, ?)", (d["id"], parent, d["child"], now))
+        return deps
+
+    @staticmethod
+    def delete_dependencies_for_children(children: List[str], db_path: Optional[str] = None) -> List[str]:
+        """Bulk unlink: drop the parent of every listed child in one transaction.
+        Returns the children that actually had a parent."""
+        with db_transaction(db_path) as conn:
+            q = ",".join("?" * len(children))
+            had = [r["child"] for r in conn.execute(f"SELECT child FROM dependencies WHERE child IN ({q})", children)]
+            conn.execute(f"DELETE FROM dependencies WHERE child IN ({q})", children)
+        return had
+
+    @staticmethod
     def delete_dependency(dep_id: str, db_path: Optional[str] = None) -> bool:
         with db_transaction(db_path) as conn:
             cursor = conn.execute("DELETE FROM dependencies WHERE id = ? OR child = ?", (dep_id, dep_id))

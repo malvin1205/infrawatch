@@ -127,7 +127,7 @@ const STEPS = [
   { ch: 'Host grid', ctx: 'none', sel: '#selectModeBtn', title: 'Select mode', note: ADMIN_NOTE,
     body: 'Turns the grid into checkboxes so you can act on many hosts at once.' },
   { ch: 'Host grid', ctx: 'select', sel: '#selectionBar', title: 'Bulk actions', note: ADMIN_NOTE,
-    body: 'Tick hosts (or <b>Select all</b>), then <b>Maintenance</b> to schedule a window for all of them, or <b>Remove selected</b> to hide them. <b>Cancel</b> leaves select mode.' },
+    body: 'Tick hosts (or <b>Select all</b>), then <b>Maintenance</b> to schedule a window for all of them, <b>Parent host</b> to link them all to one upstream host (or remove their parent), or <b>Remove selected</b> to hide them. <b>Cancel</b> leaves select mode.' },
   { ch: 'Host grid', ctx: 'none', sel: '#instanceCount', title: 'Host count',
     body: 'How many hosts match the current filters.' },
   { ch: 'Host grid', ctx: 'none', sel: '#instancesBody .host-card', title: 'Host card',

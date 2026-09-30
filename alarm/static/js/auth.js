@@ -302,6 +302,9 @@ const WRITE_CONTROL_IDS = [
   'removeSelectedBtn',          // targets.write
   'bulkMaintenanceBtn',         // maintenance.write
   'bulkMaintSubmitBtn',         // maintenance.write
+  'bulkParentBtn',              // dependencies.write
+  'bulkParentSubmitBtn',        // dependencies.write
+  'bulkParentRemoveBtn',        // dependencies.write
   'endpointUrlInput',           // endpoints.write
   'addEndpointSubmitBtn',       // endpoints.write
   'apSubmitBtn',                // alarm_policy.write

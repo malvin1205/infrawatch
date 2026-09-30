@@ -1842,6 +1842,9 @@ export class InstancesPage {
     if (cancelBtn) cancelBtn.addEventListener('click', () => this._setSelectMode(false));
     if (bulkMaintBtn) bulkMaintBtn.addEventListener('click', () => this._openBulkMaintenanceModal());
     this._bindBulkMaintenanceModal();
+    const bulkParentBtn = document.getElementById('bulkParentBtn');
+    if (bulkParentBtn) bulkParentBtn.addEventListener('click', () => this._openBulkParentModal());
+    this._bindBulkParentModal();
   }
 
   _setSelectMode(on) {
@@ -1889,6 +1892,8 @@ export class InstancesPage {
     if (removeBtn) removeBtn.disabled = count === 0;
     const bulkMaintBtn = document.getElementById('bulkMaintenanceBtn');
     if (bulkMaintBtn) bulkMaintBtn.disabled = count === 0;
+    const bulkParentBtn = document.getElementById('bulkParentBtn');
+    if (bulkParentBtn) bulkParentBtn.disabled = count === 0;
   }
 
   async _removeSelectedTargets() {
@@ -2022,6 +2027,152 @@ export class InstancesPage {
       }
     } finally {
       if (submitBtn) { submitBtn.disabled = false; submitBtn.removeAttribute('aria-busy'); }
+    }
+  }
+
+  // Bulk Parent Host (dashboard multi-select → one parent for the whole
+  // batch) — same correlation link as the drawer's Settings tab
+  // (_setDependency in target-drawer.js), via /api/dependencies/bulk.
+  _bindBulkParentModal() {
+    const modal = document.getElementById('bulkParentModal');
+    const closeBtn = document.getElementById('closeBulkParentModal');
+    const form = document.getElementById('bulkParentForm');
+    if (!modal || this._bulkParentBound) return;
+    this._bulkParentBound = true;
+
+    const close = () => modal.classList.add('hidden');
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    modal.addEventListener('click', e => { if (e.target === modal) close(); });
+
+    if (form) {
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const parent = document.getElementById('bulkParentSelect')?.value.trim();
+        const errorEl = document.getElementById('bulkParentError');
+        // Free-text input: only accept a host the active server actually has.
+        if (!parent || !this.data.some(t => t.instance === parent)) {
+          if (errorEl) { errorEl.textContent = parent ? `"${parent}" is not a host on this server — pick one from the list.` : 'Pick a parent host.'; errorEl.classList.remove('hidden'); }
+          return;
+        }
+        await this._setBulkParent(Array.from(this._selectedInstances), parent);
+      });
+    }
+    const removeBtn = document.getElementById('bulkParentRemoveBtn');
+    if (removeBtn) removeBtn.addEventListener('click', () => this._removeBulkParent(Array.from(this._selectedInstances)));
+  }
+
+  _openBulkParentModal() {
+    const modal = document.getElementById('bulkParentModal');
+    const previewEl = document.getElementById('bulkParentPreview');
+    const errorEl = document.getElementById('bulkParentError');
+    const select = document.getElementById('bulkParentSelect');
+    if (!modal) return;
+    const instances = Array.from(this._selectedInstances);
+    if (instances.length === 0) return;
+
+    if (errorEl) errorEl.classList.add('hidden');
+    if (previewEl) {
+      const preview = instances.slice(0, 4).map(i => this._esc(i)).join(', ')
+        + (instances.length > 4 ? `, +${instances.length - 4} more` : '');
+      const linked = instances.filter(inst => this.data.find(t => t.instance === inst)?.dependsOn).length;
+      previewEl.innerHTML = `${instances.length} selected host${instances.length === 1 ? '' : 's'}: ${preview}`
+        + `<br><span style="color:var(--text-muted);">${linked} already ha${linked === 1 ? 's' : 've'} a parent. If the new parent is one of the selected hosts, it is skipped.</span>`;
+    }
+    const removeBtn = document.getElementById('bulkParentRemoveBtn');
+    if (removeBtn && !removeBtn.classList.contains('is-readonly')) {
+      removeBtn.disabled = !instances.some(inst => this.data.find(t => t.instance === inst)?.dependsOn);
+    }
+    const options = document.getElementById('bulkParentOptions');
+    if (options) {
+      // Any host can be the parent, including a selected one ("select the
+      // whole rack, pick its switch") — the server drops it from the children.
+      options.innerHTML = this.data
+        .map(t => `<option value="${this._esc(t.instance)}"></option>`)
+        .join('');
+    }
+    if (select) select.value = '';
+    modal.classList.remove('hidden');
+  }
+
+  async _setBulkParent(instances, parent) {
+    const children = instances.filter(inst => inst !== parent);
+    const modal = document.getElementById('bulkParentModal');
+    const errorEl = document.getElementById('bulkParentError');
+    const submitBtn = document.getElementById('bulkParentSubmitBtn');
+
+    if (children.length === 0) {
+      if (errorEl) { errorEl.textContent = 'A host cannot be its own parent — select other hosts to link.'; errorEl.classList.remove('hidden'); }
+      return;
+    }
+
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.setAttribute('aria-busy', 'true'); }
+    try {
+      const res = await apiFetch('/api/dependencies/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parent, children })
+      });
+      let data = {};
+      try { data = await res.json(); } catch (_) { /* non-JSON error body */ }
+
+      if (res.ok && data.ok) {
+        // Patch directly — load() may be aborted by the periodic poll.
+        (data.dependencies || []).forEach(dep => {
+          const target = this.data.find(t => t.instance === dep.child);
+          if (target) Object.assign(target, { dependsOn: dep.parent, dependencyId: dep.id });
+        });
+        const n = (data.dependencies || []).length;
+        this._triggerEventToast(`Linked ${n} host${n === 1 ? '' : 's'} to ${parent}.`);
+        if (modal) modal.classList.add('hidden');
+        this._lastDataSignature = null;
+        this._setSelectMode(false);
+        this.load();
+      } else if (errorEl) {
+        errorEl.textContent = res.status === 403
+          ? 'Permission denied: read-only accounts cannot change parent hosts.'
+          : (data.error || 'Failed to set parent host');
+        errorEl.classList.remove('hidden');
+      }
+    } finally {
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.removeAttribute('aria-busy'); }
+    }
+  }
+
+  async _removeBulkParent(instances) {
+    const modal = document.getElementById('bulkParentModal');
+    const errorEl = document.getElementById('bulkParentError');
+    const removeBtn = document.getElementById('bulkParentRemoveBtn');
+    if (instances.length === 0) return;
+
+    if (removeBtn) { removeBtn.disabled = true; removeBtn.setAttribute('aria-busy', 'true'); }
+    try {
+      const res = await apiFetch('/api/dependencies/bulk', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ children: instances })
+      });
+      let data = {};
+      try { data = await res.json(); } catch (_) { /* non-JSON error body */ }
+
+      if (res.ok && data.ok) {
+        (data.removed || []).forEach(child => {
+          const target = this.data.find(t => t.instance === child);
+          if (target) Object.assign(target, { dependsOn: null, dependencyId: null, suppressedBy: null });
+        });
+        const n = (data.removed || []).length;
+        this._triggerEventToast(`Removed parent host from ${n} host${n === 1 ? '' : 's'}.`);
+        if (modal) modal.classList.add('hidden');
+        this._lastDataSignature = null;
+        this._setSelectMode(false);
+        this.load();
+      } else if (errorEl) {
+        errorEl.textContent = res.status === 403
+          ? 'Permission denied: read-only accounts cannot change parent hosts.'
+          : (data.error || 'Failed to remove parent host');
+        errorEl.classList.remove('hidden');
+      }
+    } finally {
+      if (removeBtn) { removeBtn.disabled = false; removeBtn.removeAttribute('aria-busy'); }
     }
   }
 

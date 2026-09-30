@@ -1535,6 +1535,84 @@ def create_dependency_api():
     )
     return jsonify({"ok": True, "dependency": dep})
 
+@app.route('/api/dependencies/bulk', methods=['POST'])
+@rate_limit(10, 60)
+@require_permission('dependencies.write')
+def create_dependencies_bulk_api():
+    """Link many children to one parent from the dashboard multi-select — one
+    transaction, one audit entry, one rate-limit slot (same reasoning as
+    /api/maintenance/bulk). The parent itself is silently dropped from the
+    children list so "select all → pick one as parent" just works."""
+    data = request.json or {}
+    parent = (data.get('parent') or '').strip()
+    raw_children = data.get('children')
+    if not parent:
+        return jsonify({"ok": False, "error": "parent is required"}), 400
+    if not isinstance(raw_children, list):
+        return jsonify({"ok": False, "error": "children must be a non-empty list"}), 400
+
+    seen = {parent}
+    children = []
+    for c in raw_children:
+        c = c.strip() if isinstance(c, str) else ''
+        if c and c not in seen:
+            seen.add(c)
+            children.append(c)
+    if not children:
+        return jsonify({"ok": False, "error": "children must be a non-empty list (excluding the parent)"}), 400
+    if len(children) > 500:
+        return jsonify({"ok": False, "error": "Cannot link more than 500 hosts at once"}), 400
+
+    with _WEBHOOK_LOCK:
+        try:
+            deps = DependencyRepository.create_dependencies(parent=parent, children=children)
+            _invalidate_dep_cache()
+        except Exception:
+            logger.exception("create_dependencies_bulk_api: DB write failed")
+            return jsonify({"ok": False, "error": "Failed to save dependencies"}), 500
+
+    AuditLogRepository.record_action(
+        actor_username=g.current_user.get("username", "admin"),
+        actor_role=g.current_user.get("role", "admin"),
+        action="CREATE_DEPENDENCY",
+        resource=f"{parent}->bulk:{len(children)} targets",
+        details=f"Created {len(deps)} dependencies on {parent}: {', '.join(children[:10])}{', +' + str(len(children) - 10) + ' more' if len(children) > 10 else ''}"
+    )
+    return jsonify({"ok": True, "dependencies": deps})
+
+@app.route('/api/dependencies/bulk', methods=['DELETE'])
+@rate_limit(10, 60)
+@require_permission('dependencies.write')
+def delete_dependencies_bulk_api():
+    """Unlink many hosts from their parent at once (dashboard multi-select)."""
+    data = request.json or {}
+    raw_children = data.get('children')
+    if not isinstance(raw_children, list):
+        return jsonify({"ok": False, "error": "children must be a non-empty list"}), 400
+    children = list(dict.fromkeys(c.strip() for c in raw_children if isinstance(c, str) and c.strip()))
+    if not children:
+        return jsonify({"ok": False, "error": "children must be a non-empty list"}), 400
+    if len(children) > 500:
+        return jsonify({"ok": False, "error": "Cannot unlink more than 500 hosts at once"}), 400
+
+    with _WEBHOOK_LOCK:
+        try:
+            removed = DependencyRepository.delete_dependencies_for_children(children)
+            _invalidate_dep_cache()
+        except Exception:
+            logger.exception("delete_dependencies_bulk_api: DB write failed")
+            return jsonify({"ok": False, "error": "Failed to remove dependencies"}), 500
+
+    if removed:
+        AuditLogRepository.record_action(
+            actor_username=g.current_user.get("username", "admin"),
+            actor_role=g.current_user.get("role", "admin"),
+            action="DELETE_DEPENDENCY",
+            resource=f"bulk:{len(removed)} targets",
+            details=f"Removed parent host from {len(removed)} hosts: {', '.join(removed[:10])}{', +' + str(len(removed) - 10) + ' more' if len(removed) > 10 else ''}"
+        )
+    return jsonify({"ok": True, "removed": removed})
+
 @app.route('/api/dependencies/<dep_id>', methods=['DELETE'])
 @rate_limit(20, 60)
 @require_permission('dependencies.write')
