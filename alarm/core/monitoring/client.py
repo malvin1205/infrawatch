@@ -259,6 +259,10 @@ def _fetch_from_source(path, source, use_cache, cache_ttl, timeout):
             hit = PROMETHEUS_CACHE.get(cache_key)
         if hit and (time.time() - hit[0] < cache_ttl or _tripped(base)):
             return hit[1], hit[2]
+    # Breaker open, nothing cached: fail fast instead of every poll re-waiting
+    # a dead server's connect timeout (there is no failover to fall back on).
+    if not hit and _tripped(base):
+        return None, None
     raw = fetch_url(f"{base}{path}", timeout=6.0 if timeout is None else timeout)
     try:
         data = json.loads(raw) if raw else None
@@ -283,19 +287,22 @@ def _fetch_from_source(path, source, use_cache, cache_ttl, timeout):
 
 
 def fetch_prometheus_json(path, use_cache=True, cache_ttl=None, timeout=None, source=None):
-    """`source` given: query exactly that server (no failover) — required for
-    anything feeding per-server availability. Omitted: active endpoint with
-    failover, for the live grid."""
+    """`source` given: query exactly that server (no failover). Omitted: the
+    active endpoint, also with no failover — registered endpoints are separate,
+    unrelated fleets, so a down active server must read as down, never as
+    another server's hosts under its name. The failover chain below only runs
+    when no endpoint is active (env/compose default URL)."""
     global LAST_WORKING_PROMETHEUS_URL, PROMETHEUS_CACHE
     if cache_ttl is None:
         cache_ttl = PROMETHEUS_CACHE_TTL_DEFAULT
     now = time.time()
     _maybe_prune_cache(now)
-    if source is not None:
-        return _fetch_from_source(path, source, use_cache, cache_ttl, timeout)
-
     endpoints_data = load_endpoints()
     active_url = endpoints_data.get("active")
+    if source is None:
+        source = active_url or None
+    if source is not None:
+        return _fetch_from_source(path, source, use_cache, cache_ttl, timeout)
 
     # Active endpoint down and a failover answered: read (and single-flight) on
     # the failover's key, where its answers are stored. Keyed on the dead active

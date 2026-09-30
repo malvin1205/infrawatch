@@ -240,6 +240,14 @@ class FleetStateEngine:
     def active_incident_provider(self, val):
         self._active_incident_provider = val
 
+    def _incidents_for(self, source: Optional[str]) -> List[Dict[str, Any]]:
+        """Firing incidents of ONE server. Unfiltered, a switched-away
+        endpoint's outages folded into this server's grid as phantom hosts
+        (and its parent-host picker). No source known → all, as before."""
+        src = (source or "").rstrip("/")
+        return [a for a in self.active_incident_provider()
+                if not src or (a.get("source") or "").rstrip("/") == src]
+
     @property
     def maintenance_loader(self):
         return self._maintenance_loader or _get_alerts_helpers()["load_maintenance_windows"]
@@ -516,7 +524,7 @@ class FleetStateEngine:
                 if j and j != 'prometheus':
                     available_jobs.add(j)
 
-        active_alerts_list = self.active_incident_provider()
+        active_alerts_list = self._incidents_for(snapshot.get("active_base"))
         alerts_by_instance: Dict[str, List[Dict[str, Any]]] = {}
         for a in active_alerts_list:
             inst = a.get('instance')
@@ -828,7 +836,8 @@ class FleetStateEngine:
                     job_map[inst_name] = job or scrape_pool or 'blackbox'
 
         if include_alert_only:
-            for a in self.active_incident_provider():
+            active = source or getattr(self.prom_client, "load_endpoints", dict)().get("active")
+            for a in self._incidents_for(active):
                 inst = a.get('instance')
                 if (
                     inst

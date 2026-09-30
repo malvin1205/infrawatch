@@ -26,10 +26,10 @@ def test_source_fetch_serves_stale_and_skips_network_while_tripped():
     assert len(calls) == 2, calls
 
 
-def test_dead_active_endpoint_reads_failover_cache_instead_of_retrying():
-    """Active endpoint down, failover answered: the next call within the cache
-    TTL must be served from the failover's cache entry, not re-wait the dead
-    active's connect timeout."""
+def test_dead_active_endpoint_never_fails_over_to_another_server():
+    """Endpoints are unrelated fleets: a dead active endpoint reads as down —
+    never as another registered server's data — and while the breaker is open
+    the next poll fails fast instead of re-waiting the connect timeout."""
     dead, alive = "http://dead.test:9090", "http://alive.test:9090"
     client.PROMETHEUS_CACHE.clear()
     client._FAILED_CANDIDATES.clear()
@@ -43,9 +43,8 @@ def test_dead_active_endpoint_reads_failover_cache_instead_of_retrying():
     with mock.patch.object(client, "fetch_url", side_effect=fake_fetch), \
          mock.patch.object(client, "_filter_safe_candidates", side_effect=lambda urls: urls), \
          mock.patch.object(client, "load_endpoints", return_value=eps), \
-         mock.patch.object(client, "LAST_WORKING_PROMETHEUS_URL", None), \
+         mock.patch.object(client, "LAST_WORKING_PROMETHEUS_URL", alive), \
          mock.patch.object(client, "_DEFAULT_PROM_URL", None):
-        assert client.fetch_prometheus_json("/q", cache_ttl=60)[1] == alive
-        n = len(calls)
-        assert client.fetch_prometheus_json("/q", cache_ttl=60)[1] == alive
-    assert len(calls) == n, calls[n:]
+        assert client.fetch_prometheus_json("/q", cache_ttl=60) == (None, None)
+        assert client.fetch_prometheus_json("/q", cache_ttl=60) == (None, None)
+    assert calls == [f"{dead}/q"], calls
