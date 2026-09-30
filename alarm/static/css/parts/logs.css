@@ -169,7 +169,6 @@
 }
 
 .hist-stat-critical .hist-stat-value { color: var(--critical); }
-.hist-stat-warning .hist-stat-value { color: var(--warning); }
 
 .history-meta-row {
   display: flex;
@@ -229,8 +228,20 @@
 
 .history-meta-filters {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+/* Custom Range inputs — :not([hidden]) so the display rule can't unhide it. */
+.history-custom-range:not([hidden]) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.history-custom-range .crp-input {
+  height: 28px;
+  padding: 3px 6px;
 }
 
 .data-table-head.maint-grid,

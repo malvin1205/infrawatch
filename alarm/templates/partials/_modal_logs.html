@@ -49,22 +49,24 @@
 
         <!-- Incident History panel -->
         <div id="historyTabPanel" class="logs-tab-panel hidden">
+          <!-- Summary of exactly the rows listed below (range + every filter) —
+               the same numbers the Export Report PDF prints. -->
           <div class="hist-stat-row">
             <div class="hist-stat-card">
               <span class="hist-stat-value" id="histTotal">—</span>
-              <span class="hist-stat-label">Total Incidents <em style="font-weight:400; font-style:normal; opacity:0.7;">(all time)</em></span>
-            </div>
-            <div class="hist-stat-card">
-              <span class="hist-stat-value" id="histThisMonth">—</span>
-              <span class="hist-stat-label">This Month</span>
+              <span class="hist-stat-label">Total Incidents</span>
             </div>
             <div class="hist-stat-card hist-stat-critical">
-              <span class="hist-stat-value" id="histCritical">—</span>
-              <span class="hist-stat-label">Critical</span>
+              <span class="hist-stat-value" id="histOngoing">—</span>
+              <span class="hist-stat-label">Ongoing</span>
             </div>
-            <div class="hist-stat-card hist-stat-warning">
-              <span class="hist-stat-value" id="histWarning">—</span>
-              <span class="hist-stat-label">Warning</span>
+            <div class="hist-stat-card">
+              <span class="hist-stat-value" id="histResolved">—</span>
+              <span class="hist-stat-label">Resolved</span>
+            </div>
+            <div class="hist-stat-card">
+              <span class="hist-stat-value" id="histDowntime">—</span>
+              <span class="hist-stat-label">Total Downtime</span>
             </div>
           </div>
 
@@ -85,7 +87,8 @@
               <option value="total_down">Sort: Total Down</option>
               <option value="occurrences">Sort: Occurrences</option>
             </select>
-            <button id="exportHistory" class="btn btn-secondary btn-sm" type="button">Export CSV</button>
+            <button id="exportHistoryReport" class="btn btn-secondary btn-sm" type="button" title="Printable PDF report of the incidents listed below">Export Report</button>
+            <button id="exportHistory" class="btn btn-secondary btn-sm" type="button" title="Raw data of the incidents listed below">Export CSV</button>
             <button id="clearHistory" class="btn btn-secondary btn-sm" type="button" title="Hide entries older than now — this browser only; does not delete server-side data">Hide older</button>
           </div>
           <div class="history-meta-row">
@@ -95,11 +98,18 @@
                 <option value="all" selected>All Jobs</option>
               </select>
               <select id="historyRangeSelect" class="avail-range-select" aria-label="Select date range">
-                <option value="month" selected>This Month</option>
-                <option value="7d">Last 7 Days</option>
-                <option value="30d">Last 30 Days</option>
-                <option value="all">All Time</option>
+                <option value="24h">24H</option>
+                <option value="7d">7D</option>
+                <option value="30d">30D</option>
+                <option value="mtd" selected>MTD</option>
+                <option value="custom">Custom Range</option>
               </select>
+              <span id="historyCustomRange" class="history-custom-range" hidden>
+                <input type="datetime-local" id="historyFrom" class="crp-input" aria-label="Range start (WIB)">
+                <span aria-hidden="true">–</span>
+                <input type="datetime-local" id="historyTo" class="crp-input" aria-label="Range end (WIB)">
+                <span>WIB</span>
+              </span>
               <span id="historyBadge" class="host-count-badge">—</span>
             </div>
           </div>

@@ -1,5 +1,5 @@
 /* History page — incident timeline + per-incident detail. */
-import { escapeHtml, formatDuration, formatWib, isoWib } from './ui/format.js';
+import { epochToWibInput, escapeHtml, formatDuration, formatWib, isoWib, wibInputToEpoch } from './ui/format.js';
 import { apiFetch } from './net.js';
 import { isAdminLike } from './auth.js';
 import { LogsPage } from './logs.js';
@@ -25,6 +25,100 @@ export function csvCell(v) {
   return `"${t.replace(/"/g, '""')}"`;
 }
 
+export const RANGE_LABELS = {
+  '24h': 'Last 24 hours', '7d': 'Last 7 days', '30d': 'Last 30 days', mtd: 'Month to date', custom: 'Custom range',
+};
+
+export function isOngoing(inc) {
+  return (inc.status || 'firing').toLowerCase() !== 'resolved';
+}
+
+// Did this incident's activity [first seen, resolved-or-now] touch [from, to]?
+// An outage that started before the window and is still open (or resolved
+// inside it) belongs to the window; one that ended before it, or began after
+// it, does not.
+export function overlapsRange(inc, from, to, now) {
+  const start = inc.first_seen || inc.time || 0;
+  const end = isOngoing(inc) ? now : (inc.resolved_time || inc.time || 0);
+  return end >= from && start <= to;
+}
+
+// Printable Incident History Report. Every value arrives pre-formatted as
+// text and is escaped here; the page prints what the table lists, nothing more.
+export function reportHtml({ title, range, generated, filters, summary, rows }) {
+  const e = escapeHtml;
+  const table = rows.length ? `
+<table class="inc">
+  <colgroup><col style="width:15%"><col style="width:15%"><col style="width:13%"><col style="width:29%"><col style="width:17%"><col style="width:11%"></colgroup>
+  <thead><tr><th>Start Time</th><th>End Time</th><th>Duration</th><th>Host / Target</th><th>Type</th><th>Status</th></tr></thead>
+  <tbody>${rows.map(r => `
+    <tr>
+      <td>${e(r.start)}</td>
+      <td>${e(r.end)}</td>
+      <td>${e(r.duration)}${r.durationNote ? `<div class="sub">${e(r.durationNote)}</div>` : ''}</td>
+      <td>${e(r.host)}${r.job ? `<div class="sub">${e(r.job)}</div>` : ''}</td>
+      <td>${e(r.type)}${r.severity ? `<div class="sub">${e(r.severity)}</div>` : ''}</td>
+      <td class="${r.ongoing ? 'ongoing' : ''}">${e(r.status)}</td>
+    </tr>`).join('')}
+  </tbody>
+</table>` : `<p class="empty">No incidents ${filters ? 'match the selected range and filters' : 'in the selected range'}.</p>`;
+
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>${e(title)}</title>
+<style>
+  @page { size: A4; margin: 14mm 12mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: #111; font: 9.5pt/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  h1 { font-size: 16pt; margin: 0 0 8px; }
+  .meta { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 14px; }
+  .meta dt { color: #555; }
+  .meta dd { margin: 0; overflow-wrap: anywhere; }
+  .summary { width: 100%; border-collapse: collapse; margin: 0 0 16px; table-layout: fixed; border: 1px solid #ccc; }
+  .summary th { text-align: left; font-weight: 500; color: #555; font-size: 8.5pt; padding: 6px 8px 0; }
+  .summary td { font-size: 13pt; font-weight: 700; padding: 0 8px 6px; }
+  .inc { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .inc th, .inc td { text-align: left; vertical-align: top; padding: 5px 6px; border-bottom: 1px solid #ddd; overflow-wrap: anywhere; }
+  .inc th { font-size: 8pt; text-transform: uppercase; letter-spacing: .03em; color: #444; border-bottom: 1.5px solid #333; }
+  .inc tr { break-inside: avoid; }
+  .sub { color: #666; font-size: 8pt; }
+  .ongoing { color: #b91c1c; font-weight: 600; }
+  .empty { padding: 24px 0; color: #555; text-align: center; border: 1px dashed #ccc; }
+</style></head>
+<body>
+  <h1>Incident History Report</h1>
+  <dl class="meta">
+    <dt>Range</dt><dd>${e(range)}</dd>
+    <dt>Generated</dt><dd>${e(generated)}</dd>
+    ${filters ? `<dt>Filters</dt><dd>${e(filters)}</dd>` : ''}
+    <dt>Timezone</dt><dd>All times WIB (UTC+7)</dd>
+  </dl>
+  <table class="summary">
+    <tr>${summary.map(([k]) => `<th>${e(k)}</th>`).join('')}</tr>
+    <tr>${summary.map(([, v]) => `<td>${e(v)}</td>`).join('')}</tr>
+  </table>
+  ${table}
+</body></html>`;
+}
+
+// Browser print dialog -> "Save as PDF". No PDF library: the browser's own
+// layout already wraps long text and repeats the table header on every page.
+function printHtml(html, title) {
+  const frame = document.createElement('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  document.body.appendChild(frame);
+  const w = frame.contentWindow;
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  // Some browsers name the saved PDF after the top page, not the frame.
+  const prevTitle = document.title;
+  document.title = title;
+  w.addEventListener('afterprint', () => { document.title = prevTitle; frame.remove(); }, { once: true });
+  w.focus();
+  w.print();
+}
+
 export class HistoryPage {
   constructor(monitor) {
     this.monitor = monitor;
@@ -33,7 +127,10 @@ export class HistoryPage {
     this.severityFilter = prefs.severity || 'all';
     this.statusFilter = prefs.status || 'all';
     this.jobFilter = currentJob();
-    this.dateRange = prefs.range || 'month';
+    // 'month' / 'all' were the old presets; 'month' is today's MTD.
+    this.dateRange = RANGE_LABELS[prefs.range] ? prefs.range : 'mtd';
+    this.customFrom = prefs.customFrom || null;
+    this.customTo = prefs.customTo || null;
     this.sortBy = prefs.sort || 'last_seen';
     this.searchQ = '';
     this.clearedBefore = parseFloat(localStorage.getItem('historyClearedBefore') || '0');
@@ -50,20 +147,26 @@ export class HistoryPage {
     this.searchEl = document.getElementById('historySearch');
     this.jobSelectEl = document.getElementById('historyJobFilter');
     this.rangeSelectEl = document.getElementById('historyRangeSelect');
+    this.customRangeEl = document.getElementById('historyCustomRange');
+    this.customFromEl = document.getElementById('historyFrom');
+    this.customToEl = document.getElementById('historyTo');
     this.sortSelectEl = document.getElementById('historySortSelect');
     this.pagerEl = document.getElementById('historyPager');
     this.pagerLabelEl = document.getElementById('historyPagerLabel');
 
     this.statTotal = document.getElementById('histTotal');
-    this.statMonth = document.getElementById('histThisMonth');
-    this.statCritical = document.getElementById('histCritical');
-    this.statWarning = document.getElementById('histWarning');
+    this.statOngoing = document.getElementById('histOngoing');
+    this.statResolved = document.getElementById('histResolved');
+    this.statDowntime = document.getElementById('histDowntime');
 
     this._bindEvents();
   }
 
   _savePrefs() {
-    savePrefs({ severity: this.severityFilter, status: this.statusFilter, range: this.dateRange, sort: this.sortBy });
+    savePrefs({
+      severity: this.severityFilter, status: this.statusFilter, range: this.dateRange, sort: this.sortBy,
+      customFrom: this.customFrom, customTo: this.customTo,
+    });
   }
 
   _bindEvents() {
@@ -75,6 +178,7 @@ export class HistoryPage {
     document.querySelectorAll('[data-hist-status]').forEach(b =>
       b.classList.toggle('chip-active', b.dataset.histStatus === this.statusFilter));
     if (this.rangeSelectEl) this.rangeSelectEl.value = this.dateRange;
+    this._syncCustomInputs();
     if (this.sortSelectEl) this.sortSelectEl.value = this.sortBy;
 
     // "Hide older" is a browser-only cut-off that survives reloads: the meta
@@ -84,7 +188,6 @@ export class HistoryPage {
       if (!e.target.closest('[data-show-hidden]')) return;
       this.clearedBefore = 0;
       localStorage.removeItem('historyClearedBefore');
-      this._updateStats();
       this._render();
     });
 
@@ -125,16 +228,31 @@ export class HistoryPage {
       this._render();
     });
 
-    // Date range scopes the stat cards too (task: "don't leave the summary
-    // cards hardcoded to this month") — everything downstream of load()
-    // recomputes off it.
+    // Range scopes the table, the summary cards and both exports alike —
+    // all of them read _filteredSorted().
     this.rangeSelectEl.addEventListener('change', () => {
       this.dateRange = this.rangeSelectEl.value;
+      if (this.dateRange === 'custom' && !(this.customFrom && this.customTo)) {
+        const now = Math.floor(Date.now() / 60000) * 60;
+        this.customFrom = now - 86400;
+        this.customTo = now;
+      }
+      this._syncCustomInputs();
       this._savePrefs();
       this._resetPaging();
-      this._updateStats();
       this._render();
     });
+
+    [this.customFromEl, this.customToEl].forEach(el => el.addEventListener('change', () => {
+      const from = wibInputToEpoch(this.customFromEl.value);
+      const to = wibInputToEpoch(this.customToEl.value);
+      if (from == null || to == null) return; // half-typed: keep the last complete range
+      this.customFrom = from;
+      this.customTo = to;
+      this._savePrefs();
+      this._resetPaging();
+      this._render();
+    }));
 
     this.sortSelectEl.addEventListener('change', () => {
       this.sortBy = this.sortSelectEl.value;
@@ -143,12 +261,12 @@ export class HistoryPage {
     });
 
     document.getElementById('exportHistory').addEventListener('click', () => this._exportCSV());
+    document.getElementById('exportHistoryReport').addEventListener('click', () => this._exportReport());
 
     document.getElementById('clearHistory').addEventListener('click', () => {
       this.clearedBefore = Date.now() / 1000;
       localStorage.setItem('historyClearedBefore', this.clearedBefore);
       this._resetPaging();
-      this._updateStats();
       this._render();
     });
 
@@ -177,6 +295,12 @@ export class HistoryPage {
       e.preventDefault();
       this._openRowDrawer(row.dataset.rowKey);
     });
+  }
+
+  _syncCustomInputs() {
+    this.customRangeEl.hidden = this.dateRange !== 'custom';
+    if (this.customFrom) this.customFromEl.value = epochToWibInput(this.customFrom);
+    if (this.customTo) this.customToEl.value = epochToWibInput(this.customTo);
   }
 
   _resetPaging() {
@@ -225,7 +349,6 @@ export class HistoryPage {
       this.data = data;
       this._loaded = true;
       addJobs(this.data.map(r => r.job));
-      this._updateStats();
       this._render();
     } catch (e) {
       if (e.name === 'AbortError') return;
@@ -245,7 +368,7 @@ export class HistoryPage {
     // still in flight — that reads as "no incidents" instead of "loading".
     this.metaEl.textContent = 'Loading…';
     this.badge.textContent = '—';
-    [this.statTotal, this.statMonth, this.statCritical, this.statWarning].forEach(el => { el.textContent = '—'; });
+    [this.statTotal, this.statOngoing, this.statResolved, this.statDowntime].forEach(el => { el.textContent = '—'; });
   }
 
   _renderError(msg) {
@@ -255,66 +378,53 @@ export class HistoryPage {
       </div>`;
   }
 
-  _rangeStartEpoch() {
-    if (this.dateRange === '7d') return Date.now() / 1000 - 7 * 86400;
-    if (this.dateRange === '30d') return Date.now() / 1000 - 30 * 86400;
-    if (this.dateRange === 'all') return 0;
-    // 'month' (default): 00:00 WIB on the 1st of the current WIB month
+  // [from, to] epoch seconds of the selected range. Presets run up to now;
+  // MTD starts 00:00 WIB on the 1st of the current WIB month.
+  _rangeBounds() {
+    const now = Date.now() / 1000;
+    if (this.dateRange === '24h') return { from: now - 86400, to: now };
+    if (this.dateRange === '7d') return { from: now - 7 * 86400, to: now };
+    if (this.dateRange === '30d') return { from: now - 30 * 86400, to: now };
+    if (this.dateRange === 'custom') {
+      const a = this.customFrom ?? now - 86400;
+      const b = this.customTo ?? now;
+      return { from: Math.min(a, b), to: Math.max(a, b) };
+    }
     const wibNow = new Date(Date.now() + WIB_OFFSET_SEC * 1000);
     const monthStartWib = Date.UTC(wibNow.getUTCFullYear(), wibNow.getUTCMonth(), 1);
-    return (monthStartWib - WIB_OFFSET_SEC * 1000) / 1000;
+    return { from: (monthStartWib - WIB_OFFSET_SEC * 1000) / 1000, to: now };
   }
 
-  // Incidents still in view after "Clear" — a real, undoable cut-off shared
-  // by the stat cards, meta caption and table alike.
+  // Incidents still in view after "Clear" — a real, undoable cut-off.
   _visibleData() {
     return this.clearedBefore ? this.data.filter(r => (r.time || 0) > this.clearedBefore) : this.data;
   }
 
-  // Cleared + date-range only. The stat row summarizes "this time window",
-  // independent of the severity/status/job/search filters below — those
-  // narrow what the table itself lists (see _render()'s historyMeta caption),
-  // they don't change what the summary cards mean.
-  //
-  // Filters on ACTIVITY END, not start: a still-Ongoing incident's activity
-  // "ends" right now, so it always passes any of these range presets (they
-  // all run up to the present) regardless of how long ago it first started —
-  // an outage that's been down for 2 months must not vanish from the
-  // default "This Month" view just because it predates this month. A
-  // resolved incident is judged by when it actually resolved.
+  // Cleared + date range. An Ongoing incident's activity runs up to now, so
+  // an outage down for 2 months still shows in "24H" (see overlapsRange).
   _rangedData() {
-    const since = this._rangeStartEpoch();
-    return this._visibleData().filter(r => {
-      const activityEnd = this._isOngoing(r) ? (Date.now() / 1000) : (r.resolved_time || r.time || 0);
-      return activityEnd >= since;
-    });
+    const { from, to } = this._rangeBounds();
+    const now = Date.now() / 1000;
+    return this._visibleData().filter(r => overlapsRange(r, from, to, now));
   }
 
-  _updateStats() {
-    const base = this._rangedData();
-    // "This Month" = incidents whose ACTIVITY falls in the current calendar
-    // month, judged the same way _rangedData() judges its range (activity end,
-    // so a still-ongoing incident counts) and against the same WIB
-    // month-start anchor _rangeStartEpoch() uses.
-    const wibNow = new Date(Date.now() + WIB_OFFSET_SEC * 1000);
-    const monthStartWib = Date.UTC(wibNow.getUTCFullYear(), wibNow.getUTCMonth(), 1);
-    const monthStart = (monthStartWib - WIB_OFFSET_SEC * 1000) / 1000;
-    const nowSec = Date.now() / 1000;
-    const month = base.filter(i => {
-      const activityEnd = this._isOngoing(i) ? nowSec : (i.resolved_time || i.time || 0);
-      return activityEnd >= monthStart;
-    }).length;
-    const crit = base.filter(i => (i.severity || '').toLowerCase() === 'critical').length;
-    const warn = base.filter(i => (i.severity || '').toLowerCase() === 'warning').length;
+  // One summary for the cards and the PDF, always over the rows listed.
+  _summary(rows) {
+    const ongoing = rows.filter(r => this._isOngoing(r)).length;
+    return {
+      total: rows.length,
+      ongoing,
+      resolved: rows.length - ongoing,
+      downSeconds: rows.reduce((sum, r) => sum + this._downSeconds(r), 0),
+    };
+  }
 
-    // "Total Incidents" was the RANGE-filtered count, so with the default
-    // "This Month" range it printed the identical number to the card beside it
-    // — two cards, one fact (audit 1.8). Total now means all time (still
-    // respecting "Hide older", which is a real operator-chosen cut-off).
-    this.statTotal.textContent = this._visibleData().length;
-    this.statMonth.textContent = month;
-    this.statCritical.textContent = crit;
-    this.statWarning.textContent = warn;
+  _updateStats(rows) {
+    const s = this._summary(rows);
+    this.statTotal.textContent = s.total;
+    this.statOngoing.textContent = s.ongoing;
+    this.statResolved.textContent = s.resolved;
+    this.statDowntime.textContent = this._fmtDur(s.downSeconds);
   }
 
   // Last activity: now for a still-open incident, its resolve time otherwise.
@@ -323,7 +433,7 @@ export class HistoryPage {
   }
 
   _isOngoing(inc) {
-    return (inc.status || 'firing').toLowerCase() !== 'resolved';
+    return isOngoing(inc);
   }
 
   // "Total Down" is a cumulative figure across every occurrence of this
@@ -369,6 +479,7 @@ export class HistoryPage {
 
   _render() {
     const rows = this._filteredSorted();
+    this._updateStats(rows);
     // Reacts to every active filter (severity/status/job/search/range) —
     // the fixed grand total lives on the "Total Incidents" stat card instead
     // (task: stop showing the same number twice).
@@ -411,7 +522,6 @@ export class HistoryPage {
         document.getElementById('undoHistoryClear').addEventListener('click', () => {
           this.clearedBefore = 0;
           localStorage.removeItem('historyClearedBefore');
-          this._updateStats();
           this._render();
         });
       }
@@ -596,6 +706,54 @@ export class HistoryPage {
     a.download = `infrawatch-history-${Date.now()}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
+  }
+
+  // Active non-range filters, spelled out on the report so its numbers read
+  // against what the operator had selected.
+  _filterText() {
+    const f = [];
+    if (this.severityFilter !== 'all') f.push(`Severity: ${this.severityFilter}`);
+    if (this.statusFilter !== 'all') f.push(`Status: ${this.statusFilter}`);
+    if (this.jobFilter !== 'all') f.push(`Job: ${this.jobFilter}`);
+    if (this.searchQ) f.push(`Search: "${this.searchQ}"`);
+    if (this.clearedBefore) f.push(`Hidden before ${isoWib(this.clearedBefore)}`);
+    return f.join(' · ');
+  }
+
+  // Same rows as the table and the CSV (_filteredSorted), laid out as a report.
+  _exportReport() {
+    const rows = this._filteredSorted();
+    const { from, to } = this._rangeBounds();
+    const s = this._summary(rows);
+    const now = Date.now() / 1000;
+    const bare = ts => isoWib(ts).replace(' WIB', '');
+    const title = `Incident History Report ${isoWib(now).slice(0, 10)}`;
+    printHtml(reportHtml({
+      title,
+      range: `${RANGE_LABELS[this.dateRange]}: ${isoWib(from)} – ${isoWib(to)}`,
+      generated: isoWib(now),
+      filters: this._filterText(),
+      summary: [
+        ['Total incidents', s.total], ['Ongoing', s.ongoing],
+        ['Resolved', s.resolved], ['Total downtime', this._fmtDur(s.downSeconds)],
+      ],
+      rows: rows.map(r => {
+        const ongoing = this._isOngoing(r);
+        const n = r.occurrences || 1;
+        return {
+          start: bare(r.first_seen || r.time),
+          end: ongoing ? 'Ongoing' : bare(r.resolved_time || r.time),
+          duration: this._fmtDur(this._downSeconds(r)),
+          durationNote: n > 1 ? `across ${n} occurrences` : '',
+          host: r.instance || '—',
+          job: r.job || '',
+          type: LogsPage.friendlyAlertName(r.name) || '—',
+          severity: r.severity || '',
+          status: ongoing ? 'Ongoing' : 'Resolved',
+          ongoing,
+        };
+      }),
+    }), title);
   }
 
   _esc(s) { return escapeHtml(s); }

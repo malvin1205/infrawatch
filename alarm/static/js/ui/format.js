@@ -79,6 +79,18 @@ export function isoWib(ts) {
     `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())} WIB`;
 }
 
+// <input type="datetime-local"> value ("2026-09-30T21:59") read as WIB wall
+// clock, whatever the browser's timezone -> epoch seconds, or null.
+export function wibInputToEpoch(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v || '');
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) / 1000 - WIB_SEC : null;
+}
+
+// Epoch seconds -> datetime-local value in WIB (inverse of the above).
+export function epochToWibInput(ts) {
+  return isoWib(ts).slice(0, 16).replace(' ', 'T');
+}
+
 export function getDurationFormatPreference() {
   try {
     if (typeof localStorage !== 'undefined') {
