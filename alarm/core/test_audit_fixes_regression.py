@@ -303,8 +303,13 @@ def test_min01_wib_timezone_alignment():
     assert "WIB_OFFSET_SEC = 25200" in content or "WIB_OFFSET_SEC = 7 * 3600" in content
     assert "new Date(now.getFullYear(), now.getMonth(), 1)" not in content, \
         "history.js should not use browser-local new Date(now.getFullYear(), now.getMonth(), 1)"
-    assert "getUTCHours()" in content
-    assert "getUTCDate()" in content
+    # Timestamps are formatted by the shared WIB formatter (also used by the
+    # Live Alert Log), which must read UTC fields off a +7h-shifted date.
+    assert "formatWib" in content
+    with open(os.path.join(os.path.dirname(history_js_path), "ui", "format.js"), "r", encoding="utf-8") as f:
+        fmt = f.read()
+    assert "getUTCHours()" in fmt
+    assert "getUTCDate()" in fmt
 
 
 # ─────────────────────────────────────────────────────────────────────────────

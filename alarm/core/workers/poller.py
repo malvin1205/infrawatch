@@ -27,7 +27,7 @@ try:
         EndpointRepository,
         json_store,
     )
-    from core.monitoring import classify_scrape_failure, _outage_past_grace
+    from core.monitoring import classify_scrape_failure, _outage_past_grace, OUTAGE_GRACE_SECONDS
     import core.monitoring.queries as prom_queries
     import core.monitoring.state as monitoring_state
     from core.alerts import (
@@ -61,7 +61,7 @@ except (ImportError, ValueError):
         EndpointRepository,
         json_store,
     )
-    from alarm.core.monitoring import classify_scrape_failure, _outage_past_grace
+    from alarm.core.monitoring import classify_scrape_failure, _outage_past_grace, OUTAGE_GRACE_SECONDS
     import alarm.core.monitoring.queries as prom_queries
     import alarm.core.monitoring.state as monitoring_state
     from alarm.core.alerts import (
@@ -116,6 +116,14 @@ class PrometheusQueryAdapter:
                 return app_fn()
         return self._queries.fetch_down_since_prom_map()
 
+    def fetch_up_map(self) -> Dict[str, Any]:
+        """`up` per instance — the health of every target that has no blackbox
+        probe (node / other exporters)."""
+        return self._queries.fetch_prom_query_map("up", cache_ttl=3.0)
+
+    def fetch_recent_samples(self, selector: str, lookback_sec: float, source: Optional[str] = None):
+        return self._queries.fetch_recent_samples(selector, lookback_sec, source=source)
+
 
 class MonitoringStateAdapter:
     """Default adapter fetching monitored target state directly from core.monitoring.state,
@@ -147,6 +155,23 @@ class MonitoringStateAdapter:
 
 
 # ── Pure Transition Functions ─────────────────────────────────────────────────
+
+# How far back a transition's exact edge is looked for in the raw samples.
+EDGE_LOOKBACK_SECONDS = float(os.environ.get("ALERT_EDGE_LOOKBACK", "900"))
+
+
+def find_edge(samples, to_up: bool) -> Optional[float]:
+    """Timestamp of the newest transition INTO `to_up` in raw 0/1 samples:
+    the first sample of the current run (first 0 of an outage, first 1 of a
+    recovery), or None when the whole window is already in that state."""
+    want = 1 if to_up else 0
+    if not samples or samples[-1][1] != want:
+        return None
+    for i in range(len(samples) - 1, 0, -1):
+        if samples[i - 1][1] != want:
+            return samples[i][0]
+    return None
+
 
 def compute_state_transitions(success_map: Dict[str, Any], prev_state: Dict[str, str]) -> Tuple[List[Tuple[str, bool]], Dict[str, str]]:
     """Pure function: given instance->probe_success value map and the last
@@ -378,6 +403,19 @@ class TargetPoller:
         if not success_map:
             return  # Prometheus unreachable this tick
 
+        # Exporter targets (node, keepalived, windows, ...) have no
+        # probe_success: their `up` is their health. Without this they rang
+        # the alarm and filled "Acknowledge all N outages" but never became
+        # an incident, a log line or a Telegram message.
+        probe_insts = set(success_map)
+        try:
+            up_map = self.query_adapter.fetch_up_map() or {}
+        except Exception:
+            up_map = {}
+        success_map = dict(success_map)
+        for inst, val in up_map.items():
+            success_map.setdefault(inst, val)
+
         # Real job per target: a hardcoded "blackbox" left History's and the
         # Live Log's job filters with one option, and never matched a
         # maintenance window scoped to the target's actual job.
@@ -428,21 +466,59 @@ class TargetPoller:
         scoped = {inst: v for inst, v in success_map.items() if inst in instances and inst not in active_now}
         transitions, new_state = compute_state_transitions(scoped, self._poller_state)
 
+        def recent_samples(inst: str):
+            metric = "probe_success" if inst in probe_insts else "up"
+            job = job_map.get(inst)
+            esc = lambda v: str(v).replace("\\", "\\\\").replace('"', '\\"')
+            sel = '%s{instance="%s"%s}' % (metric, esc(inst), f',job="{esc(job)}"' if job else "")
+            try:
+                return self.query_adapter.fetch_recent_samples(sel, EDGE_LOOKBACK_SECONDS, source=active_source or None)
+            except Exception:
+                return None
+
+        # Each transition's real edge, on Prometheus' timeline (the one the
+        # Trend and Calendar use): the first sample of the new state. The
+        # grace below is measured on that same timeline — the app's clock can
+        # be off from Prometheus' (13.6s was measured), and an exporter target
+        # has no probe-based down-since at all, which let a single failed
+        # scrape open an incident.
+        edges: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
+        for inst, is_up in transitions:
+            samples = recent_samples(inst)
+            edges[inst] = (find_edge(samples, is_up), samples[-1][0] if samples else None)
+
         # Debounce down-transitions
+        down_since_map: Dict[str, Any] = {}
         if any(not is_up for _, is_up in transitions):
             try:
-                down_since_map = self.query_adapter.fetch_down_since_prom_map()
+                down_since_map = self.query_adapter.fetch_down_since_prom_map() or {}
             except Exception:
                 down_since_map = {}
             held = []
             for inst, is_up in transitions:
-                if not is_up and not _outage_past_grace(down_since_map.get(inst), curr_time):
+                edge, latest = edges[inst]
+                if not is_up and edge is not None and latest is not None:
+                    past_grace = (latest - edge) >= OUTAGE_GRACE_SECONDS
+                else:
+                    past_grace = is_up or _outage_past_grace(down_since_map.get(inst), curr_time)
+                if not past_grace:
                     new_state[inst] = self._poller_state.get(inst, 'up')
                 else:
                     held.append((inst, is_up))
             transitions = held
 
         self._poller_state.update(new_state)
+
+        def event_time_of(inst: str, is_up: bool) -> float:
+            """The transition's edge; else Prometheus' down-since (a cold-start
+            outage older than the lookback); else this poll."""
+            edge = edges.get(inst, (None, None))[0]
+            if edge is None and not is_up:
+                try:
+                    edge = float(down_since_map.get(inst)) or None
+                except (TypeError, ValueError):
+                    edge = None
+            return edge or curr_time
 
         for inst, is_up in transitions:
             lat = duration_map.get(inst)
@@ -466,7 +542,7 @@ class TargetPoller:
                 instance=inst,
                 summary=summary,
                 job=job_map.get(inst, "blackbox"),
-                event_time=curr_time,
+                event_time=event_time_of(inst, is_up),
                 is_now_firing=(not is_up),
                 receiver="prometheus-poller",
                 key=f"{ALERTNAME_TARGET_DOWN}|{inst}",

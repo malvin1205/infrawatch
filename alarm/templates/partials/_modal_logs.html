@@ -36,10 +36,14 @@
               <span class="al-meta-count" id="logStreamMeta">—</span>
               <div class="al-legend">
                 <span class="al-legend-item"><span class="al-dot al-dot-firing" style="width:7px;height:7px;"></span>firing now</span>
+                <span class="al-legend-item"><span class="al-dot al-dot-past" style="width:7px;height:7px;"></span>fired (since recovered)</span>
                 <span class="al-legend-item"><span class="al-dot al-dot-resolved" style="width:7px;height:7px;"></span>resolved</span>
               </div>
             </div>
             <div class="log-stream" id="logStream"></div>
+            <div class="history-pager" id="logPager" hidden>
+              <button id="logLoadMore" class="btn btn-secondary btn-sm" type="button">Load older events</button>
+            </div>
           </div>
         </div>
 

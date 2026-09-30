@@ -765,3 +765,47 @@
   }
 }
 
+
+/* `display:flex` above beat the [hidden] attribute: "Show more" stayed on
+   screen with nothing left to load. */
+.history-pager[hidden] { display: none; }
+
+/* A firing event that has since recovered: history, not "firing now". */
+.al-dot-past {
+  border: 1.5px solid var(--critical);
+}
+.al-row-past {
+  opacity: 0.82;
+}
+.al-flap {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--warning);
+  border: 1px solid var(--warning-border, currentColor);
+}
+.al-meta-hidden { color: var(--warning); }
+.al-meta-show {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+
+/* Phones: the 7-column incident grid (≈560px of fixed columns) overflowed.
+   Stack it: host on top, the figures in a wrapped row below, header off. */
+@media (max-width: 720px) {
+  .data-table-head.hist-grid { display: none; }
+  .history-row-full {
+    grid-template-columns: repeat(3, auto);
+    justify-content: start;
+    row-gap: 6px;
+  }
+  .history-row-full > .history-chip { grid-column: 1 / -1; }
+  .al-row { flex-wrap: wrap; }
+  .al-fill { flex-basis: 100%; order: 10; }
+}

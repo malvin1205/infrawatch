@@ -116,6 +116,25 @@ def fetch_prom_range_map(query_expr, start_ts, end_ts, step_sec, cache_ttl=5.0, 
     return {inst: v for inst, (_, v) in picked.items()}
 
 
+def fetch_recent_samples(selector, lookback_sec, source=None, timeout=10.0):
+    """Raw samples of `selector` over the last `lookback_sec`, evaluated at
+    PROMETHEUS' own "now" (no `time=`): an app host whose clock lags the
+    server would otherwise cut off the newest samples — the very edge a
+    just-detected transition is about. [(ts, 0|1)] sorted, or None on failure."""
+    path = f"/api/v1/query?query={quote(f'{selector}[{int(lookback_sec)}s]')}"
+    raw, _ = _pc.fetch_prometheus_json(path, use_cache=False, timeout=timeout, source=source)
+    if not raw or raw.get('status') != 'success':
+        return None
+    pts = []
+    for r in raw.get('data', {}).get('result', []):
+        for pair in r.get('values', []):
+            try:
+                pts.append((float(pair[0]), 1 if str(pair[1]) in ('1', '1.0') else 0))
+            except (ValueError, TypeError, IndexError):
+                continue
+    return sorted(pts)
+
+
 def fetch_prom_matrix_map(query_expr, start_ts, end_ts, step_sec, timeout=None, source=None, prefer_job=None):
     """query_range -> {instance: {eval_ts: float}}, or None when the request
     failed (a caller must not read "failed" as "no series"). Used for small

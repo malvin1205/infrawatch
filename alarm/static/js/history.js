@@ -1,5 +1,5 @@
 /* History page — incident timeline + per-incident detail. */
-import { escapeHtml, formatDuration } from './ui/format.js';
+import { escapeHtml, formatDuration, formatWib, isoWib } from './ui/format.js';
 import { apiFetch } from './net.js';
 import { isAdminLike } from './auth.js';
 import { LogsPage } from './logs.js';
@@ -8,21 +8,40 @@ import { addJobs, bindJobSelect, currentJob } from './ui/job-filter.js';
 // Fixed UTC+7 offset for Asia/Jakarta (WIB) — 25200 seconds.
 export const WIB_OFFSET_SEC = 25200;
 
+// Filters survive a reload (they reset to defaults every time).
+const PREFS = 'historyPrefs';
+function loadPrefs() {
+  try { return JSON.parse(localStorage.getItem(PREFS) || '{}') || {}; } catch (_) { return {}; }
+}
+function savePrefs(p) {
+  try { localStorage.setItem(PREFS, JSON.stringify(p)); } catch (_) { /* private mode */ }
+}
+
+// A CSV cell a spreadsheet would run as a formula (=, +, -, @, tab, CR)
+// gets a leading apostrophe; then it is quoted as usual.
+export function csvCell(v) {
+  let t = String(v ?? '');
+  if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`;
+  return `"${t.replace(/"/g, '""')}"`;
+}
+
 export class HistoryPage {
   constructor(monitor) {
     this.monitor = monitor;
     this.data = [];
-    this.severityFilter = 'all';
-    this.statusFilter = 'all';
+    const prefs = loadPrefs();
+    this.severityFilter = prefs.severity || 'all';
+    this.statusFilter = prefs.status || 'all';
     this.jobFilter = currentJob();
-    this.dateRange = 'month';
-    this.sortBy = 'last_seen';
+    this.dateRange = prefs.range || 'month';
+    this.sortBy = prefs.sort || 'last_seen';
     this.searchQ = '';
     this.clearedBefore = parseFloat(localStorage.getItem('historyClearedBefore') || '0');
     this._loaded = false;
     this._loadAbortController = null;
     this._visibleCount = HistoryPage.PAGE_SIZE;
     this._tickInterval = null;
+    this._refreshInterval = null;
     this._hasFiring = false;
 
     this.tableEl = document.getElementById('historyFullTable');
@@ -43,12 +62,36 @@ export class HistoryPage {
     this._bindEvents();
   }
 
+  _savePrefs() {
+    savePrefs({ severity: this.severityFilter, status: this.statusFilter, range: this.dateRange, sort: this.sortBy });
+  }
+
   _bindEvents() {
     window.addEventListener('iw:duration-format-changed', () => this._render());
+
+    // Paint the restored filters.
+    document.querySelectorAll('[data-hist-filter]').forEach(b =>
+      b.classList.toggle('chip-active', b.dataset.histFilter === this.severityFilter));
+    document.querySelectorAll('[data-hist-status]').forEach(b =>
+      b.classList.toggle('chip-active', b.dataset.histStatus === this.statusFilter));
+    if (this.rangeSelectEl) this.rangeSelectEl.value = this.dateRange;
+    if (this.sortSelectEl) this.sortSelectEl.value = this.sortBy;
+
+    // "Hide older" is a browser-only cut-off that survives reloads: the meta
+    // line says how many it hides and offers the way back, at any time (the
+    // old undo only appeared once EVERY row was hidden).
+    this.metaEl.addEventListener('click', e => {
+      if (!e.target.closest('[data-show-hidden]')) return;
+      this.clearedBefore = 0;
+      localStorage.removeItem('historyClearedBefore');
+      this._updateStats();
+      this._render();
+    });
 
     document.querySelectorAll('[data-hist-filter]').forEach(btn => {
       btn.addEventListener('click', () => {
         this.severityFilter = btn.dataset.histFilter;
+        this._savePrefs();
         document.querySelectorAll('[data-hist-filter]').forEach(b =>
           b.classList.toggle('chip-active', b.dataset.histFilter === this.severityFilter)
         );
@@ -60,6 +103,7 @@ export class HistoryPage {
     document.querySelectorAll('[data-hist-status]').forEach(btn => {
       btn.addEventListener('click', () => {
         this.statusFilter = btn.dataset.histStatus;
+        this._savePrefs();
         document.querySelectorAll('[data-hist-status]').forEach(b =>
           b.classList.toggle('chip-active', b.dataset.histStatus === this.statusFilter)
         );
@@ -86,6 +130,7 @@ export class HistoryPage {
     // recomputes off it.
     this.rangeSelectEl.addEventListener('change', () => {
       this.dateRange = this.rangeSelectEl.value;
+      this._savePrefs();
       this._resetPaging();
       this._updateStats();
       this._render();
@@ -93,6 +138,7 @@ export class HistoryPage {
 
     this.sortSelectEl.addEventListener('change', () => {
       this.sortBy = this.sortSelectEl.value;
+      this._savePrefs();
       this._render();
     });
 
@@ -141,10 +187,15 @@ export class HistoryPage {
     if (!this._loaded) this._renderLoading();
     this.load();
     this._startTicking();
+    // It loaded once per tab switch: an incident that fired or resolved while
+    // the tab stayed open never showed. Re-read it while it's on screen.
+    if (this._refreshInterval) clearInterval(this._refreshInterval);
+    this._refreshInterval = setInterval(() => { if (!document.hidden) this.load(); }, HistoryPage.REFRESH_MS);
   }
 
   onDeactivate() {
     this._stopTicking();
+    if (this._refreshInterval) { clearInterval(this._refreshInterval); this._refreshInterval = null; }
   }
 
   // Only ticks (re-renders once a second) while a still-open incident is
@@ -266,6 +317,11 @@ export class HistoryPage {
     this.statWarning.textContent = warn;
   }
 
+  // Last activity: now for a still-open incident, its resolve time otherwise.
+  _lastSeen(inc) {
+    return this._isOngoing(inc) ? Date.now() / 1000 : (inc.resolved_time || inc.time || 0);
+  }
+
   _isOngoing(inc) {
     return (inc.status || 'firing').toLowerCase() !== 'resolved';
   }
@@ -306,7 +362,7 @@ export class HistoryPage {
     } else if (this.sortBy === 'occurrences') {
       sorted.sort((a, b) => (b.occurrences || 1) - (a.occurrences || 1));
     } else {
-      sorted.sort((a, b) => (b.resolved_time || b.time || 0) - (a.resolved_time || a.time || 0));
+      sorted.sort((a, b) => this._lastSeen(b) - this._lastSeen(a));
     }
     return sorted;
   }
@@ -316,7 +372,13 @@ export class HistoryPage {
     // Reacts to every active filter (severity/status/job/search/range) —
     // the fixed grand total lives on the "Total Incidents" stat card instead
     // (task: stop showing the same number twice).
-    this.metaEl.textContent = `${rows.length} incident${rows.length !== 1 ? 's' : ''} (filtered)`;
+    let meta = this._esc(`${rows.length} incident${rows.length !== 1 ? 's' : ''} (filtered)`);
+    if (this.clearedBefore) {
+      const hidden = this.data.length - this._visibleData().length;
+      meta += ` · <span class="al-meta-hidden">${hidden} hidden before ${this._esc(this._fmt(this.clearedBefore))}</span>` +
+        ' <button type="button" class="btn-link al-meta-show" data-show-hidden>Show</button>';
+    }
+    this.metaEl.innerHTML = meta;
     this.badge.textContent = rows.length;
     this._hasFiring = rows.some(r => this._isOngoing(r));
 
@@ -385,7 +447,11 @@ export class HistoryPage {
     const rawSev = (inc.severity || 'critical').toLowerCase();
     // Clamp to the known set — the value is stored from the Alertmanager
     // webhook and flows straight into a class name and text below.
-    const sev = ['critical', 'warning', 'info'].includes(rawSev) ? rawSev : 'critical';
+    // Known severities get their colour; anything else shows as itself (it
+    // used to be relabelled CRITICAL).
+    const known = ['critical', 'warning', 'info'].includes(rawSev);
+    const sev = known ? rawSev : 'info';
+    const sevLabel = known ? sev.toUpperCase() : rawSev.toUpperCase().slice(0, 16);
     const ongoing = this._isOngoing(inc);
     const rowKey = inc.key || `${inc.instance}|${inc.name}|${inc.time}`;
     // Same alertname → plain-English mapping the live feed uses, so one
@@ -434,11 +500,11 @@ export class HistoryPage {
         </div>
       </div>
       <span class="history-status ${statusClass}"><span class="history-status-dot"></span>${statusLabel}</span>
-      <span class="history-sev ${sevClass}">${this._esc(sev.toUpperCase())}</span>
+      <span class="history-sev ${sevClass}">${this._esc(sevLabel)}</span>
       <span class="history-occurrences">×${inc.occurrences || 1}</span>
       <span class="history-firstseen">${this._fmt(inc.first_seen || inc.time)}</span>
       <span class="history-downtime">${downtime}</span>
-      <span class="history-lastseen">${this._fmt(inc.resolved_time || inc.time)}</span>
+      <span class="history-lastseen">${ongoing ? 'now' : this._fmt(inc.resolved_time || inc.time)}</span>
     </div>`;
   }
 
@@ -501,13 +567,7 @@ export class HistoryPage {
   }
 
   _fmt(ts) {
-    if (!ts) return '—';
-    const d = new Date((ts + WIB_OFFSET_SEC) * 1000);
-    const hh = String(d.getUTCHours()).padStart(2, '0');
-    const mm = String(d.getUTCMinutes()).padStart(2, '0');
-    const dd = String(d.getUTCDate()).padStart(2, '0');
-    const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
-    return `${hh}:${mm} · ${dd}/${mo}`;
+    return formatWib(ts);
   }
 
   _fmtDur(s) {
@@ -515,19 +575,20 @@ export class HistoryPage {
     return formatDuration(s * 1000, { compact: true });
   }
 
+  // Exports what the table shows (every active filter, all pages), with
+  // full ISO WIB timestamps.
   _exportCSV() {
     const header = 'FirstSeen,LastSeen,Alert,Instance,Job,Severity,Status,Occurrences,LastOccurrenceDurationSeconds,TotalDownSeconds,LastError\n';
-    const rows = this.data.map(r =>
+    const rows = this._filteredSorted().map(r =>
       [
-        this._fmt(r.first_seen || r.time), this._fmt(r.resolved_time || r.time), r.name, r.instance, r.job, r.severity,
+        isoWib(r.first_seen || r.time), this._isOngoing(r) ? 'ongoing' : isoWib(r.resolved_time || r.time),
+        r.name, r.instance, r.job, r.severity,
         r.status || 'firing',
         r.occurrences || 1,
         typeof r.duration_seconds === 'number' ? Math.round(r.duration_seconds) : '',
         Math.round(this._downSeconds(r)),
         r.last_error || r.summary
-      ]
-        .map(v => `"${String(v || '').replace(/"/g, '""')}"`)
-        .join(',')
+      ].map(csvCell).join(',')
     ).join('\n');
     const blob = new Blob([header + rows], { type: 'text/csv' });
     const a = document.createElement('a');
@@ -541,3 +602,4 @@ export class HistoryPage {
 }
 
 HistoryPage.PAGE_SIZE = 40;
+HistoryPage.REFRESH_MS = 30000;

@@ -887,6 +887,7 @@ export class ServerMonitor {
     if (!modal || !openBtn) return;
 
     const showTab = (tab) => {
+      try { localStorage.setItem('logsModalTab', tab); } catch (_) { /* private mode */ }
       Object.entries(tabs).forEach(([key, { btn, panel }]) => {
         const active = key === tab;
         if (panel) panel.classList.toggle('hidden', !active);
@@ -896,6 +897,7 @@ export class ServerMonitor {
         }
       });
       if (tab !== 'history') this.historyPage.onDeactivate();
+      if (tab !== 'logs') this.logsPage.onDeactivate();
       if (tab === 'logs') this.logsPage.onActivate();
       else if (tab === 'history') this.historyPage.onActivate();
       else if (tab === 'maintenance') this.instancesPage._maintenanceManagerOnActivate();
@@ -909,7 +911,11 @@ export class ServerMonitor {
       modal.classList.remove('hidden');
       if (this._untrapLogs) this._untrapLogs();
       this._untrapLogs = window.trapModalFocus(modal);
-      showTab('logs');
+      // Reopen on the tab the operator last used (it always snapped back to
+      // Live Alert Log).
+      let last = 'logs';
+      try { last = localStorage.getItem('logsModalTab') || 'logs'; } catch (_) { /* private mode */ }
+      showTab(tabs[last] ? last : 'logs');
     };
     const closeModal = () => {
       if (this._untrapLogs) { this._untrapLogs(); this._untrapLogs = null; }

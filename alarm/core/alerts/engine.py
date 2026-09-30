@@ -180,29 +180,24 @@ def record_alert_event(name, severity, instance, summary, job, event_time, is_no
             return False  # suppressed: instance/job is under an active maintenance window.
 
         status_data = json_store.load_json(json_store.STATUS_FILE, {"status": "NORMAL", "alerts": [], "updated": event_time})
+        # Keyed by source too: the same alert on another Prometheus server is
+        # a different incident (it is in SQLite, keyed (source, key)).
+        json_key = f"{(source or '').rstrip('/')}|{key}"
         active_alerts = {}
         for a in status_data.get('alerts', []):
             k = a.get('key') or f"{a.get('name')}|{a.get('instance')}"
-            active_alerts[k] = a
+            active_alerts[f"{(a.get('source') or '').rstrip('/')}|{k}"] = a
 
-        was_firing = key in active_alerts
-        if was_firing == is_now_firing:
-            return False  # no state transition — dedupe repeat notifications
-
-        # SQLite keeps its own was_firing/is_now_firing dedup (needed so two
-        # worker processes racing on the same transition still land exactly
-        # once — see test_persistence_concurrency.py). That means a failed
-        # write here isn't just a missed record: it leaves SQLite's row on
-        # stale status, so the *next* real transition for this key can look
-        # like a no-op to SQLite's own dedup and get silently dropped too —
-        # permanently desyncing /history from /status. One retry closes the
-        # common transient case (lock contention, disk hiccup) cheaply.
-        # ponytail: not a full reconciliation job; a periodic sweep that
-        # reconciles SQLite incident status against status.json would close
-        # the rest, add if repeated failures show up in the error log.
+        # SQLite decides whether this is a transition — not the status.json
+        # cache. Deduping on the cache let the two drift apart for good: a
+        # resolve the cache didn't know about was dropped as a "repeat" and
+        # the SQLite incident stayed firing forever (and a failed SQLite write
+        # still sent Telegram). One retry covers transient lock contention;
+        # only when SQLite can't be written at all does the cache decide.
+        changed = None
         for attempt in (1, 2):
             try:
-                IncidentRepository.record_alert_event(
+                changed = IncidentRepository.record_alert_event(
                     name=name, severity=severity, instance=instance, summary=summary,
                     job=job, event_time=event_time, is_now_firing=is_now_firing,
                     receiver=receiver, generatorURL=generatorURL, key=key, latency_ms=latency_ms,
@@ -213,9 +208,30 @@ def record_alert_event(name, severity, instance, summary, job, event_time, is_no
                 if attempt == 2:
                     logger.error(f"Error updating SQLite incident repository (gave up after retry): {e}")
 
+        was_firing = json_key in active_alerts
+        if changed is None:
+            if was_firing == is_now_firing:
+                return False  # degraded: SQLite unavailable, dedupe on the cache
+        elif not changed:
+            # No transition (repeat, or suppressed by maintenance). Heal the
+            # cache if it disagrees with SQLite, and send nothing.
+            if was_firing != is_now_firing and not (is_now_firing and get_active_maintenance(instance, job, now=event_time)):
+                if is_now_firing:
+                    active_alerts[json_key] = {"key": key, "source": source or "", "name": name,
+                                               "severity": severity, "instance": instance,
+                                               "summary": summary, "time": event_time}
+                else:
+                    active_alerts.pop(json_key, None)
+                firing_list = list(active_alerts.values())
+                status_data.update(alerts=firing_list, updated=time.time(), status=(
+                    "CRITICAL" if any(x.get('severity', 'critical') == 'critical' for x in firing_list)
+                    else "WARNING" if firing_list else "NORMAL"))
+                json_store.save_json(json_store.STATUS_FILE, status_data)
+            return False
+
         duration_seconds = None
         if is_now_firing:
-            active_alerts[key] = {
+            active_alerts[json_key] = {
                 "key":      key,
                 "source":   source or "",
                 "name":     name,
@@ -225,7 +241,7 @@ def record_alert_event(name, severity, instance, summary, job, event_time, is_no
                 "time":     event_time
             }
         else:
-            started = active_alerts.pop(key, None)
+            started = active_alerts.pop(json_key, None)
             if started:
                 duration_seconds = max(0, event_time - started.get('time', event_time))
 
@@ -251,8 +267,14 @@ def record_alert_event(name, severity, instance, summary, job, event_time, is_no
             # has a prior entry here increments instead of reading as a
             # fresh "occurrences x1" (this JSON copy is a fallback only;
             # SQLite is the source /history reads from when available).
+            # One entry per key, like the SQLite row /history normally reads:
+            # a re-fire updates it (moved to the top) instead of adding a
+            # second, per-episode entry that only this fallback copy had.
             prior = next((h for h in history if h.get('key') == key), None)
+            if prior is not None:
+                history.remove(prior)
             history.insert(0, {
+                "total_down_seconds": (prior or {}).get('total_down_seconds', 0) or 0,
                 "key":          key,
                 "name":         name,
                 "severity":     severity,
@@ -277,6 +299,7 @@ def record_alert_event(name, severity, instance, summary, job, event_time, is_no
                         duration_seconds if duration_seconds is not None
                         else max(0, event_time - h.get('time', event_time))
                     )
+                    h['total_down_seconds'] = (h.get('total_down_seconds') or 0) + h['duration_seconds']
                     break
 
         firing_list = list(active_alerts.values())

@@ -23,6 +23,9 @@ except (ImportError, ValueError):
 # resolved incidents accumulates in well under 35 days) while 4000 more sat
 # right there in the table, already paid for.
 INCIDENT_RETENTION_LIMIT = 5000
+# Rows event_logs keeps (retention DELETE in record_alert_event) — and so the
+# most /logs can ever page through.
+EVENT_LOG_RETENTION_LIMIT = 5000
 
 
 class IncidentRepository:
@@ -179,9 +182,9 @@ class IncidentRepository:
                       event_time, event_time, event_time, latency_ms, http_status_code, last_error))
 
                 conn.execute("""
-                    INSERT INTO event_logs (event, name, severity, instance, summary, job, time, duration_seconds, latency_ms, fingerprint)
-                    VALUES ('firing', ?, ?, ?, ?, ?, ?, NULL, ?, ?)
-                """, (name, severity, instance, summary, job, event_time, latency_ms, key))
+                    INSERT INTO event_logs (event, name, severity, instance, summary, job, time, duration_seconds, latency_ms, fingerprint, source)
+                    VALUES ('firing', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+                """, (name, severity, instance, summary, job, event_time, latency_ms, key, source))
             else:
                 started_at = row["started_at"] if row else event_time
                 duration_seconds = round(float(event_time - started_at), 1)
@@ -192,9 +195,9 @@ class IncidentRepository:
                 """, (event_time, duration_seconds, duration_seconds, event_time, source, key))
 
                 conn.execute("""
-                    INSERT INTO event_logs (event, name, severity, instance, summary, job, time, duration_seconds, latency_ms, fingerprint)
-                    VALUES ('resolved', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (name, severity, instance, summary, job, event_time, duration_seconds, latency_ms, key))
+                    INSERT INTO event_logs (event, name, severity, instance, summary, job, time, duration_seconds, latency_ms, fingerprint, source)
+                    VALUES ('resolved', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, severity, instance, summary, job, event_time, duration_seconds, latency_ms, key, source))
 
                 conn.execute("""
                     DELETE FROM alert_acknowledgments WHERE instance = ? AND NOT EXISTS (
@@ -203,9 +206,9 @@ class IncidentRepository:
                 """, (instance, instance))
 
             # Retention limits
-            conn.execute("""
+            conn.execute(f"""
                 DELETE FROM event_logs WHERE id NOT IN (
-                    SELECT id FROM event_logs ORDER BY time DESC, id DESC LIMIT 5000
+                    SELECT id FROM event_logs ORDER BY time DESC, id DESC LIMIT {EVENT_LOG_RETENTION_LIMIT}
                 )
             """)
             conn.execute(f"""
@@ -217,6 +220,8 @@ class IncidentRepository:
 
 
 class EventLogRepository:
+    RETENTION_LIMIT = EVENT_LOG_RETENTION_LIMIT
+
     @staticmethod
     def get_logs(
         limit: int = 50,
@@ -224,10 +229,14 @@ class EventLogRepository:
         since_time: Optional[float] = None,
         db_path: Optional[str] = None,
         job: Optional[str] = None,
+        source: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         with db_read(db_path) as conn:
             query = "SELECT * FROM event_logs WHERE 1=1"
             params: List[Any] = []
+            if source:
+                query += " AND source = ?"
+                params.append(source.rstrip("/"))
             if instance:
                 query += " AND instance = ?"
                 params.append(instance)
@@ -251,7 +260,9 @@ class EventLogRepository:
                     "job": r["job"],
                     "time": r["time"],
                     "duration_seconds": r["duration_seconds"],
-                    "latency_ms": r["latency_ms"]
+                    "latency_ms": r["latency_ms"],
+                    "key": r["fingerprint"],
+                    "source": r["source"] if "source" in r.keys() else "",
                 }
                 for r in rows
             ]

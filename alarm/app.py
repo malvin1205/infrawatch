@@ -721,13 +721,28 @@ def resolve_alert_api():
     )
     return jsonify({"ok": True, "key": key, "changed": bool(changed)})
 
+def _redact_ackers(rows):
+    """These reads are public (wallboard). WHO acknowledged is an operator's
+    username: shown to signed-in users only. That it was acked, and when,
+    stays visible to everyone."""
+    try:
+        if get_current_authenticated_user():
+            return rows
+    except Exception:
+        pass
+    for r in rows:
+        if isinstance(r, dict) and r.get("acknowledged_by"):
+            r["acknowledged_by"] = "operator"
+    return rows
+
 @app.route('/api/alerts/firing', methods=['GET'])
+@rate_limit(120, 60)
 def get_firing_alerts_api():
     """Return currently-firing incidents, scoped by active endpoint (or optional ?source=)."""
     active_source = (load_endpoints().get("active") or "").rstrip("/") or None
     req_source = request.args.get("source")
     target_source = req_source if req_source is not None else active_source
-    incidents = IncidentRepository.get_active_incidents(source=target_source)
+    incidents = _redact_ackers(IncidentRepository.get_active_incidents(source=target_source))
     if request.args.get("raw") or request.args.get("format") == "list":
         return jsonify(incidents)
     return jsonify({"ok": True, "incidents": incidents, "count": len(incidents)})
@@ -839,6 +854,7 @@ def status():
 # needs a coordinated frontend change; not done here to avoid a silent break.
 @app.route('/history')
 @app.route('/api/history')
+@rate_limit(120, 60)
 def history():
     try:
         # Return the SQLite result even when it is a legitimately empty list —
@@ -850,7 +866,7 @@ def history():
         source = request.args.get('source')
         if source == 'all':
             source = None
-        return jsonify(IncidentRepository.get_history(limit=INCIDENT_RETENTION_LIMIT, source=source))
+        return jsonify(_redact_ackers(IncidentRepository.get_history(limit=INCIDENT_RETENTION_LIMIT, source=source)))
     except Exception:
         logger.exception("history(): SQLite read failed, falling back to history.json")
     # Fallback also folds in history_archive.json so overflow rows past
@@ -859,17 +875,22 @@ def history():
 
 @app.route('/logs')
 @app.route('/api/logs')
+@rate_limit(120, 60)
 def logs():
     try:
         limit = int(request.args.get('limit', 50))
     except (TypeError, ValueError):
         limit = 50
-    limit = max(1, min(limit, json_store.MAX_LOGS))
+    # Up to what event_logs keeps — the JSON fallback's 200-row cap made
+    # everything older unreachable from the UI.
+    limit = max(1, min(limit, EventLogRepository.RETENTION_LIMIT))
+    source = (request.args.get('source') or '').strip()
     try:
         # A legitimately empty log list is not a read failure (audit F20).
-        data = EventLogRepository.get_logs(limit=limit, job=(request.args.get('job') or '').strip() or None)
+        data = EventLogRepository.get_logs(limit=limit, job=(request.args.get('job') or '').strip() or None,
+                                           source=None if source in ('', 'all') else source)
         _annotate_logs_with_acknowledgment(data)
-        return jsonify(data)
+        return jsonify(_redact_ackers(data))
     except Exception:
         logger.exception("logs(): SQLite read failed, falling back to logs.json")
     data = json_store.load_json(json_store.LOGS_FILE, [])

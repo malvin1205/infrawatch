@@ -57,6 +57,28 @@ export function latencyColor(ms, thresholdMs) {
 // e.g. 'en-GB' for "HH:MM" if the wallboard audience is non-Indonesian.
 export const DATE_LOCALE = 'id-ID';
 
+// Alert Log / Incident History timestamps: always WIB (UTC+7), whatever the
+// browser's timezone, and always with the date — a bare "00:00:00" read as
+// "today" for an event from another day.
+const WIB_SEC = 25200;
+const pad2 = n => String(n).padStart(2, '0');
+
+export function formatWib(ts, { seconds = false, now = Date.now() } = {}) {
+  if (!ts) return '—';
+  const d = new Date((ts + WIB_SEC) * 1000);
+  const time = `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}${seconds ? `:${pad2(d.getUTCSeconds())}` : ''}`;
+  const year = new Date(now + WIB_SEC * 1000).getUTCFullYear() === d.getUTCFullYear() ? '' : `/${d.getUTCFullYear()}`;
+  return `${time} · ${pad2(d.getUTCDate())}/${pad2(d.getUTCMonth() + 1)}${year}`;
+}
+
+// "2026-09-30 21:59:55 WIB" — unambiguous, sortable (CSV export).
+export function isoWib(ts) {
+  if (!ts) return '';
+  const d = new Date((ts + WIB_SEC) * 1000);
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())} ` +
+    `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())} WIB`;
+}
+
 export function getDurationFormatPreference() {
   try {
     if (typeof localStorage !== 'undefined') {

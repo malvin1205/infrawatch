@@ -306,6 +306,22 @@ export class InstancesPage {
         if (this._lastAckClick && (Date.now() - this._lastAckClick < 1000)) return;
         this._lastAckClick = Date.now();
         if (this._ackInFlight) return;
+
+        // Claiming several outages at once silences all their sirens; undoing
+        // it is one host at a time (drawer). Confirm first.
+        const toAck = (this.data || []).filter(t => t.is_alarmable && t.health !== 'up' && !t.acknowledged);
+        if (toAck.length > 1 && typeof window.showConfirmDialog === 'function') {
+          const ok = await window.showConfirmDialog({
+            title: `Acknowledge ${toAck.length} outages?`,
+            message: `This silences the alarm for all ${toAck.length} unacknowledged outages in this view ` +
+              `(${toAck.slice(0, 5).map(t => t.instance).join(', ')}${toAck.length > 5 ? ', …' : ''}). ` +
+              'New outages will still ring. Undo is per host, from its detail drawer.',
+            confirmText: `Acknowledge ${toAck.length}`,
+            cancelText: 'Cancel',
+            isDanger: false,
+          });
+          if (!ok) return;
+        }
         this._ackInFlight = true;
         ackBtn.disabled = true;
         ackBtn.style.pointerEvents = 'none';

@@ -288,6 +288,17 @@ def init_db(db_path: Optional[str] = None):
         # the row's current started_at) — real re-fire counts only start
         # accumulating from here on, which is honest: earlier flaps were
         # never counted anywhere, there's nothing truer to backfill.
+        # event_logs.source: which Prometheus server an event came from, so
+        # the Alert Log can be scoped like incidents are. Old rows take the
+        # source of the incident with the same key (their only link), else ''.
+        log_cols = {r[1] for r in conn.execute("PRAGMA table_info(event_logs)").fetchall()}
+        if "source" not in log_cols:
+            conn.execute("ALTER TABLE event_logs ADD COLUMN source TEXT NOT NULL DEFAULT ''")
+            inc_has_source = "source" in {r[1] for r in conn.execute("PRAGMA table_info(incidents)").fetchall()}
+            if inc_has_source:
+                conn.execute("""UPDATE event_logs SET source = COALESCE(
+                    (SELECT i.source FROM incidents i WHERE i.key = event_logs.fingerprint LIMIT 1), '')""")
+
         inc_cols = {r[1] for r in conn.execute("PRAGMA table_info(incidents)").fetchall()}
         if "occurrences" not in inc_cols:
             conn.execute("ALTER TABLE incidents ADD COLUMN occurrences INTEGER NOT NULL DEFAULT 1")
