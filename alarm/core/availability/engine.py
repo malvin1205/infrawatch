@@ -916,7 +916,8 @@ class AvailabilityEngine:
             all_windows = load_maintenance_windows()
             overlapping = [
                 w for w in all_windows
-                if _parse_epoch_ts(w.get("end_epoch") if w.get("end_epoch") is not None else w.get("end", 0)) > req_start
+                if w.get("sla_excluded", True)  # "Include in SLA" windows only mute alarms
+                and _parse_epoch_ts(w.get("end_epoch") if w.get("end_epoch") is not None else w.get("end", 0)) > req_start
                 and _parse_epoch_ts(w.get("start_epoch") if w.get("start_epoch") is not None else w.get("start", 0)) < req_end
             ]
             if overlapping:

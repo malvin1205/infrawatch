@@ -672,12 +672,12 @@ class _DrawerMethods {
     }
   }
 
-  async _startMaintenance(instance, minutes, reason) {
+  async _startMaintenance(instance, minutes, reason, excludeFromSla = true) {
     const now = Math.floor(Date.now() / 1000);
     const res = await apiFetch('/api/maintenance', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target: instance, scope: 'instance', reason, start: now, end: now + minutes * 60 })
+      body: JSON.stringify({ target: instance, scope: 'instance', reason, start: now, end: now + minutes * 60, exclude_from_sla: excludeFromSla })
     });
     if (res.ok) {
       const { window: mw } = await res.json();
@@ -828,7 +828,7 @@ class _DrawerMethods {
       return `
         <div class="maint-row">
           <span class="maint-target" title="${this._esc(w.scope === 'job' ? 'Entire job/group' : 'Single host')}">${this._esc(w.target)}</span>
-          <span class="maint-reason">${this._esc(w.reason || 'No reason given')}</span>
+          <span class="maint-reason">${this._esc(w.reason || 'No reason given')}${w.sla_excluded === false ? ' · counts toward SLA' : ''}</span>
           <span class="maint-window ${isActive ? 'maint-window-active' : ''}">${label}</span>
           <button class="btn btn-sm btn-secondary" data-end-id="${this._esc(w.id)}" type="button">${isActive ? 'End Early' : 'Cancel'}</button>
         </div>`;

@@ -1,6 +1,7 @@
 """Inventory and infrastructure topology repositories for InfraWatch.
 """
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
@@ -29,22 +30,26 @@ class MaintenanceRepository:
                     "start_iso": r["start_iso"],
                     "end_iso": r["end_iso"],
                     "active": (r["start_epoch"] <= now <= r["end_epoch"]),
+                    "sla_excluded": bool(r["sla_excluded"]) if "sla_excluded" in r.keys() else True,
                     "created_at": r["created_at"]
                 }
                 for r in rows
             ]
 
     @staticmethod
-    def create_window(scope: str, target: str, reason: str, start: float, end: float, db_path: Optional[str] = None) -> Dict[str, Any]:
-        win_id = f"mw_{int(time.time() * 1000)}"
+    def create_window(scope: str, target: str, reason: str, start: float, end: float,
+                      sla_excluded: bool = True, db_path: Optional[str] = None) -> Dict[str, Any]:
+        # uuid suffix: a bulk request creates many windows within one millisecond,
+        # and a bare ms timestamp collided on the PRIMARY KEY.
+        win_id = f"mw_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
         now = time.time()
         start_iso = datetime.fromtimestamp(float(start), tz=timezone.utc).isoformat()
         end_iso = datetime.fromtimestamp(float(end), tz=timezone.utc).isoformat()
         with db_transaction(db_path) as conn:
             conn.execute("""
-                INSERT INTO maintenance_windows (id, scope, target, reason, start_epoch, end_epoch, start_iso, end_iso, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (win_id, scope, target, reason, start, end, start_iso, end_iso, now))
+                INSERT INTO maintenance_windows (id, scope, target, reason, start_epoch, end_epoch, start_iso, end_iso, created_at, sla_excluded)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (win_id, scope, target, reason, start, end, start_iso, end_iso, now, 1 if sla_excluded else 0))
         return {
             "id": win_id,
             "scope": scope,
@@ -54,14 +59,27 @@ class MaintenanceRepository:
             "end": end,
             "start_epoch": start,
             "end_epoch": end,
+            "sla_excluded": bool(sla_excluded),
             "created_at": int(now)
         }
 
     @staticmethod
-    def delete_window(window_id: str, db_path: Optional[str] = None) -> bool:
+    def delete_window(window_id: str, now: Optional[float] = None, db_path: Optional[str] = None) -> bool:
+        """End Early / Cancel. Only a window that hasn't started is deleted. One
+        already running is cut short at `now` instead: deleting it also erased
+        the maintenance time that already passed, so its downtime was re-counted
+        against SLA as an outage. An already-finished window is left as history."""
+        curr = now if now is not None else time.time()
         with db_transaction(db_path) as conn:
-            cursor = conn.execute("DELETE FROM maintenance_windows WHERE id = ?", (window_id,))
-            return cursor.rowcount > 0
+            row = conn.execute("SELECT start_epoch, end_epoch FROM maintenance_windows WHERE id = ?", (window_id,)).fetchone()
+            if row is None:
+                return False
+            if row["start_epoch"] > curr:
+                conn.execute("DELETE FROM maintenance_windows WHERE id = ?", (window_id,))
+            elif row["end_epoch"] > curr:
+                conn.execute("UPDATE maintenance_windows SET end_epoch = ?, end_iso = ? WHERE id = ?",
+                             (curr, datetime.fromtimestamp(curr, tz=timezone.utc).isoformat(), window_id))
+            return True
 
     @staticmethod
     def get_active_maintenance(instance: str, job: Optional[str] = None, now: Optional[float] = None, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:

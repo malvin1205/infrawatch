@@ -239,6 +239,13 @@ def init_db(db_path: Optional[str] = None):
         # aggregator so incident counts can later be de-duplicated across the
         # hour boundary. Nullable — legacy rows and the approximate fallback
         # path simply leave it NULL.
+        # sla_excluded: 1 = the window's time is carved out of SLA (the original
+        # behaviour, so existing rows keep it); 0 = alarms still suppressed but
+        # the time counts toward SLA like any other.
+        mw_cols = {r[1] for r in conn.execute("PRAGMA table_info(maintenance_windows)").fetchall()}
+        if "sla_excluded" not in mw_cols:
+            conn.execute("ALTER TABLE maintenance_windows ADD COLUMN sla_excluded INTEGER NOT NULL DEFAULT 1")
+
         cols = {r[1] for r in conn.execute("PRAGMA table_info(availability_buckets)").fetchall()}
         if "outage_json" not in cols:
             conn.execute("ALTER TABLE availability_buckets ADD COLUMN outage_json TEXT")

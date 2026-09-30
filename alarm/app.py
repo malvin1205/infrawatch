@@ -1279,7 +1279,8 @@ def create_maintenance_api():
     with _WEBHOOK_LOCK:
         try:
             window = MaintenanceRepository.create_window(
-                scope=scope, target=target, reason=reason, start=float(start), end=float(end)
+                scope=scope, target=target, reason=reason, start=float(start), end=float(end),
+                sla_excluded=data.get('exclude_from_sla') is not False,
             )
             _invalidate_maint_cache()
             availability_engine.invalidate_cache()  # Trend + SLA carve out maintenance
@@ -1292,7 +1293,7 @@ def create_maintenance_api():
         actor_role=g.current_user.get("role", "admin"),
         action="CREATE_MAINTENANCE",
         resource=f"{scope}:{target}",
-        details=f"Created maintenance window {window.get('id')} ({reason})"
+        details=f"Created maintenance window {window.get('id')} ({reason}){'' if window.get('sla_excluded') else ' [counts toward SLA]'}"
     )
     return jsonify({"ok": True, "window": window})
 
@@ -1338,12 +1339,14 @@ def create_maintenance_bulk_api():
     if end - start > 366 * 86400:
         return jsonify({"ok": False, "error": "Maintenance window cannot exceed 366 days"}), 400
 
+    sla_excluded = data.get('exclude_from_sla') is not False
     windows = []
     with _WEBHOOK_LOCK:
         try:
             for target in targets:
                 windows.append(MaintenanceRepository.create_window(
-                    scope='instance', target=target, reason=reason, start=float(start), end=float(end)
+                    scope='instance', target=target, reason=reason, start=float(start), end=float(end),
+                    sla_excluded=sla_excluded,
                 ))
             _invalidate_maint_cache()
             availability_engine.invalidate_cache()  # Trend + SLA carve out maintenance
@@ -1356,7 +1359,7 @@ def create_maintenance_bulk_api():
         actor_role=g.current_user.get("role", "admin"),
         action="CREATE_MAINTENANCE",
         resource=f"bulk:{len(targets)} targets",
-        details=f"Created {len(windows)} maintenance windows ({reason}): {', '.join(targets[:10])}{', +' + str(len(targets) - 10) + ' more' if len(targets) > 10 else ''}"
+        details=f"Created {len(windows)} maintenance windows ({reason}){'' if sla_excluded else ' [counts toward SLA]'}: {', '.join(targets[:10])}{', +' + str(len(targets) - 10) + ' more' if len(targets) > 10 else ''}"
     )
     return jsonify({"ok": True, "windows": windows})
 
@@ -1379,7 +1382,7 @@ def delete_maintenance_api(window_id):
         actor_role=g.current_user.get("role", "admin"),
         action="DELETE_MAINTENANCE",
         resource=window_id,
-        details="Deleted maintenance window"
+        details="Ended/cancelled maintenance window (elapsed time kept for SLA)"
     )
     return jsonify({"ok": True})
 

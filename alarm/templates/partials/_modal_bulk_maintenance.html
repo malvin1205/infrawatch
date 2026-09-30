@@ -23,6 +23,22 @@
               <option value="240">4 hours</option>
               <option value="480">8 hours</option>
               <option value="1440">24 hours</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </div>
+          <div id="bulkMaintCustomRow" class="hidden" style="display:flex; gap:8px;">
+            <input type="number" id="bulkMaintCustomValue" class="form-input" min="1" step="any" placeholder="e.g. 3" aria-label="Custom duration" style="flex:1;">
+            <select id="bulkMaintCustomUnit" class="form-select" aria-label="Custom duration unit" style="flex:1;">
+              <option value="1">minutes</option>
+              <option value="60" selected>hours</option>
+              <option value="1440">days</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="bulkMaintSla">SLA</label>
+            <select id="bulkMaintSla" class="form-select">
+              <option value="exclude" selected>Exclude from SLA (planned downtime)</option>
+              <option value="include">Include in SLA (counts as downtime)</option>
             </select>
           </div>
           <div class="form-group">
@@ -30,7 +46,7 @@
             <input type="text" id="bulkMaintReasonInput" class="form-input" placeholder="Scheduled reboot, firmware update, ...">
           </div>
           <div id="bulkMaintError" class="form-error hidden"></div>
-          <p class="form-help" style="margin: 0 0 8px;">Keeps checking these hosts, but stops them raising alarms and excludes the window from their SLA. Hosts already in maintenance are left untouched.</p>
+          <p class="form-help" style="margin: 0 0 8px;">Keeps checking these hosts, but stops them raising alarms. With "Exclude from SLA" the window is also left out of their SLA; with "Include" any downtime in it still counts. Hosts already in maintenance are left untouched.</p>
           <button id="bulkMaintSubmitBtn" type="submit" class="btn btn-warning btn-sm btn-block">Start maintenance</button>
         </form>
       </div>

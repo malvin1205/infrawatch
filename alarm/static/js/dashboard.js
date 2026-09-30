@@ -252,12 +252,14 @@ export class InstancesPage {
     // Maintenance Mode (Phase 9)
     const maintForm = document.getElementById('drawerMaintenanceForm');
     if (maintForm) {
+      this._bindMaintCustomDuration('drawerMaint');
       maintForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         if (!this.selectedTarget) return;
-        const minutes = parseInt(document.getElementById('drawerMaintDuration')?.value, 10) || 60;
+        const opts = this._maintFormOptions('drawerMaint');
+        if (!opts) return;
         const reason = document.getElementById('drawerMaintReasonInput')?.value.trim() || '';
-        await this._startMaintenance(this.selectedTarget.instance, minutes, reason);
+        await this._startMaintenance(this.selectedTarget.instance, opts.minutes, reason, opts.excludeFromSla);
       });
     }
     const maintEndBtn = document.getElementById('drawerMaintEndBtn');
@@ -1952,13 +1954,46 @@ export class InstancesPage {
     modal.addEventListener('click', e => { if (e.target === modal) close(); });
 
     if (form) {
+      this._bindMaintCustomDuration('bulkMaint');
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const minutes = parseInt(document.getElementById('bulkMaintDuration')?.value, 10) || 60;
+        const opts = this._maintFormOptions('bulkMaint');
+        if (!opts) return;
         const reason = document.getElementById('bulkMaintReasonInput')?.value.trim() || '';
-        await this._startBulkMaintenance(Array.from(this._selectedInstances), minutes, reason);
+        await this._startBulkMaintenance(Array.from(this._selectedInstances), opts.minutes, reason, opts.excludeFromSla);
       });
     }
+  }
+
+  // Shared by the drawer (prefix 'drawerMaint') and bulk ('bulkMaint')
+  // maintenance forms: "Custom…" in the Duration preset reveals a number +
+  // unit row.
+  _bindMaintCustomDuration(prefix) {
+    const sel = document.getElementById(`${prefix}Duration`);
+    const row = document.getElementById(`${prefix}CustomRow`);
+    if (!sel || !row) return;
+    sel.addEventListener('change', () => {
+      row.classList.toggle('hidden', sel.value !== 'custom');
+      if (sel.value === 'custom') document.getElementById(`${prefix}CustomValue`)?.focus();
+    });
+  }
+
+  // {minutes, excludeFromSla} from a maintenance form, or null (with the
+  // browser's own validation bubble shown) when the custom duration is bad.
+  // Bounds match the server: at least 1 minute, at most 366 days.
+  _maintFormOptions(prefix) {
+    const excludeFromSla = document.getElementById(`${prefix}Sla`)?.value !== 'include';
+    const preset = document.getElementById(`${prefix}Duration`)?.value;
+    if (preset !== 'custom') return { minutes: parseInt(preset, 10) || 60, excludeFromSla };
+    const input = document.getElementById(`${prefix}CustomValue`);
+    const unit = parseInt(document.getElementById(`${prefix}CustomUnit`)?.value, 10) || 1;
+    const minutes = Math.round(parseFloat(input?.value) * unit);
+    const ok = Number.isFinite(minutes) && minutes >= 1 && minutes <= 366 * 1440;
+    if (input) {
+      input.setCustomValidity(ok ? '' : 'Enter a duration between 1 minute and 366 days.');
+      if (!ok) { input.reportValidity(); input.addEventListener('input', () => input.setCustomValidity(''), { once: true }); }
+    }
+    return ok ? { minutes, excludeFromSla } : null;
   }
 
   _openBulkMaintenanceModal() {
@@ -1984,7 +2019,7 @@ export class InstancesPage {
     modal.classList.remove('hidden');
   }
 
-  async _startBulkMaintenance(instances, minutes, reason) {
+  async _startBulkMaintenance(instances, minutes, reason, excludeFromSla = true) {
     const eligible = instances.filter(inst => !this.data.find(t => t.instance === inst)?.maintenance);
     const modal = document.getElementById('bulkMaintenanceModal');
     const errorEl = document.getElementById('bulkMaintError');
@@ -2001,7 +2036,7 @@ export class InstancesPage {
       const res = await apiFetch('/api/maintenance/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targets: eligible, reason, start: now, end: now + minutes * 60 })
+        body: JSON.stringify({ targets: eligible, reason, start: now, end: now + minutes * 60, exclude_from_sla: excludeFromSla })
       });
       let data = {};
       try { data = await res.json(); } catch (_) { /* non-JSON error body */ }

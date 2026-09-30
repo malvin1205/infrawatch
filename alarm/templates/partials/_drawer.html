@@ -351,13 +351,29 @@
                 <option value="240">4 hours</option>
                 <option value="480">8 hours</option>
                 <option value="1440">24 hours</option>
+                <option value="custom">Custom…</option>
+              </select>
+            </div>
+            <div id="drawerMaintCustomRow" class="hidden" style="display:flex; gap:8px;">
+              <input type="number" id="drawerMaintCustomValue" class="form-input" min="1" step="any" placeholder="e.g. 3" aria-label="Custom duration" style="flex:1;">
+              <select id="drawerMaintCustomUnit" class="form-select" aria-label="Custom duration unit" style="flex:1;">
+                <option value="1">minutes</option>
+                <option value="60" selected>hours</option>
+                <option value="1440">days</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="drawerMaintSla">SLA</label>
+              <select id="drawerMaintSla" class="form-select">
+                <option value="exclude" selected>Exclude from SLA (planned downtime)</option>
+                <option value="include">Include in SLA (counts as downtime)</option>
               </select>
             </div>
             <div class="form-group">
               <label class="form-label" for="drawerMaintReasonInput">Reason (optional)</label>
               <input type="text" id="drawerMaintReasonInput" class="form-input" placeholder="Scheduled reboot, firmware update, ...">
             </div>
-            <p class="form-help" style="margin: 0 0 8px;">Keeps checking this host, but stops it raising alarms and excludes the window from its SLA. Everyone sees it as &ldquo;In maintenance&rdquo; until the window ends.</p>
+            <p class="form-help" style="margin: 0 0 8px;">Keeps checking this host, but stops it raising alarms. With "Exclude from SLA" the window is also left out of its SLA; with "Include" any downtime in it still counts. Everyone sees it as &ldquo;In maintenance&rdquo; until the window ends.</p>
             <button id="drawerMaintStartBtn" type="submit" class="btn btn-warning btn-sm btn-block">Suppress alerts for this window</button>
           </form>
         </div>
