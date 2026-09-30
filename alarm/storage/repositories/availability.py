@@ -351,11 +351,22 @@ class AvailabilityBucketRepository:
         }
 
     @staticmethod
-    def prune_old_buckets(retention_seconds: float = 35 * 86400, db_path: Optional[str] = None) -> int:
+    def prune_old_buckets(retention_seconds: float = 35 * 86400, source: Optional[str] = None,
+                          db_path: Optional[str] = None) -> int:
+        """Delete buckets older than `retention_seconds` — of one server when
+        `source` is given (servers keep different depths), else of all."""
         cutoff = time.time() - retention_seconds
         with db_transaction(db_path) as conn:
-            cur = conn.execute("DELETE FROM availability_buckets WHERE bucket_end < ?", (cutoff,))
+            if source is None:
+                cur = conn.execute("DELETE FROM availability_buckets WHERE bucket_end < ?", (cutoff,))
+            else:
+                cur = conn.execute("DELETE FROM availability_buckets WHERE bucket_end < ? AND source = ?", (cutoff, source))
             return cur.rowcount
+
+    @staticmethod
+    def list_sources(db_path: Optional[str] = None) -> List[str]:
+        with db_read(db_path) as conn:
+            return [r["source"] for r in conn.execute("SELECT DISTINCT source FROM availability_buckets")]
 
     @staticmethod
     def clear_all_buckets(db_path: Optional[str] = None):

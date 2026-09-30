@@ -239,8 +239,42 @@ def test_backfill_floor_follows_prometheus_retention():
             return {"status": "success", "data": {"storage.tsdb.retention.time": "15d"}}, SRC
 
     eng = AvailabilityEngine(prom_client=Flags, bucket_repo=DbRepo())
-    assert eng._backfill_depth(SRC) == min(AVAIL_BACKFILL_SECONDS, 15 * DAY)
+    assert eng._backfill_depth(SRC) == 15 * DAY
     assert AVAIL_BACKFILL_CHUNK_SECONDS == H
+
+    # Longer than the 35d fallback: follow Prometheus, not the fallback.
+    class Flags60(Client):
+        @staticmethod
+        def fetch_prometheus_json(path, **k):
+            return {"status": "success", "data": {"storage.tsdb.retention.time": "60d"}}, SRC
+
+    assert AvailabilityEngine(prom_client=Flags60, bucket_repo=DbRepo())._backfill_depth(SRC) == 60 * DAY
+
+    # Unknown retention (unreachable / size-based): the configured fallback.
+    class NoFlags(Client):
+        @staticmethod
+        def fetch_prometheus_json(path, **k):
+            return None, None
+
+    assert AvailabilityEngine(prom_client=NoFlags, bucket_repo=DbRepo())._backfill_depth(SRC) == AVAIL_BACKFILL_SECONDS
+
+    # Default retention: /flags says 0s, runtimeinfo has the effective value.
+    class DefaultRetention(Client):
+        @staticmethod
+        def fetch_prometheus_json(path, **k):
+            if path.endswith("runtimeinfo"):
+                return {"status": "success", "data": {"storageRetention": "15d or 10GiB"}}, SRC
+            return {"status": "success", "data": {"storage.tsdb.retention.time": "0s"}}, SRC
+
+    assert AvailabilityEngine(prom_client=DefaultRetention, bucket_repo=DbRepo())._backfill_depth(SRC) == 15 * DAY
+
+    # Server goes unreachable after a good read: keep the last known depth
+    # (the prune follows it), don't fall back to 35d on a network blip.
+    eng = AvailabilityEngine(prom_client=Flags60, bucket_repo=DbRepo())
+    assert eng._backfill_depth(SRC) == 60 * DAY
+    eng.prom_client = NoFlags
+    eng._retention_cache[SRC] = (0.0, eng._retention_cache[SRC][1])  # expire the cache
+    assert eng._backfill_depth(SRC) == 60 * DAY
 
 
 # ── calendar / trend consistency ──

@@ -75,11 +75,25 @@ class AvailabilityAggregator:
             logger.exception("Availability aggregator: aggregate_hourly_buckets failed")
 
         try:
-            self.bucket_repo.prune_old_buckets(self.retention_sec)
+            self._prune()
         except Exception:
             logger.exception("Availability aggregator: prune_old_buckets failed")
 
         return upserted
+
+    def _prune(self) -> None:
+        """Per server: keep buckets for as long as that server's Prometheus
+        retains data (what backfill fills to), never less than retention_sec.
+        One global 35d cutoff deleted the 35-60d a 60d-retention server had
+        just been backfilled with, every cycle. A server whose retention can't
+        be read right now is skipped, not pruned on a guess.
+        ponytail: a server that is never reachable again keeps its rows
+        forever; prune it by hand (or delete the endpoint) if that matters."""
+        for src in self.bucket_repo.list_sources():
+            if src and not self.engine._prom_retention_seconds(src):
+                continue
+            depth = self.engine._backfill_depth(src) if src else 0.0
+            self.bucket_repo.prune_old_buckets(max(self.retention_sec, depth), source=src)
 
     def get_health(self, now: Optional[float] = None) -> Dict[str, Any]:
         """Compute and return health status dictionary for /health reporting."""

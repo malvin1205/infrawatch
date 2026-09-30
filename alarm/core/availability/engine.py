@@ -94,13 +94,17 @@ except (ImportError, ValueError):
 
 logger = logging.getLogger("infrawatch.availability")
 
-# How deep materialized history should reach — an upper bound. The effective
-# floor is min(this, the source Prometheus's own retention): history older than
-# what Prometheus holds can never be reconstructed, so sweeping it only writes
-# empty placeholder rows (see _prom_retention_seconds).
+# How deep materialized history reaches: each server's own Prometheus
+# retention, so SQLite holds everything that server can still reconstruct
+# (history older than that can't be rebuilt; sweeping it only writes empty
+# placeholder rows). This value is only the fallback for a server whose
+# retention is unknown (unreachable, or size-based retention).
 AVAIL_BACKFILL_SECONDS = float(
     os.environ.get("AVAIL_BACKFILL_SECONDS", os.environ.get("AVAIL_BUCKET_RETENTION_SECONDS", str(35 * 86400)))
 )
+# Hard ceiling: no /api/availability window reaches past 366 days, so deeper
+# rows could never be read.
+AVAIL_BACKFILL_MAX_SECONDS = 366 * 86400.0
 # Depth is filled by walking backwards one chunk per aggregation cycle. The
 # exact path fetches RAW samples for the whole chunk (`probe_success[Ns]`, every
 # series): at a 2s scrape a 6h chunk was ~10.8k samples/series — tens of MB that
@@ -168,26 +172,37 @@ class AvailabilityEngine:
         self._last_live: Dict[str, Tuple[float, int, Dict[str, Any]]] = {}
 
     def _prom_retention_seconds(self, source: str) -> Optional[float]:
-        """`storage.tsdb.retention.time` of server `source` (cached 1h), or None
-        when unknown/size-only. Never raises."""
+        """Effective retention of server `source` (cached 1h), or None when
+        unknown/size-only. A failed read keeps the last value that did succeed
+        — a network blip must not shrink the depth (and the prune that follows
+        it) to the 35d fallback — and is retried after 60s. Never raises."""
         now = time.time()
         hit = self._retention_cache.get(source)
-        if hit and now - hit[0] < 3600.0:
+        if hit and now - hit[0] < (3600.0 if hit[1] else 60.0):
             return hit[1]
         ret = None
-        try:
-            raw, _ = self.prom_client.fetch_prometheus_json(
-                "/api/v1/status/flags", use_cache=True, cache_ttl=3600.0, timeout=5.0, source=source)
-            if raw and raw.get("status") == "success":
-                ret = _parse_prom_duration((raw.get("data") or {}).get("storage.tsdb.retention.time"))
-        except Exception:
-            ret = None
+        # runtimeinfo carries the EFFECTIVE retention ("15d", "15d or 10GiB"):
+        # a server left on the default has retention.time=0s in /flags, which
+        # read as unknown. /flags stays as the fallback for older Prometheus.
+        for path, pick in (("/api/v1/status/runtimeinfo", lambda d: d.get("storageRetention")),
+                           ("/api/v1/status/flags", lambda d: d.get("storage.tsdb.retention.time"))):
+            try:
+                raw, _ = self.prom_client.fetch_prometheus_json(
+                    path, use_cache=True, cache_ttl=3600.0, timeout=5.0, source=source)
+                if raw and raw.get("status") == "success":
+                    ret = _parse_prom_duration(pick(raw.get("data") or {}))
+            except Exception:
+                ret = None
+            if ret:
+                break
+        if ret is None and hit:
+            ret = hit[1]
         self._retention_cache[source] = (now, ret)
         return ret
 
     def _backfill_depth(self, source: str) -> float:
         ret = self._prom_retention_seconds(source)
-        return min(AVAIL_BACKFILL_SECONDS, ret) if ret else AVAIL_BACKFILL_SECONDS
+        return min(ret, AVAIL_BACKFILL_MAX_SECONDS) if ret else AVAIL_BACKFILL_SECONDS
 
     def invalidate_cache(self, job: Optional[str] = None, instance: Optional[str] = None) -> int:
         """Evict matching cached availability queries and clear module-level trend caches."""
@@ -1617,8 +1632,8 @@ class AvailabilityEngine:
         floor_start = hour_end - (self._backfill_depth_sec or AVAIL_BACKFILL_SECONDS)
 
         try:
-            # Only history inside the floor counts: older rows (kept by the 35d
-            # prune while Prometheus retains less) can never be re-fetched, so
+            # Only history inside the floor counts: older rows (kept by the
+            # prune's 35d minimum while Prometheus retains less) can never be re-fetched, so
             # counting their gaps would re-trigger a useless sweep forever.
             coverage = self.bucket_repo.get_instance_bucket_coverage(monitored, source=source, since=floor_start)
         except Exception:

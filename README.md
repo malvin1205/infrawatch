@@ -192,7 +192,7 @@ Tuning lanjutan (tambahkan ke blok `environment:` di `docker-compose.yml` bila p
 | `SLOW_RESPONSE_DEBOUNCE_N` | `3` | Jumlah probe lambat berturut-turut sebelum ditandai Slow. |
 | `SLA_TARGET_PCT` | `99.9` | Target SLA default armada (bisa diubah dari UI). |
 | `AVAIL_AGGREGATE_INTERVAL` | `60` | Interval aggregator bucket availability (detik). |
-| `AVAIL_BUCKET_RETENTION_SECONDS` | `3024000` (35 hari) | Retensi bucket availability per jam. |
+| `AVAIL_BUCKET_RETENTION_SECONDS` | `3024000` (35 hari) | Retensi minimum bucket availability per jam. Tiap server otomatis disimpan & di-backfill sepanjang retention Prometheus-nya sendiri (maks. 366 hari); nilai ini hanya batas bawah, dan kedalaman backfill bila retention server tidak diketahui. |
 | `ALERT_TZ_OFFSET_HOURS` | `7` | Offset zona waktu tampilan (WIB). |
 | `INFRAWATCH_SESSION_HOURS` | `24` | Masa berlaku sesi login. |
 | `INFRAWATCH_TRUST_PROXY` | `0` | Percayai header `X-Forwarded-*` dari reverse proxy. |
