@@ -116,6 +116,33 @@ def fetch_prom_range_map(query_expr, start_ts, end_ts, step_sec, cache_ttl=5.0, 
     return {inst: v for inst, (_, v) in picked.items()}
 
 
+def fetch_prom_matrix_map(query_expr, start_ts, end_ts, step_sec, timeout=None, source=None, prefer_job=None):
+    """query_range -> {instance: {eval_ts: float}}, or None when the request
+    failed (a caller must not read "failed" as "no series"). Used for small
+    per-hour aggregates (changes/min/max/count_over_time), never raw samples."""
+    path = (
+        f"/api/v1/query_range?query={quote(query_expr)}"
+        f"&start={start_ts:.3f}&end={end_ts:.3f}&step={int(step_sec)}"
+    )
+    raw, _ = _pc.fetch_prometheus_json(path, use_cache=False, timeout=timeout, source=source)
+    if not raw or raw.get('status') != 'success':
+        return None
+    picked = {}
+    for r in raw.get('data', {}).get('result', []):
+        labels = r.get('metric', {})
+        inst = labels.get('instance') or labels.get('target') or labels.get('url')
+        if not inst:
+            continue
+        vals = {}
+        for pair in r.get('values', []):
+            try:
+                vals[round(float(pair[0]), 3)] = float(pair[1])
+            except (ValueError, TypeError, IndexError):
+                continue
+        pick_series(picked, inst, labels, vals, prefer_job)
+    return {inst: v for inst, (_, v) in picked.items()}
+
+
 # Widest lookback of the down-since queries below ([32d:1h]). A target never
 # UP inside it gets the window's first DOWN sample, which slides forward as
 # time passes: a lower bound, not the outage start.

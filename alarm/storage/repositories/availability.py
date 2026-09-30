@@ -263,8 +263,12 @@ class AvailabilityBucketRepository:
                       )
                       AND bucket_end > ?
                       AND bucket_start < ?
+                      -- Lower bound on bucket_start too, so the range index
+                      -- is used: `bucket_end > ?` alone scanned every newer
+                      -- row, O(history) per call. Buckets are hourly.
+                      AND bucket_start > ?
             """
-            params: List[Any] = [source, job, job, job, job, start_time, end_time]
+            params: List[Any] = [source, job, job, job, job, start_time, end_time, start_time - 86400.0]
             if instances:
                 placeholders = ",".join("?" for _ in instances)
                 query += f" AND instance IN ({placeholders})"
@@ -299,6 +303,40 @@ class AvailabilityBucketRepository:
                 (norm_source(source), job, job, job, job)
             ).fetchone()
             return float(row["max_end"]) if row and row["max_end"] is not None else None
+
+    @staticmethod
+    def get_materialized_instance_hours(
+        start: float, end: float, db_path: Optional[str] = None, *, source: str,
+    ) -> Dict[str, set]:
+        """`{instance: {bucket_start, ...}}` of materialized hours in [start, end).
+        Same "materialized" test as get_instance_bucket_coverage."""
+        with db_read(db_path) as conn:
+            rows = conn.execute(
+                "SELECT bucket_start, instance FROM availability_buckets WHERE source = ? "
+                "AND bucket_start >= ? AND bucket_start < ? "
+                "AND NOT (downtime_seconds > 0 AND (outage_json IS NULL OR outage_json = ''))",
+                (norm_source(source), float(start), float(end)),
+            ).fetchall()
+        out: Dict[str, set] = {}
+        for r in rows:
+            out.setdefault(r["instance"], set()).add(float(r["bucket_start"]))
+        return out
+
+    @staticmethod
+    def get_materialized_hour_counts(
+        instances: List[str], start: float, end: float, db_path: Optional[str] = None, *, source: str,
+    ) -> Dict[float, int]:
+        """`{bucket_start: instances materialized}` for hours in [start, end).
+        One query for what the depth sweep used to ask one chunk at a time."""
+        wanted = set(instances)
+        counts: Dict[float, int] = {}
+        per_inst = AvailabilityBucketRepository.get_materialized_instance_hours(
+            start, end, db_path=db_path, source=source)
+        for inst, hours in per_inst.items():
+            if inst in wanted:
+                for h in hours:
+                    counts[h] = counts.get(h, 0) + 1
+        return counts
 
     @staticmethod
     def get_instance_bucket_coverage(

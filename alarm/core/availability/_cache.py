@@ -1,4 +1,5 @@
 """Availability thread-safe response cache and single-flight lock coalescer."""
+import re
 import threading
 import time
 from typing import Optional, Tuple, Any, Dict
@@ -69,6 +70,25 @@ class AvailabilityCache:
                 for k in to_remove:
                     self._flight_locks.pop(k, None)
 
+        return evicted
+
+    _KEY_WINDOW = re.compile(r":(\d+):(live|hist)_([\d.]+):sla")
+
+    def invalidate_range(self, start: float, end: float) -> int:
+        """Evict entries whose report window overlaps [start, end). The window
+        is read back from the key (minutes + live bucket / fixed end); a key
+        that can't be parsed is evicted to be safe."""
+        evicted = 0
+        with self._lock:
+            for k in list(self._cache):
+                m = self._KEY_WINDOW.search(k)
+                if m:
+                    w_end = float(m.group(3)) + (900.0 if m.group(2) == "live" else 0.0)
+                    w_start = float(m.group(3)) - int(m.group(1)) * 60.0 - 900.0
+                    if w_start >= end or w_end <= start:
+                        continue
+                del self._cache[k]
+                evicted += 1
         return evicted
 
     def clear(self) -> None:

@@ -110,7 +110,19 @@ AVAIL_BACKFILL_MAX_SECONDS = 366 * 86400.0
 # series): at a 2s scrape a 6h chunk was ~10.8k samples/series — tens of MB that
 # routinely timed out, silently leaving hours without outage intervals. 1h keeps
 # each fetch small; 35d still completes in ~14h of 60s ticks.
-AVAIL_BACKFILL_CHUNK_SECONDS = float(os.environ.get("AVAIL_BACKFILL_CHUNK", "3600"))
+# Raw sample fetches reach this far before the window, so the first hour sees
+# the previous sample (its carried-in state). Prometheus' own lookback: 15s
+# missed it for 1m-scraped targets, marking every hour of one long outage as a
+# new drop.
+RAW_LEAD_IN_SECONDS = 300.0
+AVAIL_BACKFILL_CHUNK_SECONDS = float(os.environ.get("AVAIL_BACKFILL_CHUNK", str(12 * 3600)))
+# Longest span of one host's raw samples fetched in one request: only flapping
+# hosts are fetched raw, ~1800 samples/hour each at a 2s scrape.
+AVAIL_BACKFILL_RAW_SPAN_SECONDS = float(os.environ.get("AVAIL_BACKFILL_RAW_SPAN", str(6 * 3600)))
+# Concurrent raw fetches per chunk (of the 16-worker pool shared with the API).
+AVAIL_BACKFILL_RAW_CONCURRENCY = int(os.environ.get("AVAIL_BACKFILL_RAW_CONCURRENCY", "4"))
+# Flapping hosts sharing the same hours fetched per raw request.
+AVAIL_BACKFILL_RAW_BATCH = int(os.environ.get("AVAIL_BACKFILL_RAW_BATCH", "8"))
 # A completed sweep that left instances under-materialized is not re-run for
 # this long (Prometheus may simply have nothing there) — but it IS re-run after,
 # so a sweep that failed transiently is never abandoned for good.
@@ -119,6 +131,84 @@ AVAIL_BACKFILL_RETRY_SECONDS = float(os.environ.get("AVAIL_BACKFILL_RETRY", str(
 # this many consecutive failures it is persisted from the scalar fallback (and
 # stays a "hole" for the next sweep to retry) so one bad hour can't pin the walk.
 AVAIL_BACKFILL_MAX_CHUNK_FAILURES = int(os.environ.get("AVAIL_BACKFILL_MAX_CHUNK_FAILURES", "3"))
+# Wall-clock budget per aggregation cycle for depth chunks (after the first,
+# which always runs). Keep under AVAIL_AGGREGATE_INTERVAL so ticks don't pile up.
+AVAIL_BACKFILL_CYCLE_BUDGET_SECONDS = float(os.environ.get("AVAIL_BACKFILL_CYCLE_BUDGET", "40"))
+# At most this often, backfilled history evicts cached reports (and once more
+# when the sweep reaches the floor).
+AVAIL_BACKFILL_INVALIDATE_SECONDS = float(os.environ.get("AVAIL_BACKFILL_INVALIDATE", "60"))
+
+
+def _promql_str(text: str) -> str:
+    """`text` escaped for a double-quoted PromQL string literal."""
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _raw_hour_record(inst, job, samples, sample_ts, cur_h, curr_time, cad, latency):
+    """One hour's bucket row reconstructed from raw 0/1 samples (the exact path)."""
+    nxt_h = cur_h + 3600.0
+    # Carried in = the host was already down AT cur_h, i.e. the last sample
+    # BEFORE the hour (the fetch keeps a lead-in) is 0. hour_pts[0] == 0 alone
+    # also flagged an outage that began at the hour's first scrape.
+    lead_idx = bisect.bisect_left(sample_ts, cur_h) - 1
+    carried_in = lead_idx >= 0 and samples[lead_idx][1] == 0
+    eff_end = min(nxt_h, curr_time)
+    rec = reconstruct_time_series_intervals(
+        samples, window_start_ts=cur_h, window_end_ts=eff_end, expected_interval_sec=cad,
+    )
+    lo = bisect.bisect_left(sample_ts, cur_h)
+    hi = bisect.bisect_left(sample_ts, eff_end)
+    return {
+        "instance": inst,
+        "job": job,
+        "bucket_start": cur_h,
+        "bucket_end": nxt_h,
+        "uptime_seconds": round(rec["uptime_seconds"], 2),
+        "downtime_seconds": round(rec["downtime_seconds"], 2),
+        "unknown_seconds": round(rec["unknown_seconds"], 2),
+        "coverage_seconds": round(rec["coverage_seconds"], 2),
+        "sample_count": hi - lo,
+        "availability_pct": rec["availability_pct"],
+        "incident_count": int(rec["incident_count"]),
+        "avg_latency_ms": latency,
+        "updated_at": curr_time,
+        "outage_json": {
+            "d": [round(float(x), 1) for x in rec.get("outage_durations_sec", [])],
+            "i": [[round(float(s), 1), round(float(e), 1)]
+                  for s, e in rec.get("outage_intervals_sec", [])],
+            "ongoing_start": bool(carried_in),
+            "ongoing_end": bool(rec.get("is_ongoing_outage")),
+        },
+    }
+
+
+def _stable_hour_record(inst, job, cur_h, value, count, lead_down, latency, curr_time):
+    """The row _raw_hour_record would build for an hour whose samples are all
+    `value` with no gap over the reconstruction tolerance — without fetching
+    them. Full UP: no outage. Full DOWN: one outage spanning the hour, open at
+    its end (the next hour decides whether it continued)."""
+    down = value == 0
+    return {
+        "instance": inst,
+        "job": job,
+        "bucket_start": cur_h,
+        "bucket_end": cur_h + 3600.0,
+        "uptime_seconds": 0.0 if down else 3600.0,
+        "downtime_seconds": 3600.0 if down else 0.0,
+        "unknown_seconds": 0.0,
+        "coverage_seconds": 3600.0,
+        "sample_count": int(count),
+        "availability_pct": 0.0 if down else 100.0,
+        "incident_count": 1 if down else 0,
+        "avg_latency_ms": latency,
+        "updated_at": curr_time,
+        "outage_json": {
+            "d": [3600.0] if down else [],
+            "i": [[round(cur_h, 1), round(cur_h + 3600.0, 1)]] if down else [],
+            "ongoing_start": bool(lead_down),
+            "ongoing_end": down,
+        },
+    }
 
 
 def _parse_prom_duration(text: Optional[str]) -> Optional[float]:
@@ -165,6 +255,11 @@ class AvailabilityEngine:
         self._deep_chunk_failures: Dict[Tuple[float, float], int] = {}
         # Effective depth (seconds) for the current source — see _backfill_depth.
         self._backfill_depth_sec: Optional[float] = None
+        # Last time freshly backfilled history evicted the report cache, and
+        # the span written since then (evicted only for reports overlapping it).
+        self._depth_invalidated_at: float = 0.0
+        self._dirty_range: Optional[Tuple[float, float]] = None
+        self._backfill_status_cache: Dict[Tuple[str, Tuple[str, ...]], Tuple[float, Dict[str, Any]]] = {}
         self._retention_cache: Dict[str, Tuple[float, Optional[float]]] = {}
         # Stale-while-revalidate state for live long windows (get_availability).
         self._refresh_guard = threading.Lock()
@@ -204,6 +299,27 @@ class AvailabilityEngine:
         ret = self._prom_retention_seconds(source)
         return min(ret, AVAIL_BACKFILL_MAX_SECONDS) if ret else AVAIL_BACKFILL_SECONDS
 
+    @property
+    def backfill_in_progress(self) -> bool:
+        """A depth sweep is walking toward the retention floor."""
+        return self._deep_sweep_pending is not None
+
+    def _note_materialized(self, start: float, end: float) -> None:
+        lo, hi = self._dirty_range or (start, end)
+        self._dirty_range = (min(lo, start), max(hi, end))
+
+    def invalidate_range(self, start: float, end: float) -> int:
+        """Evict cached reports whose window overlaps [start, end) — and their
+        stale-serve copies, which would otherwise be handed out once more as
+        "backfill pending" for history that is now materialized."""
+        clear_helpers_caches()
+        self._backfill_status_cache.clear()
+        with self._refresh_guard:
+            for view_id, (ts, minutes, _) in list(self._last_live.items()):
+                if ts - minutes * 60.0 < end and ts > start:
+                    self._last_live.pop(view_id, None)
+        return self.cache.invalidate_range(start, end)
+
     def invalidate_cache(self, job: Optional[str] = None, instance: Optional[str] = None) -> int:
         """Evict matching cached availability queries and clear module-level trend caches."""
         clear_helpers_caches()
@@ -231,6 +347,59 @@ class AvailabilityEngine:
         threading.Thread(target=run, name=f"avail-refresh-{len(self._refreshing)}", daemon=True).start()
 
     def get_availability(self, query: AvailabilityQuery, allow_stale: bool = True) -> AvailabilityReport:
+        """_get_availability plus the live backfill status (see backfill_status).
+        Attached per response, not cached with the report: a 30d report is
+        cached for minutes, the progress of a running backfill is not."""
+        report = self._get_availability(query, allow_stale)
+        payload = report.payload
+        scope = payload.get("scope") or {}
+        targets = payload.get("targets")
+        if scope.get("source") and isinstance(targets, dict) and targets:
+            try:
+                status = self.backfill_status(scope["source"], sorted(targets))
+            except Exception:
+                logger.exception("availability: backfill status failed")
+                status = None
+            if status is not None:
+                return AvailabilityReport(dict(payload, backfill=status))
+        return report
+
+    def backfill_status(self, source: str, instances: List[str], now: Optional[float] = None) -> Dict[str, Any]:
+        """How much of the retention window is materialized for `instances`.
+
+        state "filling" while any completed hour in [floor, now) lacks a row
+        for some instance; "complete" once all do. materialized_from_ts: every
+        hour from it up to now is complete — history the Trend can show with
+        exact intervals; older is still being filled (newest first). Read from
+        SQLite, so it holds on any worker, leader or not. Cached 30s."""
+        now = time.time() if now is None else now
+        key = (source, tuple(instances))
+        hit = self._backfill_status_cache.get(key)
+        if hit and now - hit[0] < 30.0:
+            return hit[1]
+        top = math.floor(now / 3600.0) * 3600.0
+        # Same floor as the depth sweep (_next_depth_backfill_window), which
+        # also materializes the hour the floor falls in.
+        floor_ts = math.floor((top - self._backfill_depth(source)) / 3600.0) * 3600.0
+        counts = self.bucket_repo.get_materialized_hour_counts(instances, floor_ts, top, source=source)
+        need = len(set(instances))
+        total = max(0, int(round((top - floor_ts) / 3600.0)))
+        done = sum(1 for h, c in counts.items() if c >= need)
+        t = top - 3600.0
+        while t >= floor_ts and counts.get(t, 0) >= need:
+            t -= 3600.0
+        status = {
+            "state": "complete" if done >= total else "filling",
+            "floor_ts": int(floor_ts),
+            "materialized_from_ts": int(t + 3600.0),
+            "complete_hours": done,
+            "total_hours": total,
+            "progress_pct": round(100.0 * done / total, 1) if total else 100.0,
+        }
+        self._backfill_status_cache[key] = (now, status)
+        return status
+
+    def _get_availability(self, query: AvailabilityQuery, allow_stale: bool = True) -> AvailabilityReport:
         """Single deep entry point for querying fleet and per-target availability.
 
         Live windows of 24h and longer are stale-while-revalidate: when the
@@ -562,269 +731,263 @@ class AvailabilityEngine:
 
         executor = getattr(self.prom_client, "_SHARED_EXECUTOR", None)
 
-        for w_start, w_end in windows_to_aggregate:
-            w_minutes = max(1, int(round((w_end - w_start) / 60.0)))
-            step_sec = SCRAPE_INTERVAL_SECONDS
-            if w_minutes > 10080:
-                step_sec = 300.0
-            elif w_minutes > 1440:
-                step_sec = 30.0
+        # Several depth chunks per cycle while the budget lasts: one 1h chunk
+        # per 60s tick took ~24h to backfill 60d of retention after a fresh start.
+        deadline = time.monotonic() + AVAIL_BACKFILL_CYCLE_BUDGET_SECONDS
+        while True:
+            for w_start, w_end in windows_to_aggregate:
+                if depth_window is not None and (w_start, w_end) == depth_window:
+                    rows, complete, st = self._materialize_depth_chunk(
+                        w_start, w_end, monitored, instance_job_map, source, curr_time)
+                    if not complete:
+                        fails = self._deep_chunk_failures.get(depth_window, 0) + 1
+                        self._deep_chunk_failures[depth_window] = fails
+                        if fails < AVAIL_BACKFILL_MAX_CHUNK_FAILURES:
+                            logger.warning(
+                                "Availability depth backfill: fetch failed for [%.0f, %.0f] "
+                                "(attempt %d/%d); will retry",
+                                w_start, w_end, fails, AVAIL_BACKFILL_MAX_CHUNK_FAILURES)
+                            self._deep_cursor = w_end
+                            continue
+                        # Keep what was built; the missing hosts/hours stay
+                        # holes for the next sweep to retry.
+                        logger.warning(
+                            "Availability depth backfill: fetch failed %d times for [%.0f, %.0f]; "
+                            "storing %d complete row(s), rest left for the next sweep",
+                            fails, w_start, w_end, len(rows))
+                    self._deep_chunk_failures.pop(depth_window, None)
+                    logger.info(
+                        "Availability depth backfill: [%.0f, %.0f] %d host(s): %d stable hour(s), "
+                        "%d raw hour(s) via %d request(s), %d raw sample(s)",
+                        w_start, w_end, st["hosts"], st["stable_hours"], st["raw_hours"],
+                        st["raw_requests"], st["raw_samples"])
+                    if rows:
+                        try:
+                            self.bucket_repo.save_buckets(rows, source)
+                            total_written += len(rows)
+                            self._note_materialized(w_start, w_end)
+                        except Exception:
+                            logger.exception(
+                                "availability aggregator: save_buckets failed for %d record(s)", len(rows))
+                    continue
 
-            at_suffix = f" @ {int(w_end)}"
-            queries = {
-                "probe_avail": f"avg_over_time(probe_success[{w_minutes}m]{at_suffix}) * 100",
-                "up_avail": f"avg_over_time(up[{w_minutes}m]{at_suffix}) * 100",
-                "probe_count": f"count_over_time(probe_success[{w_minutes}m]{at_suffix})",
-                "up_count": f"count_over_time(up[{w_minutes}m]{at_suffix})",
-                "probe_first_ts": f"min_over_time(timestamp(probe_success)[{w_minutes}m:]{at_suffix})",
-                "probe_last_ts": f"max_over_time(timestamp(probe_success)[{w_minutes}m:]{at_suffix})",
-                "up_first_ts": f"min_over_time(timestamp(up)[{w_minutes}m:]{at_suffix})",
-                "up_last_ts": f"max_over_time(timestamp(up)[{w_minutes}m:]{at_suffix})",
-                "duration": f"avg_over_time(probe_duration_seconds[{w_minutes}m]{at_suffix}) * 1000",
-                "probe_incidents": f"changes(probe_success[{w_minutes}m]{at_suffix})",
-                "up_incidents": f"changes(up[{w_minutes}m]{at_suffix})",
-            }
+                w_minutes = max(1, int(round((w_end - w_start) / 60.0)))
+                step_sec = SCRAPE_INTERVAL_SECONDS
+                if w_minutes > 10080:
+                    step_sec = 300.0
+                elif w_minutes > 1440:
+                    step_sec = 30.0
 
-            if executor:
-                futures = {k: executor.submit(self.prom_queries.fetch_prom_query_map, q, 10.0, 15.0, source,
-                                              prefer_job=instance_job_map) for k, q in queries.items()}
-                results = {}
-                for k, f in futures.items():
-                    try:
-                        results[k] = f.result()
-                    except Exception:
-                        results[k] = {}
-            else:
-                results = {}
-                for k, q in queries.items():
-                    try:
-                        results[k] = self.prom_queries.fetch_prom_query_map(q, 10.0, 15.0, source, prefer_job=instance_job_map)
-                    except Exception:
-                        results[k] = {}
+                at_suffix = f" @ {int(w_end)}"
+                queries = {
+                    "probe_avail": f"avg_over_time(probe_success[{w_minutes}m]{at_suffix}) * 100",
+                    "up_avail": f"avg_over_time(up[{w_minutes}m]{at_suffix}) * 100",
+                    "probe_count": f"count_over_time(probe_success[{w_minutes}m]{at_suffix})",
+                    "up_count": f"count_over_time(up[{w_minutes}m]{at_suffix})",
+                    "probe_first_ts": f"min_over_time(timestamp(probe_success)[{w_minutes}m:]{at_suffix})",
+                    "probe_last_ts": f"max_over_time(timestamp(probe_success)[{w_minutes}m:]{at_suffix})",
+                    "up_first_ts": f"min_over_time(timestamp(up)[{w_minutes}m:]{at_suffix})",
+                    "up_last_ts": f"max_over_time(timestamp(up)[{w_minutes}m:]{at_suffix})",
+                    "duration": f"avg_over_time(probe_duration_seconds[{w_minutes}m]{at_suffix}) * 1000",
+                    "probe_incidents": f"changes(probe_success[{w_minutes}m]{at_suffix})",
+                    "up_incidents": f"changes(up[{w_minutes}m]{at_suffix})",
+                }
 
-            range_step = 15.0
-            try:
-                probe_range_map = self.prom_queries.fetch_prom_range_map("probe_success", w_start, w_end, range_step, cache_ttl=10.0, timeout=20.0, source=source, prefer_job=instance_job_map, strict=True)
-            except Exception:
-                probe_range_map = None
-            is_depth = depth_window is not None and (w_start, w_end) == depth_window
-            probe_failed = probe_range_map is None
-            if probe_failed:
-                # A blackbox target's `up` stays 1 while its probe fails, so filling
-                # a failed probe_success fetch in from `up` (raw or scalar) booked
-                # down hosts as fully up. Leave what is stored and retry: a head
-                # window is re-aggregated next cycle (stop here so no later
-                # window moves the watermark past it); a depth chunk goes
-                # through the raw-fetch retry below with no `up` to fall back on.
-                if not is_depth:
+                if executor:
+                    futures = {k: executor.submit(self.prom_queries.fetch_prom_query_map, q, 10.0, 15.0, source,
+                                                  prefer_job=instance_job_map) for k, q in queries.items()}
+                    results = {}
+                    for k, f in futures.items():
+                        try:
+                            results[k] = f.result()
+                        except Exception:
+                            results[k] = {}
+                else:
+                    results = {}
+                    for k, q in queries.items():
+                        try:
+                            results[k] = self.prom_queries.fetch_prom_query_map(q, 10.0, 15.0, source, prefer_job=instance_job_map)
+                        except Exception:
+                            results[k] = {}
+
+                range_step = 15.0
+                try:
+                    probe_range_map = self.prom_queries.fetch_prom_range_map("probe_success", w_start, w_end, RAW_LEAD_IN_SECONDS, cache_ttl=10.0, timeout=20.0, source=source, prefer_job=instance_job_map, strict=True)
+                except Exception:
+                    probe_range_map = None
+                if probe_range_map is None:
+                    # A blackbox target's `up` stays 1 while its probe fails, so filling
+                    # a failed probe_success fetch in from `up` (raw or scalar) booked
+                    # down hosts as fully up. Leave what is stored and retry: a head
+                    # window is re-aggregated next cycle (stop here so no later
+                    # window moves the watermark past it).
                     logger.warning(
                         "Availability aggregator: probe_success fetch failed for [%.0f, %.0f]; "
                         "keeping stored buckets, will retry", w_start, w_end)
                     break
-                probe_range_map, up_range_map = {}, {}
-                results = {k: v for k, v in results.items() if not k.startswith("up_")}
-            else:
-                try:
-                    up_range_map = self.prom_queries.fetch_prom_range_map("up", w_start, w_end, range_step, cache_ttl=10.0, timeout=20.0, source=source, prefer_job=instance_job_map)
-                except Exception:
-                    up_range_map = {}
-
-            probe_results_raw = {
-                "avail": results.get("probe_avail", {}), "count": results.get("probe_count", {}),
-                "first_ts": results.get("probe_first_ts", {}), "last_ts": results.get("probe_last_ts", {}),
-                "incidents": results.get("probe_incidents", {}),
-            }
-            up_results_raw = {
-                "avail": results.get("up_avail", {}), "count": results.get("up_count", {}),
-                "first_ts": results.get("up_first_ts", {}), "last_ts": results.get("up_last_ts", {}),
-                "incidents": results.get("up_incidents", {}),
-            }
-            merged_maps = derive_bucket_inputs(monitored, probe_results_raw, up_results_raw)
-
-            # Prometheus has samples for this window (count > 0) but the raw
-            # fetch came back empty: a timeout/oversized response, not "no data".
-            # Persisting the scalar fallback here would store downtime without
-            # outage intervals and the chunk would read as done forever. For a
-            # depth chunk, rewind the cursor and retry on a later cycle instead.
-            raw_fetch_failed = probe_failed or (not probe_range_map and not up_range_map
-                                                and any(merged_maps["count"].get(i) for i in monitored))
-            if is_depth:
-                if raw_fetch_failed:
-                    fails = self._deep_chunk_failures.get(depth_window, 0) + 1
-                    self._deep_chunk_failures[depth_window] = fails
-                    if fails < AVAIL_BACKFILL_MAX_CHUNK_FAILURES:
-                        logger.warning(
-                            "Availability depth backfill: raw sample fetch failed for [%.0f, %.0f] "
-                            "(attempt %d/%d); will retry",
-                            w_start, w_end, fails, AVAIL_BACKFILL_MAX_CHUNK_FAILURES)
-                        self._deep_cursor = w_end
-                        continue
-                    logger.warning(
-                        "Availability depth backfill: raw sample fetch failed %d times for [%.0f, %.0f]; "
-                        "storing scalar fallback (left as a hole for the next sweep)",
-                        fails, w_start, w_end)
-                self._deep_chunk_failures.pop(depth_window, None)
-            elif raw_fetch_failed:
-                logger.warning(
-                    "Availability aggregator: raw sample fetch failed for [%.0f, %.0f]; "
-                    "storing scalar fallback without outage intervals", w_start, w_end)
-            avail_map = merged_maps["avail"]
-            count_map = merged_maps["count"]
-            first_ts_map = merged_maps["first_ts"]
-            last_ts_map = merged_maps["last_ts"]
-            incidents_map = merged_maps["incidents"]
-            duration_map = results.get("duration", {})
-
-            observed_cadences = []
-            for inst in monitored:
-                estimated = estimate_instance_cadence(inst, count_map, first_ts_map, last_ts_map)
-                if estimated is not None:
-                    observed_cadences.append(estimated)
-            fleet_median_cadence = (
-                sorted(observed_cadences)[len(observed_cadences) // 2]
-                if observed_cadences else SCRAPE_INTERVAL_SECONDS
-            )
-
-            bucket_records = []
-            h_start = math.floor(w_start / 3600.0) * 3600.0
-            h_end = math.ceil(w_end / 3600.0) * 3600.0
-            num_hours = max(1, int(round((h_end - h_start) / 3600.0)))
-            w_duration_sec = float(w_end - w_start)
-
-            for inst in monitored:
-                raw_avail = avail_map.get(inst)
-                raw_count = count_map.get(inst)
-                raw_dur = duration_map.get(inst)
-                raw_inc = incidents_map.get(inst)
-
-                latency = 0.0
-                if raw_dur is not None:
+                else:
                     try:
-                        latency = round(float(raw_dur), 1)
-                    except (ValueError, TypeError):
-                        latency = 0.0
+                        up_range_map = self.prom_queries.fetch_prom_range_map("up", w_start, w_end, RAW_LEAD_IN_SECONDS, cache_ttl=10.0, timeout=20.0, source=source, prefer_job=instance_job_map)
+                    except Exception:
+                        up_range_map = {}
 
-                # Exact path: raw 0/1 samples for this instance (probe_success
-                # first, fall back to the `up` series for node/exporter targets).
-                samples = probe_range_map.get(inst) or up_range_map.get(inst)
-                if samples:
-                    cad = (
-                        estimate_instance_cadence(inst, count_map, first_ts_map, last_ts_map)
-                        or (fleet_median_cadence if fleet_median_cadence > 0 else range_step)
-                    )
-                    sample_ts = [ts for ts, _ in samples]
+                probe_results_raw = {
+                    "avail": results.get("probe_avail", {}), "count": results.get("probe_count", {}),
+                    "first_ts": results.get("probe_first_ts", {}), "last_ts": results.get("probe_last_ts", {}),
+                    "incidents": results.get("probe_incidents", {}),
+                }
+                up_results_raw = {
+                    "avail": results.get("up_avail", {}), "count": results.get("up_count", {}),
+                    "first_ts": results.get("up_first_ts", {}), "last_ts": results.get("up_last_ts", {}),
+                    "incidents": results.get("up_incidents", {}),
+                }
+                merged_maps = derive_bucket_inputs(monitored, probe_results_raw, up_results_raw)
+
+                # Prometheus has samples for this window (count > 0) but the raw
+                # fetch came back empty: a timeout/oversized response, not "no data".
+                raw_fetch_failed = (not probe_range_map and not up_range_map
+                                    and any(merged_maps["count"].get(i) for i in monitored))
+                if raw_fetch_failed:
+                    logger.warning(
+                        "Availability aggregator: raw sample fetch failed for [%.0f, %.0f]; "
+                        "storing scalar fallback without outage intervals", w_start, w_end)
+                avail_map = merged_maps["avail"]
+                count_map = merged_maps["count"]
+                first_ts_map = merged_maps["first_ts"]
+                last_ts_map = merged_maps["last_ts"]
+                incidents_map = merged_maps["incidents"]
+                duration_map = results.get("duration", {})
+
+                observed_cadences = []
+                for inst in monitored:
+                    estimated = estimate_instance_cadence(inst, count_map, first_ts_map, last_ts_map)
+                    if estimated is not None:
+                        observed_cadences.append(estimated)
+                fleet_median_cadence = (
+                    sorted(observed_cadences)[len(observed_cadences) // 2]
+                    if observed_cadences else SCRAPE_INTERVAL_SECONDS
+                )
+
+                bucket_records = []
+                h_start = math.floor(w_start / 3600.0) * 3600.0
+                h_end = math.ceil(w_end / 3600.0) * 3600.0
+                num_hours = max(1, int(round((h_end - h_start) / 3600.0)))
+                w_duration_sec = float(w_end - w_start)
+
+                for inst in monitored:
+                    raw_avail = avail_map.get(inst)
+                    raw_count = count_map.get(inst)
+                    raw_dur = duration_map.get(inst)
+                    raw_inc = incidents_map.get(inst)
+
+                    latency = 0.0
+                    if raw_dur is not None:
+                        try:
+                            latency = round(float(raw_dur), 1)
+                        except (ValueError, TypeError):
+                            latency = 0.0
+
+                    # Exact path: raw 0/1 samples for this instance (probe_success
+                    # first, fall back to the `up` series for node/exporter targets).
+                    samples = probe_range_map.get(inst) or up_range_map.get(inst)
+                    if samples:
+                        cad = (
+                            estimate_instance_cadence(inst, count_map, first_ts_map, last_ts_map)
+                            or (fleet_median_cadence if fleet_median_cadence > 0 else range_step)
+                        )
+                        sample_ts = [ts for ts, _ in samples]
+                        cur_h = h_start
+                        while cur_h < h_end:
+                            if cur_h >= curr_time:
+                                break  # never materialize a bucket for an hour that has not started
+                            bucket_records.append(_raw_hour_record(
+                                inst, instance_job_map.get(inst, "blackbox"), samples, sample_ts,
+                                cur_h, curr_time, cad, latency))
+                            cur_h += 3600.0
+                        continue
+
+                    # Fallback path: no raw samples — approximate from the
+                    # avg_over_time / count / first-last-timestamp scalars.
+                    avail_pct = None
+                    raw_avail_float = None
+                    if raw_avail is not None:
+                        try:
+                            raw_avail_float = max(0.0, min(100.0, float(raw_avail)))
+                            avail_pct = round(raw_avail_float, 2)
+                        except (ValueError, TypeError):
+                            avail_pct = None
+                            raw_avail_float = None
+
+                    sample_count = 0
+                    cov_sec = 0.0
+                    f_ts = float(first_ts_map.get(inst, 0)) if first_ts_map else 0.0
+                    l_ts = float(last_ts_map.get(inst, 0)) if last_ts_map else 0.0
+
+                    if raw_count is not None:
+                        try:
+                            sample_count = int(float(raw_count))
+                            if sample_count >= 2:
+                                span = l_ts - f_ts
+                                if f_ts > 0 and l_ts > 0 and span > 0:
+                                    intv = span / (sample_count - 1)
+                                    lead_in = min(intv, max(0.0, f_ts - w_start)) if (f_ts - w_start) <= intv * 1.5 else 0.0
+                                    lead_out = min(intv, max(0.0, w_end - l_ts)) if (w_end - l_ts) <= intv * 1.5 else 0.0
+                                    cov_sec = min(span + lead_in + lead_out, w_duration_sec)
+                                else:
+                                    eff_cad = fleet_median_cadence if fleet_median_cadence > 0 else step_sec
+                                    cov_sec = min(sample_count * eff_cad, w_duration_sec)
+                            elif sample_count == 1:
+                                eff_cad = fleet_median_cadence if fleet_median_cadence > 0 else step_sec
+                                cov_sec = min(eff_cad, w_duration_sec)
+                        except (ValueError, TypeError):
+                            cov_sec = 0.0
+                    elif avail_pct is not None:
+                        cov_sec = w_duration_sec
+
+                    if raw_avail_float is not None:
+                        up_rate = min(1.0, max(0.0, raw_avail_float / 100.0))
+                        down_rate = max(0.0, 1.0 - up_rate)
+                    else:
+                        # No availability ratio (avg_over_time failed or absent):
+                        # samples existed but their up/down split is unknown. With
+                        # down_rate=0 the covered seconds used to be booked as pure
+                        # uptime — a fabricated 100%. Record the hour as unknown.
+                        up_rate = 0.0
+                        down_rate = 0.0
+                        cov_sec = 0.0
+                        f_ts = l_ts = 0.0
+                    down_sec = round(cov_sec * down_rate, 2)
+
+                    inc_count = 0
+                    if raw_inc is not None:
+                        try:
+                            inc_count = int(math.ceil(float(raw_inc) / 2.0))
+                        except (ValueError, TypeError):
+                            inc_count = 0
+                    if inc_count == 0 and down_sec > 0:
+                        inc_count = 1
+
                     cur_h = h_start
                     while cur_h < h_end:
                         nxt_h = cur_h + 3600.0
-                        if cur_h >= curr_time:
-                            break  # never materialize a bucket for an hour that has not started
-                        # Carried in = the host was already down AT cur_h, i.e. the
-                        # last sample BEFORE the hour (the fetch keeps a lead-in) is 0.
-                        # hour_pts[0] == 0 alone also flagged an outage that began
-                        # at the hour's first scrape.
-                        lead_idx = bisect.bisect_left(sample_ts, cur_h) - 1
-                        carried_in = lead_idx >= 0 and samples[lead_idx][1] == 0
-                        eff_end = min(nxt_h, curr_time)
-                        rec = reconstruct_time_series_intervals(
-                            samples, window_start_ts=cur_h, window_end_ts=eff_end,
-                            expected_interval_sec=cad,
-                        )
-                        hour_pts = [v for ts, v in samples if cur_h <= ts < eff_end]
-                        bucket_records.append({
-                            "instance": inst,
-                            "job": instance_job_map.get(inst, "blackbox"),
-                            "bucket_start": cur_h,
-                            "bucket_end": nxt_h,
-                            "uptime_seconds": round(rec["uptime_seconds"], 2),
-                            "downtime_seconds": round(rec["downtime_seconds"], 2),
-                            "unknown_seconds": round(rec["unknown_seconds"], 2),
-                            "coverage_seconds": round(rec["coverage_seconds"], 2),
-                            "sample_count": len(hour_pts),
-                            "availability_pct": rec["availability_pct"],
-                            "incident_count": int(rec["incident_count"]),
-                            "avg_latency_ms": latency,
-                            "updated_at": curr_time,
-                            "outage_json": {
-                                "d": [round(float(x), 1) for x in rec.get("outage_durations_sec", [])],
-                                "i": [[round(float(s), 1), round(float(e), 1)]
-                                      for s, e in rec.get("outage_intervals_sec", [])],
-                                "ongoing_start": bool(carried_in),
-                                "ongoing_end": bool(rec.get("is_ongoing_outage")),
-                            },
-                        })
-                        cur_h = nxt_h
-                    continue
-
-                # Fallback path: no raw samples — approximate from the
-                # avg_over_time / count / first-last-timestamp scalars.
-                avail_pct = None
-                raw_avail_float = None
-                if raw_avail is not None:
-                    try:
-                        raw_avail_float = max(0.0, min(100.0, float(raw_avail)))
-                        avail_pct = round(raw_avail_float, 2)
-                    except (ValueError, TypeError):
-                        avail_pct = None
-                        raw_avail_float = None
-
-                sample_count = 0
-                cov_sec = 0.0
-                f_ts = float(first_ts_map.get(inst, 0)) if first_ts_map else 0.0
-                l_ts = float(last_ts_map.get(inst, 0)) if last_ts_map else 0.0
-
-                if raw_count is not None:
-                    try:
-                        sample_count = int(float(raw_count))
-                        if sample_count >= 2:
-                            span = l_ts - f_ts
-                            if f_ts > 0 and l_ts > 0 and span > 0:
-                                intv = span / (sample_count - 1)
-                                lead_in = min(intv, max(0.0, f_ts - w_start)) if (f_ts - w_start) <= intv * 1.5 else 0.0
-                                lead_out = min(intv, max(0.0, w_end - l_ts)) if (w_end - l_ts) <= intv * 1.5 else 0.0
-                                cov_sec = min(span + lead_in + lead_out, w_duration_sec)
+                        if f_ts > 0 and l_ts > 0 and l_ts >= f_ts:
+                            overlap_start = max(cur_h, f_ts)
+                            overlap_end = min(nxt_h, l_ts)
+                            overlap_sec = max(0.0, overlap_end - overlap_start)
+                            if overlap_sec > 0:
+                                h_cov = min(3600.0, overlap_sec)
+                                h_down = round(h_cov * down_rate, 2)
+                                h_up = max(0.0, round(h_cov - h_down, 2))
+                                h_unk = max(0.0, round(3600.0 - h_cov, 2))
+                                h_avail = avail_pct
                             else:
-                                eff_cad = fleet_median_cadence if fleet_median_cadence > 0 else step_sec
-                                cov_sec = min(sample_count * eff_cad, w_duration_sec)
-                        elif sample_count == 1:
-                            eff_cad = fleet_median_cadence if fleet_median_cadence > 0 else step_sec
-                            cov_sec = min(eff_cad, w_duration_sec)
-                    except (ValueError, TypeError):
-                        cov_sec = 0.0
-                elif avail_pct is not None:
-                    cov_sec = w_duration_sec
-
-                if raw_avail_float is not None:
-                    up_rate = min(1.0, max(0.0, raw_avail_float / 100.0))
-                    down_rate = max(0.0, 1.0 - up_rate)
-                else:
-                    # No availability ratio (avg_over_time failed or absent):
-                    # samples existed but their up/down split is unknown. With
-                    # down_rate=0 the covered seconds used to be booked as pure
-                    # uptime — a fabricated 100%. Record the hour as unknown.
-                    up_rate = 0.0
-                    down_rate = 0.0
-                    cov_sec = 0.0
-                    f_ts = l_ts = 0.0
-                down_sec = round(cov_sec * down_rate, 2)
-
-                inc_count = 0
-                if raw_inc is not None:
-                    try:
-                        inc_count = int(math.ceil(float(raw_inc) / 2.0))
-                    except (ValueError, TypeError):
-                        inc_count = 0
-                if inc_count == 0 and down_sec > 0:
-                    inc_count = 1
-
-                cur_h = h_start
-                while cur_h < h_end:
-                    nxt_h = cur_h + 3600.0
-                    if f_ts > 0 and l_ts > 0 and l_ts >= f_ts:
-                        overlap_start = max(cur_h, f_ts)
-                        overlap_end = min(nxt_h, l_ts)
-                        overlap_sec = max(0.0, overlap_end - overlap_start)
-                        if overlap_sec > 0:
-                            h_cov = min(3600.0, overlap_sec)
+                                h_cov = 0.0
+                                h_down = 0.0
+                                h_up = 0.0
+                                h_unk = 3600.0
+                                h_avail = None
+                        elif avail_pct is not None or cov_sec > 0:
+                            h_cov = min(3600.0, cov_sec / num_hours)
                             h_down = round(h_cov * down_rate, 2)
                             h_up = max(0.0, round(h_cov - h_down, 2))
                             h_unk = max(0.0, round(3600.0 - h_cov, 2))
@@ -835,44 +998,52 @@ class AvailabilityEngine:
                             h_up = 0.0
                             h_unk = 3600.0
                             h_avail = None
-                    elif avail_pct is not None or cov_sec > 0:
-                        h_cov = min(3600.0, cov_sec / num_hours)
-                        h_down = round(h_cov * down_rate, 2)
-                        h_up = max(0.0, round(h_cov - h_down, 2))
-                        h_unk = max(0.0, round(3600.0 - h_cov, 2))
-                        h_avail = avail_pct
-                    else:
-                        h_cov = 0.0
-                        h_down = 0.0
-                        h_up = 0.0
-                        h_unk = 3600.0
-                        h_avail = None
 
-                    bucket_records.append({
-                        "instance": inst,
-                        "job": instance_job_map.get(inst, "blackbox"),
-                        "bucket_start": cur_h,
-                        "bucket_end": nxt_h,
-                        "uptime_seconds": round(h_up, 2),
-                        "downtime_seconds": round(h_down, 2),
-                        "unknown_seconds": round(h_unk, 2),
-                        "coverage_seconds": round(h_cov, 2),
-                        "sample_count": sample_count // num_hours,
-                        "availability_pct": h_avail,
-                        "incident_count": inc_count if cur_h == h_start else 0,
-                        "avg_latency_ms": latency,
-                        "updated_at": curr_time,
-                    })
-                    cur_h = nxt_h
+                        bucket_records.append({
+                            "instance": inst,
+                            "job": instance_job_map.get(inst, "blackbox"),
+                            "bucket_start": cur_h,
+                            "bucket_end": nxt_h,
+                            "uptime_seconds": round(h_up, 2),
+                            "downtime_seconds": round(h_down, 2),
+                            "unknown_seconds": round(h_unk, 2),
+                            "coverage_seconds": round(h_cov, 2),
+                            "sample_count": sample_count // num_hours,
+                            "availability_pct": h_avail,
+                            "incident_count": inc_count if cur_h == h_start else 0,
+                            "avg_latency_ms": latency,
+                            "updated_at": curr_time,
+                        })
+                        cur_h = nxt_h
 
-            if bucket_records:
-                try:
-                    self.bucket_repo.save_buckets(bucket_records, source)
-                    total_written += len(bucket_records)
-                except Exception:
-                    logger.exception(
-                        "availability aggregator: save_buckets failed for %d record(s)", len(bucket_records)
-                    )
+                if bucket_records:
+                    try:
+                        self.bucket_repo.save_buckets(bucket_records, source)
+                        total_written += len(bucket_records)
+                    except Exception:
+                        logger.exception(
+                            "availability aggregator: save_buckets failed for %d record(s)", len(bucket_records)
+                        )
+
+            # Stop on budget, sweep done, or a failed chunk (cursor rewound to its end).
+            if (depth_window is None or time.monotonic() >= deadline
+                    or self._deep_cursor == depth_window[1]):
+                break
+            depth_window = self._next_depth_backfill_window(monitored, curr_time, source)
+            if depth_window is None:
+                break
+            windows_to_aggregate = [depth_window]
+
+        # Reports are cached up to 15 min (plus stale-serve), so days the sweep
+        # just filled kept reading "backfill pending". Throttled: a cold 30d
+        # report is expensive, don't rebuild it every cycle mid-sweep.
+        floor_start = math.floor(curr_time / 3600.0) * 3600.0 - (self._backfill_depth_sec or AVAIL_BACKFILL_SECONDS)
+        sweep_done = self._deep_cursor is None or self._deep_cursor <= floor_start
+        if self._dirty_range and (sweep_done or curr_time - self._depth_invalidated_at >= AVAIL_BACKFILL_INVALIDATE_SECONDS):
+            self._depth_invalidated_at = curr_time
+            lo, hi = self._dirty_range
+            self._dirty_range = None
+            self.invalidate_range(lo, hi)
 
         return total_written
 
@@ -1563,6 +1734,194 @@ class AvailabilityEngine:
             "source": "nodata",
         }
 
+    def _materialize_depth_chunk(
+        self, w_start: float, w_end: float, monitored: List[str],
+        instance_job_map: Dict[str, str], source: str, curr_time: float,
+    ) -> Tuple[List[Dict[str, Any]], bool, Dict[str, int]]:
+        """Bucket rows for one depth chunk, fetching raw samples only where needed.
+
+        Per hour and host, changes/min/max/count_over_time classify the hour:
+        constant value with no gap over the reconstruction tolerance is written
+        straight from the aggregates (_stable_hour_record — identical to what
+        the raw path reconstructs); anything else (flapping, gaps, partial
+        data) gets that host's raw TSDB samples for just those hours, so short
+        outages keep their exact edges. Hosts already complete are skipped.
+
+        Returns (rows, complete, stats). complete=False means a fetch failed:
+        the rows hold only what could be built and the caller retries.
+        """
+        stats = {"hosts": 0, "stable_hours": 0, "raw_hours": 0, "raw_requests": 0, "raw_samples": 0}
+        h_start = math.floor(w_start / 3600.0) * 3600.0
+        h_end = min(math.ceil(w_end / 3600.0) * 3600.0, math.floor(curr_time / 3600.0) * 3600.0)
+        hours = [h_start + 3600.0 * k for k in range(max(0, int(round((h_end - h_start) / 3600.0))))]
+        if not hours:
+            return [], True, stats
+        try:
+            have = self.bucket_repo.get_materialized_instance_hours(h_start, h_end, source=source)
+        except Exception:
+            have = {}
+        todo = [i for i in monitored if len(have.get(i, ())) < len(hours)]
+        stats["hosts"] = len(todo)
+        if not todo:
+            return [], True, stats
+
+        # Per-hour aggregates, evaluated at each hour's END. [3601s], not [1h]:
+        # a range selector is (t-r, t] (Prometheus 3) or [t-r, t] (2.x), and the
+        # extra second makes sure the hour's own first sample is inside either
+        # way. Overlap can only make an hour look like it changed -> raw fetch.
+        span = dict(start_ts=h_start + 3600.0, end_ts=h_end, step_sec=3600, timeout=30.0,
+                    source=source, prefer_job=instance_job_map)
+        queries = {}
+        for m in ("probe_success", "up"):
+            queries[(m, "changes")] = (f"changes({m}[3601s])", span)
+            queries[(m, "min")] = (f"min_over_time({m}[3601s])", span)
+            queries[(m, "max")] = (f"max_over_time({m}[3601s])", span)
+            # Evaluated 1ms before the hour's end: (cur_h - 1ms, nxt_h - 1ms]
+            # is exactly the bucket's [cur_h, nxt_h) at ms resolution.
+            queries[(m, "count")] = (f"count_over_time({m}[3600s])",
+                                     dict(span, start_ts=h_start + 3599.999, end_ts=h_end - 0.001))
+            # Last sample before each hour (5m lookback): carried-in state.
+            queries[(m, "lead")] = (m, dict(span, start_ts=h_start - 0.001, end_ts=h_end - 3600.001))
+        queries[("probe_success", "latency")] = ("avg_over_time(probe_duration_seconds[1h]) * 1000", span)
+
+        executor = getattr(self.prom_client, "_SHARED_EXECUTOR", None)
+        fetch = self.prom_queries.fetch_prom_matrix_map
+        res: Dict[Tuple[str, str], Any] = {}
+        if executor:
+            futs = {k: executor.submit(fetch, q, **kw) for k, (q, kw) in queries.items()}
+            for k, f in futs.items():
+                try:
+                    res[k] = f.result()
+                except Exception:
+                    res[k] = None
+        else:
+            for k, (q, kw) in queries.items():
+                try:
+                    res[k] = fetch(q, **kw)
+                except Exception:
+                    res[k] = None
+        if any(v is None for k, v in res.items() if k[1] != "latency"):
+            return [], False, stats
+        latency_map = res.get(("probe_success", "latency")) or {}
+
+        def val(m, kind, inst, ts):
+            return (res[(m, kind)].get(inst) or {}).get(round(ts, 3))
+
+        def latency_at(inst, t):
+            v = (latency_map.get(inst) or {}).get(round(t, 3))
+            return round(v, 1) if v is not None else 0.0
+
+        rows: List[Dict[str, Any]] = []
+        raw_spans: List[Tuple[str, str, List[float], float]] = []
+        span_h = max(1, int(AVAIL_BACKFILL_RAW_SPAN_SECONDS // 3600))
+        for inst in todo:
+            job = instance_job_map.get(inst, "blackbox")
+            done = have.get(inst, set())
+            # Same routing as derive_bucket_inputs: the probe series when the
+            # host has one in this chunk, else its `up` series.
+            m = "probe_success" if res[("probe_success", "count")].get(inst) else "up"
+            counts = {h: val(m, "count", inst, h + 3599.999) or 0.0 for h in hours}
+            dense = max(counts.values())
+            if dense <= 0:
+                # No sample for this host anywhere in the chunk: the row the
+                # scalar path writes for "no data" (an unknown hour).
+                for h in hours:
+                    if h not in done:
+                        rows.append({
+                            "instance": inst, "job": job, "bucket_start": h, "bucket_end": h + 3600.0,
+                            "uptime_seconds": 0.0, "downtime_seconds": 0.0, "unknown_seconds": 3600.0,
+                            "coverage_seconds": 0.0, "sample_count": 0, "availability_pct": None,
+                            "incident_count": 0, "avg_latency_ms": 0.0, "updated_at": curr_time,
+                        })
+                continue
+            cad = 3600.0 / dense
+            need_raw: List[float] = []
+            for h in hours:
+                if h in done:
+                    continue
+                t = h + 3600.0
+                ch, mn, mx = val(m, "changes", inst, t), val(m, "min", inst, t), val(m, "max", inst, t)
+                c = counts[h]
+                # Complete = at most 1 sample short of the chunk's densest hour.
+                # A gap-free hour holds n or n+1 samples depending on scrape
+                # phase, so this allows at most one missing sample: a ~2x
+                # cadence gap, under the 3x reconstruction tolerance, so no
+                # second of the hour is unknown. (-2 let jittered double
+                # misses through: measured 12-37s of unknown booked as up.)
+                complete = c >= 2 and c >= dense - 1
+                stable = ch == 0 and mn is not None and mn == mx and mn in (0.0, 1.0)
+                if complete and stable:
+                    lead = val(m, "lead", inst, h - 0.001)
+                    rows.append(_stable_hour_record(
+                        inst, job, h, int(mn), c, lead == 0, latency_at(inst, t), curr_time))
+                    stats["stable_hours"] += 1
+                else:
+                    need_raw.append(h)
+            # Contiguous raw hours per request, capped to bound the payload.
+            group: List[float] = []
+            for h in need_raw + [None]:
+                if group and (h is None or h != group[-1] + 3600.0 or len(group) >= span_h):
+                    raw_spans.append((inst, m, group, cad))
+                    group = []
+                if h is not None:
+                    group.append(h)
+
+        # Hosts needing the same hours share one request (up to
+        # AVAIL_BACKFILL_RAW_BATCH): same samples, far fewer round trips.
+        by_span: Dict[Tuple[str, Tuple[float, ...]], List[Tuple[str, float]]] = {}
+        for inst, m, group, cad in raw_spans:
+            by_span.setdefault((m, tuple(group)), []).append((inst, cad))
+        batches = []
+        for (m, group), members in by_span.items():
+            step = max(1, AVAIL_BACKFILL_RAW_BATCH)
+            for i in range(0, len(members), step):
+                batches.append((m, list(group), members[i:i + step]))
+
+        def fetch_raw(m, group, members):
+            names = [inst for inst, _ in members]
+            if len(names) == 1:
+                matcher = 'instance="%s"' % _promql_str(names[0])
+            else:
+                matcher = 'instance=~"^(?:%s)$"' % "|".join(_promql_str(re.escape(n)) for n in names)
+            return self.prom_queries.fetch_prom_range_map(
+                "%s{%s}" % (m, matcher), group[0], group[-1] + 3600.0, RAW_LEAD_IN_SECONDS,
+                cache_ttl=0.0, timeout=30.0, source=source, prefer_job=instance_job_map, strict=True)
+
+        got = []
+        if executor:
+            # A few at a time: the pool is shared with the API, and hundreds
+            # of queued raw fetches (a bad day) would stall every UI query.
+            n = max(1, AVAIL_BACKFILL_RAW_CONCURRENCY)
+            for i in range(0, len(batches), n):
+                futs = [(b, executor.submit(fetch_raw, *b)) for b in batches[i:i + n]]
+                for b, f in futs:
+                    try:
+                        got.append((b, f.result()))
+                    except Exception:
+                        got.append((b, None))
+        else:
+            for b in batches:
+                try:
+                    got.append((b, fetch_raw(*b)))
+                except Exception:
+                    got.append((b, None))
+        complete = True
+        for (m, group, members), rmap in got:
+            stats["raw_requests"] += 1
+            if rmap is None:
+                complete = False
+                continue
+            for inst, cad in members:
+                samples = rmap.get(inst) or []
+                stats["raw_samples"] += len(samples)
+                sample_ts = [ts for ts, _ in samples]
+                job = instance_job_map.get(inst, "blackbox")
+                for h in group:
+                    rows.append(_raw_hour_record(
+                        inst, job, samples, sample_ts, h, curr_time, cad, latency_at(inst, h + 3600.0)))
+                    stats["raw_hours"] += 1
+        return rows, complete, stats
+
     @staticmethod
     def _is_under_materialized(
         span: Optional[Tuple[float, int]], hour_end: float, floor_start: float
@@ -1603,15 +1962,12 @@ class AvailabilityEngine:
         materialized. Per host, not a fleet-wide 95%: that let one host's hole
         hide behind 19 complete ones and never be swept."""
         try:
-            rows = self.bucket_repo.get_bucket_records("all", start, end, instances=monitored, source=source)
+            counts = self.bucket_repo.get_materialized_hour_counts(monitored, start, end, source=source)
         except Exception:
             return False
-        hours: Dict[str, set] = {}
-        for r in rows:
-            if start <= float(r["bucket_start"]) < end and self._row_is_materialized(r):
-                hours.setdefault(r["instance"], set()).add(r["bucket_start"])
-        need = int(round((end - start) / 3600.0))
-        return all(len(hours.get(i, ())) >= need for i in monitored)
+        need = len(set(monitored))
+        hours = int(round((end - start) / 3600.0))
+        return all(counts.get(start + k * 3600.0, 0) >= need for k in range(hours))
 
     def _next_depth_backfill_window(
         self, monitored: List[str], now: float, source: str
@@ -1631,20 +1987,6 @@ class AvailabilityEngine:
         hour_end = math.floor(now / 3600.0) * 3600.0
         floor_start = hour_end - (self._backfill_depth_sec or AVAIL_BACKFILL_SECONDS)
 
-        try:
-            # Only history inside the floor counts: older rows (kept by the
-            # prune's 35d minimum while Prometheus retains less) can never be re-fetched, so
-            # counting their gaps would re-trigger a useless sweep forever.
-            coverage = self.bucket_repo.get_instance_bucket_coverage(monitored, source=source, since=floor_start)
-        except Exception:
-            logger.exception("Availability depth backfill: bucket coverage lookup failed")
-            return None
-
-        stale = frozenset(
-            i for i in monitored
-            if self._is_under_materialized(coverage.get(i), hour_end, floor_start)
-        )
-
         cursor = self._deep_cursor
         if cursor is not None and cursor > floor_start:
             # A sweep is in flight. Never restart it on fleet churn: targets
@@ -1661,6 +2003,20 @@ class AvailabilityEngine:
                 self._deep_swept_stale = self._deep_sweep_pending
                 self._deep_swept_at = now
                 self._deep_sweep_pending = None
+            # Only looked up when idle: ~1s over 60d, and a sweep in flight
+            # doesn't need it (it was paid once per chunk before).
+            try:
+                # Only history inside the floor counts: older rows (kept by the
+                # prune's 35d minimum while Prometheus retains less) can never be re-fetched, so
+                # counting their gaps would re-trigger a useless sweep forever.
+                coverage = self.bucket_repo.get_instance_bucket_coverage(monitored, source=source, since=floor_start)
+            except Exception:
+                logger.exception("Availability depth backfill: bucket coverage lookup failed")
+                return None
+            stale = frozenset(
+                i for i in monitored
+                if self._is_under_materialized(coverage.get(i), hour_end, floor_start)
+            )
             # Anything still stale after the last completed sweep is most likely
             # stale because Prometheus has nothing there; re-sweeping it every
             # cycle would never terminate, so wait out a backoff — but retry
@@ -1682,8 +2038,20 @@ class AvailabilityEngine:
         # Skip chunks every monitored instance already has buckets for. Without
         # this, each restart re-aggregated the whole materialized span from
         # Prometheus (~1.5 min per chunk) before reaching the missing history.
+        # One query for the whole span: asking chunk by chunk cost ~0.3s each,
+        # so a restart over 60d of history spent ~7 min before its first fetch.
+        try:
+            counts = self.bucket_repo.get_materialized_hour_counts(monitored, floor_start, cursor, source=source)
+        except Exception:
+            logger.exception("Availability depth backfill: materialized-hours lookup failed")
+            counts = {}
+        need = len(set(monitored))
+
+        def chunk_done(lo, hi):
+            return all(counts.get(lo + k * 3600.0, 0) >= need for k in range(int(round((hi - lo) / 3600.0))))
+
         chunk_start = max(floor_start, cursor - AVAIL_BACKFILL_CHUNK_SECONDS)
-        while chunk_start > floor_start and self._chunk_materialized(monitored, chunk_start, cursor, source):
+        while chunk_start > floor_start and chunk_done(chunk_start, cursor):
             cursor = chunk_start
             chunk_start = max(floor_start, cursor - AVAIL_BACKFILL_CHUNK_SECONDS)
         self._deep_cursor = chunk_start

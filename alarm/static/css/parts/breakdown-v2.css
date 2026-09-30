@@ -414,6 +414,12 @@
 }
 .avb .avb-lg-sw.is-gap { background: rgba(139, 148, 158, 0.16); }
 .avb .avb-lg-sw.is-partial { background: rgba(139, 148, 158, 0.3); }
+.avb .avb-lg-sw.is-filling { background: rgba(88, 166, 255, 0.22); }
+.avb .avb-trend-filling-band {
+  fill: #58a6ff;
+  opacity: 0.1;
+  stroke: none;
+}
 
 .avb .avb-trend-xaxis {
   display: flex;

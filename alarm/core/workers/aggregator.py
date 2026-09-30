@@ -124,7 +124,10 @@ class AvailabilityAggregator:
                     self.aggregate_once()
                 except Exception as e:
                     logger.error(f"Availability aggregator error: {e}", exc_info=True)
-                self._stop_event.wait(self.interval_sec)
+                # Back-to-back while a depth sweep runs: idling a full interval
+                # between 40s budgets left 60d of backfill ~60% idle.
+                busy = getattr(self.engine, "backfill_in_progress", False) is True
+                self._stop_event.wait(5.0 if busy else self.interval_sec)
 
         self._thread = threading.Thread(target=_loop, name="availability-aggregator", daemon=True)
         self._thread.start()

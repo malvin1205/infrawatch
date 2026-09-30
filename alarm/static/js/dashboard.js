@@ -529,12 +529,12 @@ export class InstancesPage {
         this._trendZoom = { lo: null, hi: null };
         this._calendarOpenDate = null;
         if (typeof this._clearTrendHighlight === 'function') this._clearTrendHighlight();
-        if (e.target.value === 'mtd') {
+        if (e.target.value === 'mtd' || e.target.value === 'max') {
           this.isRealtime = false;
           this.periodEnd = null;
-          this.periodLabel = 'mtd';
-          this.periodMinutes = this._monthToDateMinutes();
-          this._setActiveRangeChip('mtd');
+          this.periodLabel = e.target.value;
+          this.periodMinutes = e.target.value === 'mtd' ? this._monthToDateMinutes() : this._maxHistoryMinutes();
+          this._setActiveRangeChip(e.target.value);
           this.loadAvailability(false);
           return;
         }

@@ -94,7 +94,8 @@ class _AvailabilityMethods {
     const jobKey = (job && job !== 'all') ? job : 'all';
     // Month-to-date grows a minute every minute; keying it by minutes made
     // every poll a cache miss and flashed "Updating…" once a minute.
-    const minKey = (this.periodLabel === 'mtd' && !end) ? 'mtd' : Math.round(minutes || 1440);
+    const minKey = ((this.periodLabel === 'mtd' || this.periodLabel === 'max') && !end)
+      ? this.periodLabel : Math.round(minutes || 1440);
     const endKey = end ? String(end) : 'live';
     return `${epKey}:${jobKey}:${minKey}:${endKey}`;
   }
@@ -111,8 +112,18 @@ class _AvailabilityMethods {
     const job = (this.selectedJob && this.selectedJob !== 'all') ? this.selectedJob : 'all';
     if ((data.job || 'all') !== job) return false;
     const got = Math.round(data.period_minutes || 0), want = Math.round(this.periodMinutes);
-    if (this.periodLabel === 'mtd' && !this.periodEnd) return got <= want && want - got <= 60;
+    if ((this.periodLabel === 'mtd' || this.periodLabel === 'max') && !this.periodEnd) return got <= want && want - got <= 60;
     return got === want;
+  }
+
+  // Everything Prometheus still retains (the backend's detected floor), so
+  // the range follows retention instead of a hardcoded day count. 30d until
+  // a first report has told us the floor.
+  _maxHistoryMinutes() {
+    const d = this.availabilityBreakdown || this._lastAvailabilityData;
+    const floor = d && ((d.backfill && d.backfill.floor_ts) || d.history_floor_ts);
+    if (typeof floor !== 'number') return 43200;
+    return Math.max(1, Math.floor((Date.now() / 1000 - floor) / 60));
   }
 
   _monthToDateMinutes() {
@@ -250,6 +261,7 @@ class _AvailabilityMethods {
     // window slid forward as a rolling N-minute range — dropping the 1st's
     // early hours, and spanning the previous month after a rollover.
     if (this.periodLabel === 'mtd' && !this.periodEnd) this.periodMinutes = this._monthToDateMinutes();
+    if (this.periodLabel === 'max' && !this.periodEnd) this.periodMinutes = this._maxHistoryMinutes();
 
     const cacheKey = this._getAvailCacheKey();
     const now = Date.now();
@@ -397,6 +409,7 @@ class _AvailabilityMethods {
   _rangeDisplay() {
     if (this.periodLabel === 'custom') return 'Custom';
     if (this.periodLabel === 'mtd') return 'Month to date';
+    if (this.periodLabel === 'max') return 'Max history';
     return this.periodLabel || '24h';
   }
 
@@ -473,7 +486,17 @@ class _AvailabilityMethods {
       showError('"To" date must be after "From" date');
       return;
     }
-    if (minutes > 90 * 1440) {
+    // Bounded by the detected Prometheus retention (history_floor_ts), not a
+    // fixed 90d: older history can't be reconstructed, so a longer range
+    // only showed "older than retention" gaps. 90d until the floor is known.
+    const floor = this.availabilityBreakdown && this.availabilityBreakdown.history_floor_ts;
+    if (typeof floor === 'number') {
+      if (fromDate.getTime() / 1000 < floor) {
+        const days = Math.round((Date.now() / 1000 - floor) / 86400);
+        showError(`"From" is older than Prometheus retention (${days} days)`);
+        return;
+      }
+    } else if (minutes > 90 * 1440) {
       showError('Maximum range is 90 days');
       return;
     }
@@ -1050,8 +1073,8 @@ class _AvailabilityMethods {
   _syncModalRangeSelect() {
     const sel = document.getElementById('modalRangeSelect');
     if (!sel) return;
-    if (this.periodLabel === 'mtd') {
-      sel.value = 'mtd';
+    if (this.periodLabel === 'mtd' || this.periodLabel === 'max') {
+      sel.value = this.periodLabel;
     } else if (this.periodLabel === 'custom') {
       // Hidden, disabled option: shows "Custom range" without being pickable.
       sel.value = 'custom';
@@ -1337,8 +1360,11 @@ class _AvailabilityMethods {
           // Inside one day the times alone ("00:00 – 24:00") never said WHICH day.
           : `· zoomed to ${this._calendarDayLabel(this._wibDateKey(startTs))}, ${this._trendTsLabel(startTs, windowSec)} – ${this._trendTsLabel(endTs, windowSec, true, startTs)}`)
         : (this.periodLabel === 'mtd' ? '· month to date'
-          : this.periodLabel === 'custom' ? '· selected range'
-            : `· last ${this.periodLabel || '24h'}`);
+          : this.periodLabel === 'max' ? '· max history'
+            : this.periodLabel === 'custom' ? '· selected range'
+              : `· last ${this.periodLabel || '24h'}`);
+      const bfs = data.backfill;
+      if (!isZoomed && bfs && bfs.state === 'filling') subEl.textContent += ` · filling history ${bfs.progress_pct}%`;
       if (isZoomed && zoom.hi === null) subEl.textContent += ' (live)';
       if (isZoomed && !detail && this._trendDetailPending) subEl.textContent += ' · loading detail…';
     }
@@ -1459,6 +1485,19 @@ class _AvailabilityMethods {
       gapBandsSvg += `<rect class="avb-trend-gap-band" x="${f(x1)}" y="0" width="${f(x2 - x1)}" height="100"></rect>`;
       if (hi - lo >= 60) hasGaps = true;
     }
+    // Historical backfill still running: the span older than the
+    // materialized edge is priced from Prometheus aggregates only (no
+    // per-host intervals yet). Everything newer is final and usable now.
+    const bf = data.backfill;
+    let fillingBandSvg = '';
+    let fillingShown = false;
+    if (bf && bf.state === 'filling' && typeof bf.materialized_from_ts === 'number') {
+      const lo = Math.max(startTs, bf.floor_ts), hi = Math.min(endTs, bf.materialized_from_ts);
+      if (hi > lo) {
+        fillingBandSvg = `<rect class="avb-trend-filling-band" x="${f(xOf(lo))}" y="0" width="${f(xOf(hi) - xOf(lo))}" height="100"></rect>`;
+        fillingShown = true;
+      }
+    }
     let partialBandsSvg = '';
     for (const [lo, hi] of geo.partials) {
       const x1 = xOf(lo), x2 = xOf(hi);
@@ -1491,6 +1530,7 @@ class _AvailabilityMethods {
     // stretched (preserveAspectRatio="none"), so circles would be ovals.
     wrap.innerHTML =
       `<svg class="avb-trend-svg" viewBox="0 0 100 100" preserveAspectRatio="none">` +
+      fillingBandSvg +
       gapBandsSvg +
       partialBandsSvg +
       validAreasSvg +
@@ -1610,6 +1650,7 @@ class _AvailabilityMethods {
       if (drawnDrops) parts.push(chip('is-drop', 'Node Down'));
       if (drawnRecs) parts.push(chip('is-recovery', 'Node Recovery'));
       if (hasGaps) parts.push(chip('is-gap', 'no telemetry'));
+      if (fillingShown) parts.push(chip('is-filling', `filling history ${bf.progress_pct}% — per-host detail pending`));
       // Same 60s floor as gaps: the live edge's in-progress slot (a few
       // seconds, few hosts reported yet) is an invisible sliver.
       if (geo.partials.some(([lo, hi]) => hi - lo >= 60)) parts.push(chip('is-partial', 'too few hosts reporting'));
@@ -2286,16 +2327,14 @@ class _AvailabilityMethods {
         const hostsTxt = `${day.hosts_down} host${day.hosts_down === 1 ? '' : 's'}`;
         const why = this._isBeyondRetention(ts)
           ? 'older than Prometheus retention, so per-host outage intervals cannot be reconstructed'
-          : day.events_unavailable === 'partial'
-            ? 'some per-host outage intervals for this day are stored, but not for this moment yet (backfill in progress)'
-            : 'per-host outage intervals not available yet (history not materialized; backfill pending)';
+          : `per-host outage intervals for this moment are not materialized yet — ${this._backfillPendingText()}`;
         return head(`<span class="avb-evd-state is-down">${day.hosts_down} down</span>`,
           `${hostsTxt} had downtime on ${day.date} — ${why}`);
       }
       if (slotPt && slotPt.availability_pct < 99.995) {
         const why = this._isBeyondRetention(ts)
           ? 'this period is older than Prometheus retention, so they cannot be reconstructed'
-          : 'they are not materialized for it yet (history backfill pending)';
+          : `they are not materialized for it yet — ${this._backfillPendingText()}`;
         return head(`<span class="avb-evd-state is-down">${slotPt.availability_pct.toFixed(2)}%</span>`,
           `Downtime in this period, but no per-host outage intervals — ${why}`);
       }
@@ -2625,7 +2664,7 @@ class _AvailabilityMethods {
       const dayEnd = this._wibDayStartTs(d.date) + 86400;
       const why = this._isBeyondRetention(dayEnd - 1)
         ? 'This day is older than Prometheus retention — per-host outage intervals cannot be reconstructed.'
-        : 'Per-host outage intervals are not materialized for this day yet (history backfill pending).';
+        : `Per-host outage intervals are not materialized for this day yet — ${this._backfillPendingText()}.`;
       return `${head}${limitedNote}<p class="avb-evd-sub">${why}</p>`;
     }
     const dayStart = this._wibDayStartTs(d.date);
@@ -2871,6 +2910,10 @@ class _AvailabilityMethods {
   // events_unavailable is `true` (no intervals at all for the day) or
   // `"partial"` (some stored, some not) — callers word the two differently.
   _dayWithoutIntervals(ts) {
+    // A moment the backfill already materialized has its exact intervals:
+    // nothing to explain there, even on a day that is only partly filled.
+    const bf = this._lastAvailabilityData && this._lastAvailabilityData.backfill;
+    if (bf && typeof bf.materialized_from_ts === 'number' && ts >= bf.materialized_from_ts) return null;
     const wibDate = new Date((ts + WIB_OFFSET_SEC) * 1000).toISOString().slice(0, 10);
     const day = ((this._lastAvailabilityData && this._lastAvailabilityData.daily) || []).find(d => d.date === wibDate);
     const unavailable = day && (day.events_unavailable === true || day.events_unavailable === 'partial');
@@ -2880,6 +2923,15 @@ class _AvailabilityMethods {
   // Older than the oldest history the backend can ever materialize
   // (history_floor_ts = now - min(Prometheus retention, backfill depth)):
   // "backfill pending" would be a promise that never comes true there.
+  // Why a moment inside retention has no per-host intervals yet: the
+  // historical backfill (newest first) hasn't reached it.
+  _backfillPendingText() {
+    const bf = this._lastAvailabilityData && this._lastAvailabilityData.backfill;
+    if (!bf || bf.state !== 'filling') return 'history backfill pending';
+    const from = this._calendarDayLabel(this._wibDateKey(bf.materialized_from_ts));
+    return `history is still being filled from Prometheus (${bf.progress_pct}% done, complete back to ${from})`;
+  }
+
   _isBeyondRetention(ts) {
     const floor = this._lastAvailabilityData && this._lastAvailabilityData.history_floor_ts;
     return typeof floor === 'number' && typeof ts === 'number' && ts < floor;

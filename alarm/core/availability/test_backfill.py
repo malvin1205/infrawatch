@@ -233,9 +233,8 @@ def test_sweep_skips_already_materialized_chunks():
     have_from = hour_end - 6 * DAY
 
     class Repo(FakeRepo):
-        def get_bucket_records(self, job, start, end, instances=None, source=None):
-            hours = [h for h in range(int(start), int(end), int(HOUR)) if h >= have_from]
-            return [{"instance": i, "bucket_start": h} for i in instances for h in hours]
+        def get_materialized_hour_counts(self, instances, start, end, source=None):
+            return {float(h): len(instances) for h in range(int(have_from), int(end), int(HOUR))}
 
     eng = AvailabilityEngine(bucket_repo=Repo({"a": (have_from, 144)}))
     lo, hi = eng._next_depth_backfill_window(["a"], now, "http://prom-a:9090")

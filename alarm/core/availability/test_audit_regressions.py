@@ -69,11 +69,50 @@ class Client:
 
 
 class Prom:
-    """h1 is 90% up over the window; the raw-sample fetch can be made to fail."""
+    """h1 is 90% up over the window; the raw-sample fetch can be made to fail.
 
-    def __init__(self, raw=None, avail_ok=True):
+    The depth path's per-hour aggregates (changes/min/max/count_over_time and
+    the lead sample) are computed from `raw` like Prometheus would, so what the
+    classifier sees always agrees with the samples. `raw_fail`: instances whose
+    raw fetch fails. `force_raw`: report every hour as changed (the pure raw
+    path, for comparing against). `raw_calls`: raw fetches made."""
+
+    def __init__(self, raw=None, avail_ok=True, raw_fail=(), force_raw=False):
         self.raw = raw or {}
         self.avail_ok = avail_ok
+        self.raw_fail = set(raw_fail)
+        self.force_raw = force_raw
+        self.raw_calls = []
+        self.raw_requests = 0
+
+    def fetch_prom_matrix_map(self, expr, start_ts, end_ts, step_sec, **k):
+        import re
+        m = re.match(r"(\w+)\((\w+)\[(\d+)s\]\)$", expr)
+        fn, metric, rng = (m.group(1), m.group(2), int(m.group(3))) if m else ("last", expr, 300)
+        if metric != "probe_success":
+            return {}
+        stamps, t = [], start_ts
+        while t <= end_ts + 1e-6:
+            stamps.append(round(t, 3))
+            t += step_sec
+        import bisect
+        out = {}
+        for inst, samples in self.raw.items():
+            ts_list = [ts for ts, _ in samples]
+            vals = {}
+            for t in stamps:
+                pts = [v for _, v in samples[bisect.bisect_right(ts_list, t - rng):bisect.bisect_right(ts_list, t)]]
+                if not pts:
+                    continue
+                if fn == "last":
+                    vals[t] = float(pts[-1])
+                elif fn == "changes":
+                    vals[t] = 1.0 if self.force_raw else float(sum(a != b for a, b in zip(pts, pts[1:])))
+                else:
+                    vals[t] = float({"min_over_time": min, "max_over_time": max, "count_over_time": len}[fn](pts))
+            if vals:
+                out[inst] = vals
+        return out
 
     def fetch_prom_query_map(self, q, *a, **k):
         if "avg_over_time(probe_success" in q:
@@ -84,7 +123,18 @@ class Prom:
             return {"h1": "2", "h2": "0"}
         return {}
 
-    def fetch_prom_range_map(self, expr, *a, **k):
+    def fetch_prom_range_map(self, expr, start_ts=None, end_ts=None, lead=0.0, **k):
+        if expr.startswith('probe_success{instance'):
+            import re
+            self.raw_requests += 1
+            pat = expr.split('"')[1]
+            insts = [pat] if '{instance="' in expr else [i for i in self.raw if re.fullmatch(pat, i)]
+            for inst in insts:
+                self.raw_calls.append((inst, start_ts, end_ts))
+            if set(insts) & self.raw_fail:
+                return None
+            return {inst: [(ts, v) for ts, v in self.raw.get(inst, []) if start_ts - lead <= ts <= end_ts]
+                    for inst in insts}
         return self.raw if expr == "probe_success" else {}
 
 
@@ -110,22 +160,159 @@ def _row(inst, start, down=0.0, outage=None, cov=H):
 
 # ── backfill: materialization is judged by quality, not row count ──
 
+def _series(start, end, step=15.0, down=()):
+    """0/1 samples every `step` s over [start, end); `down`: [(lo, hi)) spans of 0."""
+    out, t = [], start
+    while t < end:
+        out.append((t, 0 if any(lo <= t < hi for lo, hi in down) else 1))
+        t += step
+    return out
+
+
 def test_failed_raw_fetch_is_not_marked_materialized():
     now = _now()
     w = (now - 120 - H, now - 120)
-    eng = _agg_engine(Prom(raw={}), depth=w)
+    raw = {"h1": _series(w[0] - 300, w[1], down=[(w[0] + 600, w[0] + 900)]),  # flaps: needs raw
+           "h2": _series(w[0] - 300, w[1])}                                     # stable: doesn't
+    eng = _agg_engine(Prom(raw=raw, raw_fail={"h1"}), depth=w)
     eng._deep_cursor = w[0]
     with patch.object(repo_mod, "AVAIL_TARGET_WHITELIST", None):
         for attempt in range(1, AVAIL_BACKFILL_MAX_CHUNK_FAILURES):
             eng.aggregate_hourly_buckets(now=now)
             assert eng.bucket_repo.get_bucket_records("all", *w, source=SRC) == [], "nothing persisted on failure"
             assert eng._deep_cursor == w[1], "cursor rewound so the same chunk is retried"
-        # Give up after N failures: fallback is stored, but still NOT materialized.
+        # Give up after N failures: what could be built is stored, the host
+        # whose raw fetch failed stays a hole — never a scalar guess.
         eng.aggregate_hourly_buckets(now=now)
         rows = eng.bucket_repo.get_bucket_records("all", *w, source=SRC)
-        assert rows and any(r["downtime_seconds"] > 0 and not r["outage_json"] for r in rows)
+        assert [r["instance"] for r in rows] == ["h2"], rows
         assert not eng._chunk_materialized(["h1", "h2"], w[0], w[1], SRC)
         assert "h1" not in eng.bucket_repo.get_instance_bucket_coverage(["h1"], source=SRC)
+
+
+def _depth_rows(prom, w, now):
+    eng = _agg_engine(prom)
+    todo = [w]
+    eng._next_depth_backfill_window = lambda *a: todo.pop() if todo else None
+    with patch.object(repo_mod, "AVAIL_TARGET_WHITELIST", None):
+        eng.aggregate_hourly_buckets(now=now)
+        rows = eng.bucket_repo.get_bucket_records("all", *w, source=SRC)
+    return {(r["instance"], r["bucket_start"]): {k: r[k] for k in (
+        "uptime_seconds", "downtime_seconds", "unknown_seconds", "coverage_seconds", "sample_count",
+        "availability_pct", "incident_count", "outage_json")} for r in rows}
+
+
+def test_stable_hours_skip_raw_and_match_the_raw_path():
+    """Full-UP and full-DOWN hours are written from aggregates alone, and the
+    rows are exactly what reconstructing the raw samples gives."""
+    now = _now()
+    top = math.floor(now / H) * H
+    w = (top - 3 * H, top)
+    raw = {"h1": _series(w[0] - 300, w[1]),                                    # UP throughout
+           "h2": _series(w[0] - 300, w[1], down=[(w[0] - 300, w[1])])}         # DOWN throughout
+    prom = Prom(raw=raw)
+    fast = _depth_rows(prom, w, now)
+    assert prom.raw_calls == [], "stable hosts must not fetch raw samples"
+    exact = _depth_rows(Prom(raw=raw, force_raw=True), w, now)
+    assert fast == exact
+    assert len(fast) == 6
+    down = json.loads(fast[("h2", w[0] + H)]["outage_json"])
+    assert down == {"d": [3600.0], "i": [[w[0] + H, w[0] + 2 * H]], "ongoing_start": True, "ongoing_end": True}
+    up = json.loads(fast[("h1", w[0])]["outage_json"])
+    assert up == {"d": [], "i": [], "ongoing_start": False, "ongoing_end": False}
+
+
+def test_flapping_host_fetches_raw_only_for_its_hours_and_keeps_short_outage():
+    """A 4s outage at a 2s scrape survives: that hour is rebuilt from raw
+    samples (no 15s resampling), the other hours and hosts are not fetched."""
+    now = _now()
+    top = math.floor(now / H) * H
+    w = (top - 3 * H, top)
+    blip = (w[0] + H + 1000.0, w[0] + H + 1004.0)
+    raw = {"h1": _series(w[0] - 300, w[1], step=2.0, down=[blip]),
+           "h2": _series(w[0] - 300, w[1], step=2.0)}
+    prom = Prom(raw=raw)
+    rows = _depth_rows(prom, w, now)
+    assert [c[0] for c in prom.raw_calls] == ["h1"] and prom.raw_calls[0][1:] == (w[0] + H, w[0] + 2 * H)
+    oj = json.loads(rows[("h1", w[0] + H)]["outage_json"])
+    assert oj["i"] == [[blip[0], blip[1]]] and oj["d"] == [4.0], oj
+    assert rows[("h1", w[0] + H)]["downtime_seconds"] == 4.0
+    assert rows == _depth_rows(Prom(raw=raw, force_raw=True), w, now)
+
+
+def test_gappy_hour_is_not_classified_stable():
+    """Two missed scrapes in a row is a gap over the reconstruction tolerance:
+    the hour must go raw so the gap is booked unknown, not up."""
+    now = _now()
+    top = math.floor(now / H) * H
+    w = (top - 2 * H, top)
+    series = [p for p in _series(w[0] - 300, w[1]) if not (w[0] + 1200 < p[0] < w[0] + 1260)]
+    prom = Prom(raw={"h1": series, "h2": _series(w[0] - 300, w[1])})
+    rows = _depth_rows(prom, w, now)
+    assert [c[0] for c in prom.raw_calls] == ["h1"]
+    assert rows[("h1", w[0])]["unknown_seconds"] > 0
+    assert rows == _depth_rows(Prom(raw=prom.raw, force_raw=True), w, now)
+
+
+def test_fresh_db_backfills_newest_first_and_restart_resumes():
+    """Fresh DB: the walk starts at the newest hour. A restart (new engine,
+    same DB) resumes below what is stored instead of rebuilding it, and the
+    walk ends exactly at the detected retention floor."""
+    now = _now()
+    top = math.floor(now / H) * H
+    depth = 2 * DAY
+    raw = {i: _series(top - depth - 600, top) for i in ("h1", "h2")}
+    repo = DbRepo()
+
+    def engine():
+        eng = AvailabilityEngine(prom_client=Client, prom_queries=Prom(raw=raw), bucket_repo=repo)
+        eng._scoped_job_map = lambda job, src: {"h1": "blackbox", "h2": "blackbox"}
+        eng._validate_whitelist = lambda src: None
+        eng._availability_aggregation_windows = lambda *a, **k: []
+        eng._backfill_depth = lambda src: depth
+        return eng
+
+    with patch.object(repo_mod, "AVAIL_TARGET_WHITELIST", None), \
+            patch.object(engine_mod, "AVAIL_BACKFILL_CHUNK_SECONDS", 12 * H), \
+            patch.object(engine_mod, "AVAIL_BACKFILL_CYCLE_BUDGET_SECONDS", 0.0):
+        eng = engine()
+        eng._backfill_depth_sec = depth
+        assert eng._next_depth_backfill_window(["h1", "h2"], now, SRC) == (top - 12 * H, top), "newest first"
+        eng = engine()
+        eng.aggregate_hourly_buckets(now=now)           # one chunk: the newest 12h
+        stored = {r["bucket_start"] for r in repo.get_bucket_records("all", top - depth, top, source=SRC)}
+        assert stored == {top - k * H for k in range(1, 13)}, sorted(stored)
+        eng = engine()                                  # restart
+        eng._backfill_depth_sec = depth
+        assert eng._next_depth_backfill_window(["h1", "h2"], now, SRC) == (top - 24 * H, top - 12 * H)
+        eng = engine()                                  # (that call moved the cursor; start clean)
+        for _ in range(10):
+            eng.aggregate_hourly_buckets(now=now)
+        stored = {r["bucket_start"] for r in repo.get_bucket_records("all", top - 3 * DAY, top, source=SRC)}
+        assert stored == {top - k * H for k in range(1, 49)}, "walks exactly to the floor, no further"
+        assert not eng.backfill_in_progress
+
+
+def test_invalidate_range_evicts_only_overlapping_reports():
+    from alarm.core.availability._cache import AvailabilityCache
+    now = 1_790_000_000.0
+    cache = AvailabilityCache()
+    keys = {}
+    for name, minutes, end in (("24h", 1440, None), ("7d", 10080, None), ("30d", 43200, None),
+                               ("old", 1440, now - 20 * DAY)):
+        k, _ = AvailabilityCache.derive_cache_key(SRC, "all", minutes, end, 99.9, 30, 0, now)
+        cache.set(k, name, now=now)
+        keys[name] = k
+    # History materialized 10-9 days ago: the 30d report shows it, 24h/7d don't.
+    assert cache.invalidate_range(now - 10 * DAY, now - 9 * DAY) == 1
+    assert cache.get(keys["30d"], 900, now=now) is None
+    assert cache.get(keys["7d"], 900, now=now) == "7d" and cache.get(keys["24h"], 900, now=now) == "24h"
+    assert cache.get(keys["old"], 900, now=now) == "old"
+
+    eng = AvailabilityEngine(prom_client=Client, bucket_repo=DbRepo())
+    eng._last_live = {"a": (now, 43200, {}), "b": (now, 1440, {})}
+    eng.invalidate_range(now - 10 * DAY, now - 9 * DAY)
+    assert set(eng._last_live) == {"b"}, "stale-serve copy of an affected report is dropped too"
 
 
 def test_downtime_without_outage_json_counts_as_hole():
@@ -160,10 +347,9 @@ def test_single_host_hole_in_large_fleet_is_swept():
             full = int(round((hour_end - floor) / H))
             return {i: (floor, full - (2 if i == "h7" else 0)) for i in instances}
 
-        def get_bucket_records(self, job, start, end, instances=None, source=None):
-            return [{"instance": i, "bucket_start": h, "downtime_seconds": 0, "outage_json": None}
-                    for i in instances for h in range(int(start), int(end), int(H))
-                    if not (i == "h7" and h in hole)]
+        def get_materialized_hour_counts(self, instances, start, end, source=None):
+            return {float(h): len(instances) - (h in hole)
+                    for h in range(int(math.ceil(start / H) * H), int(end), int(H))}
 
     eng = AvailabilityEngine(bucket_repo=Repo20())
     swept = set()
@@ -240,7 +426,7 @@ def test_backfill_floor_follows_prometheus_retention():
 
     eng = AvailabilityEngine(prom_client=Flags, bucket_repo=DbRepo())
     assert eng._backfill_depth(SRC) == 15 * DAY
-    assert AVAIL_BACKFILL_CHUNK_SECONDS == H
+    assert AVAIL_BACKFILL_CHUNK_SECONDS == 12 * H
 
     # Longer than the 35d fallback: follow Prometheus, not the fallback.
     class Flags60(Client):
@@ -432,3 +618,58 @@ def test_live_trend_failed_probe_fetch_is_no_data_not_up():
 
     with patch.object(helpers_mod.promclient, "fetch_prometheus_json", side_effect=fake):
         assert helpers_mod._query_prometheus_trend("blackbox", ["h1"], 1000, 1060, 60, 5.0, source=SRC) == {}
+
+
+def test_several_depth_chunks_per_cycle():
+    now = _now()
+    top = math.floor(now / H) * H
+    chunks = [(top - (k + 1) * H, top - k * H) for k in range(1, 4)]
+    raw = {i: _series(chunks[-1][0] - 300, top) for i in ("h1", "h2")}
+    eng = _agg_engine(Prom(raw=raw))
+    todo = iter(chunks)
+    eng._next_depth_backfill_window = lambda *a: next(todo, None)
+    evicted = []
+    eng.invalidate_range = lambda lo, hi: evicted.append((lo, hi))
+    with patch.object(repo_mod, "AVAIL_TARGET_WHITELIST", None):
+        eng.aggregate_hourly_buckets(now=now)
+        for w in chunks:
+            assert eng.bucket_repo.get_bucket_records("all", *w, source=SRC), w
+        assert evicted == [(chunks[-1][0], chunks[0][1])], "evicts exactly the span it materialized"
+        # Zero budget: only the first chunk runs (the old one-per-cycle pace).
+        todo = iter(chunks)
+        eng.bucket_repo = DbRepo()
+        with patch.object(engine_mod, "AVAIL_BACKFILL_CYCLE_BUDGET_SECONDS", 0.0):
+            eng.aggregate_hourly_buckets(now=now)
+        assert eng.bucket_repo.get_bucket_records("all", *chunks[0], source=SRC)
+        assert not eng.bucket_repo.get_bucket_records("all", *chunks[1], source=SRC)
+
+
+def test_flapping_hosts_with_the_same_hours_share_one_raw_request():
+    now = _now()
+    top = math.floor(now / H) * H
+    w = (top - 2 * H, top)
+    flap = [(w[0] + 600, w[0] + 630)]
+    raw = {"h1": _series(w[0] - 300, w[1], down=flap), "h2": _series(w[0] - 300, w[1], down=flap)}
+    prom = Prom(raw=raw)
+    rows = _depth_rows(prom, w, now)
+    assert sorted(c[0] for c in prom.raw_calls) == ["h1", "h2"]
+    assert prom.raw_requests == 1, "one request for both hosts"
+    assert rows == _depth_rows(Prom(raw=raw, force_raw=True), w, now)
+
+
+def test_backfill_status_reports_filling_then_complete():
+    now = _now()
+    top = math.floor(now / H) * H
+    eng = AvailabilityEngine(prom_client=Client, bucket_repo=DbRepo())
+    eng._backfill_depth = lambda src: 10 * H
+    with patch.object(repo_mod, "AVAIL_TARGET_WHITELIST", None):
+        # Newest 4 hours stored for both hosts, the rest not yet.
+        eng.bucket_repo.save_buckets([_row(i, top - k * H) for i in ("h1", "h2") for k in range(1, 5)], SRC)
+        st = eng.backfill_status(SRC, ["h1", "h2"], now=now)
+        assert st["state"] == "filling" and st["materialized_from_ts"] == top - 4 * H
+        assert st["complete_hours"] == 4 and st["total_hours"] == 10 and st["progress_pct"] == 40.0
+        eng.bucket_repo.save_buckets([_row(i, top - k * H) for i in ("h1", "h2") for k in range(5, 11)], SRC)
+        assert eng.backfill_status(SRC, ["h1", "h2"], now=now)["state"] == "filling", "cached 30s"
+        eng.invalidate_range(top - 10 * H, top)
+        st = eng.backfill_status(SRC, ["h1", "h2"], now=now)
+        assert st["state"] == "complete" and st["materialized_from_ts"] == top - 10 * H == st["floor_ts"]

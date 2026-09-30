@@ -148,6 +148,28 @@ function fakePlot() {
   assert.equal(p._isBeyondRetention(1), false, 'unknown floor never claims beyond-retention');
 }
 
+/* ── 5b. Backfill filling: only the not-yet-materialized span says pending,
+   and Max history follows the detected floor. ── */
+{
+  const p = new P();
+  const day = Date.UTC(2026, 8, 5) / 1000 - 7 * 3600;          // 2026-09-05 00:00 WIB
+  const daily = [{ date: '2026-09-05', hosts_down: 4, events: [], events_unavailable: 'partial' }];
+  p._lastAvailabilityData = {
+    history_floor_ts: day - 30 * 86400, daily,
+    backfill: { state: 'filling', floor_ts: day - 30 * 86400, materialized_from_ts: day + 12 * 3600, progress_pct: 41.5 },
+  };
+  assert.equal(p._dayWithoutIntervals(day + 13 * 3600), null, 'materialized moment: no pending explanation');
+  assert.equal(p._dayWithoutIntervals(day + 11 * 3600), daily[0], 'older moment on the same day: still pending');
+  assert.match(p._backfillPendingText(), /41\.5% done, complete back to .*Sept? 5/);
+  p._lastAvailabilityData.backfill.state = 'complete';
+  assert.equal(p._backfillPendingText(), 'history backfill pending');
+  p.availabilityBreakdown = { backfill: { floor_ts: Date.now() / 1000 - 60 * 86400 } };
+  assert.ok(Math.abs(p._maxHistoryMinutes() - 60 * 1440) <= 1, 'max history = detected retention');
+  p.availabilityBreakdown = {};
+  p._lastAvailabilityData = {};
+  assert.equal(p._maxHistoryMinutes(), 43200, 'floor unknown: 30d until a report tells us');
+}
+
 /* ── 6. Click detail = the clicked moment only, not the whole trend slot. ──
    The live bug: a 4h slot held 165 changes; one click listed all of them
    under the slot-END time with a "RECOVERED" header during an outage. */
