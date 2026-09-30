@@ -162,7 +162,7 @@ export class ServerMonitor {
     this._selfHealthInterval = setInterval(() => this._checkSelfHealth(), 20000);
 
     // Kiosk / TV Standby lifecycle management: fully pause every recurring
-    // timer while the tab/display is hidden (a backgrounded wallboard was
+    // timer except the alarm while the tab/display is hidden (a backgrounded wallboard was
     // still hammering /instances every 5s, /api/availability every 15s,
     // /health every 20s and ticking 1/s), then resume with one immediate
     // clean sync on wake — no timer accumulation.
@@ -184,7 +184,9 @@ export class ServerMonitor {
         ip.stopPolling();
         ip.stopAvailabilityPolling();
         ip.stopDownCounterTicker();
-        this._stopAlarmTicker();
+        // The siren must keep working in a background tab: the alarm worker
+        // keeps ticking and polls /instances (_startAlarmTicker) in place of
+        // the page timer the browser throttles to once a minute.
         ip._stopAutoRotate();
         if (this._selfHealthInterval) {
           clearInterval(this._selfHealthInterval);
@@ -1362,7 +1364,14 @@ export class ServerMonitor {
     if (this._alarmTickHandle || this._alarmTickWorker) return;
     try {
       this._alarmTickWorker = new Worker('/static/js/alarm-tick-worker.js');
-      this._alarmTickWorker.onmessage = () => this._syncAlarmAudio();
+      this._alarmTickWorker.onmessage = () => {
+        const ip = this.instancesPage;
+        if (document.hidden && ip && Date.now() - (this._hiddenPollAt || 0) >= (ip.refreshIntervalMs || 5000)) {
+          this._hiddenPollAt = Date.now();
+          ip.load();
+        }
+        this._syncAlarmAudio();
+      };
       this._alarmTickWorker.onerror = () => {
         this._alarmTickWorker?.terminate();
         this._alarmTickWorker = null;
