@@ -152,6 +152,13 @@ def init_db(db_path: Optional[str] = None):
                 updated_at REAL NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS host_names (
+                instance TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                updated_by TEXT,
+                updated_at REAL NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS slow_thresholds (
                 instance TEXT PRIMARY KEY,
                 threshold_ms REAL NOT NULL,

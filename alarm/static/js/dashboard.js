@@ -3,7 +3,7 @@
  * response-time / history charts. Still the largest module; a further
  * split into drawer / availability sub-modules is a separate pass.
  */
-import { escapeHtml, slowThresholdMs, DATE_LOCALE, formatDuration, getDurationFormatPreference } from './ui/format.js';
+import { escapeHtml, slowThresholdMs, hostName, setHostNames, DATE_LOCALE, formatDuration, getDurationFormatPreference } from './ui/format.js';
 import { apiFetch } from './net.js';
 import { enhanceAllSelects } from './ui/select-skin.js';
 import { installAvailability } from './availability.js';
@@ -267,6 +267,15 @@ export class InstancesPage {
       maintEndBtn.addEventListener('click', async () => {
         if (!this.selectedTarget) return;
         await this._endMaintenance(this.selectedTarget.maintenanceId, this.selectedTarget.instance);
+      });
+    }
+
+    const nameForm = document.getElementById('drawerHostNameForm');
+    if (nameForm) {
+      nameForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!this.selectedTarget) return;
+        await this._setHostName(this.selectedTarget.instance, document.getElementById('drawerHostNameInput')?.value || '');
       });
     }
 
@@ -798,7 +807,7 @@ export class InstancesPage {
               target.acknowledged_by = null;
               target.acknowledged_at = null;
               target._ackedAtMs = null;
-              this._triggerEventToast(`Outage on ${target.instance} unacknowledged`);
+              this._triggerEventToast(`Outage on ${hostName(target.instance)} unacknowledged`);
             } else {
               if (this.acknowledgedDownInstances) this.acknowledgedDownInstances.add(target.instance);
               target.acknowledged = true;
@@ -807,7 +816,7 @@ export class InstancesPage {
               const ackItem = (data.acknowledged || []).find(x => x.instance === target.instance);
               target.acknowledged_at = (ackItem && ackItem.acknowledged_at) || Math.floor(Date.now() / 1000);
               target._ackedAtMs = target.acknowledged_at * 1000;
-              this._triggerEventToast(`Outage on ${target.instance} acknowledged by ${u}`);
+              this._triggerEventToast(`Outage on ${hostName(target.instance)} acknowledged by ${u}`);
             }
             if (typeof this._updateDrawerAckButton === 'function') {
               this._updateDrawerAckButton(target);
@@ -1261,7 +1270,7 @@ export class InstancesPage {
       const alertsSig = Array.isArray(t.active_alerts)
         ? t.active_alerts.map(a => `${a.name}:${a.severity}`).join(',')
         : '';
-      sig += t.instance + '|' + t.job + '|' + t.health + '|' + t.responseTimeMs + '|' + t.downSince + '|' + t.maintenance + '|' + t.suppressedBy + '|' + t.failureCategory + '|' + t.is_alarmable + '|' + t.effective_status + '|' + alertsSig + '|' + t.acknowledged + '|' + t.acknowledged_by + '|' + t.acknowledged_at + ';';
+      sig += t.instance + '|' + t.job + '|' + t.health + '|' + t.responseTimeMs + '|' + t.downSince + '|' + t.maintenance + '|' + t.suppressedBy + '|' + t.failureCategory + '|' + t.is_alarmable + '|' + t.effective_status + '|' + alertsSig + '|' + t.acknowledged + '|' + t.acknowledged_by + '|' + t.acknowledged_at + '|' + t.displayName + ';';
     }
     return sig;
   }
@@ -1337,6 +1346,7 @@ export class InstancesPage {
       this.serverPayload = data;
       this._checkStateTransitions(newTargets);
       this.data = newTargets;
+      setHostNames(newTargets);
       this._updateStats();
 
       // Skip the (relatively) expensive filter/sort/DOM-diff pass when the
@@ -1754,7 +1764,7 @@ export class InstancesPage {
 
       if (prev && prev !== curr) {
         const label = curr === 'up' ? 'back online' : (curr === 'down' ? 'went offline' : 'reporting no data');
-        this._triggerEventToast(`${t.instance} ${label}`);
+        this._triggerEventToast(`${hostName(t.instance)} ${label}`);
       }
       this.previousStates[t.instance] = curr;
     });
@@ -2243,7 +2253,7 @@ export class InstancesPage {
   // delete target" UI instruction (audit 4.5). acknowledged_by/_at already ship
   // on every /instances row (monitoring/engine.py), so this needs no new API.
   _cardTooltip(t, isAcked) {
-    const bits = [t.instance];
+    const bits = [t.displayName ? `${t.displayName} (${t.instance})` : t.instance];
     if (t.job) bits.push(`job ${t.job}`);
 
     if (t.maintenance) {
@@ -2535,7 +2545,7 @@ export class InstancesPage {
 
     // Search filter
     if (this.searchQ) {
-      rows = rows.filter(t => t.instance.toLowerCase().includes(this.searchQ));
+      rows = rows.filter(t => t.instance.toLowerCase().includes(this.searchQ) || (t.displayName || '').toLowerCase().includes(this.searchQ));
     }
 
     if (this.countBadge) this.countBadge.textContent = rows.length;
@@ -2682,7 +2692,8 @@ export class InstancesPage {
         }
 
         const ipEl = card.querySelector('.hc-ip') || card.children[0];
-        if (ipEl && ipEl.textContent !== t.instance) ipEl.textContent = t.instance;
+        const label = hostName(t.instance);
+        if (ipEl && ipEl.textContent !== label) ipEl.textContent = label;
 
         const latEl = card.querySelector('.hc-latency') || card.children[1];
         if (latEl && latEl.textContent !== latencyText) latEl.textContent = latencyText;
@@ -2766,10 +2777,10 @@ export class InstancesPage {
                      data-instance="${this._esc(t.instance)}"
                      role="listitem"
                      tabindex="0"
-                     aria-label="${this._esc(t.instance)} — ${t.maintenance ? 'Under maintenance' : (isDown ? (t.suppressedBy ? `Offline, correlated with ${this._esc(t.suppressedBy)}` : (isAcked ? 'Offline, acknowledged' : 'Offline, not yet acknowledged')) : (isSlow ? 'Slow' : 'Online'))}"
+                     aria-label="${this._esc(hostName(t.instance))} — ${t.maintenance ? 'Under maintenance' : (isDown ? (t.suppressedBy ? `Offline, correlated with ${this._esc(t.suppressedBy)}` : (isAcked ? 'Offline, acknowledged' : 'Offline, not yet acknowledged')) : (isSlow ? 'Slow' : 'Online'))}"
                      title="${this._esc(this._cardTooltip(t, isAcked))}">
           ${this._selectMode ? this._selectBoxHtml() : ''}
-          <div class="hc-ip">${this._esc(t.instance)}</div>
+          <div class="hc-ip">${this._esc(hostName(t.instance))}</div>
           <div class="hc-latency">${this._esc(latencyText)}</div>
           ${uptimeHtml}
           ${isAcked ? '<span class="hc-ack-mark" aria-hidden="true">✓</span>' : ''}

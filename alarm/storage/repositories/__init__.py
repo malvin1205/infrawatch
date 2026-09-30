@@ -11,6 +11,7 @@ from .availability import (
     AggregationLeaseRepository,
     SlaTargetRepository,
     SlowThresholdRepository,
+    HostNameRepository,
 )
 from .inventory import (
     MaintenanceRepository,
@@ -33,6 +34,7 @@ __all__ = [
     "AggregationLeaseRepository",
     "SlaTargetRepository",
     "SlowThresholdRepository",
+    "HostNameRepository",
     "MaintenanceRepository",
     "DependencyRepository",
     "EndpointRepository",

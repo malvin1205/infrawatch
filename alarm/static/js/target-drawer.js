@@ -3,7 +3,7 @@
  * response-time sparkline + history chart. Installed onto
  * InstancesPage.prototype (see availability.js for the why). */
 import { calculateNiceScale, buildMSGradientDefs } from './ui/charts.js';
-import { escapeHtml, slowThresholdMs, latencySeverity, latencyColor, DATE_LOCALE } from './ui/format.js';
+import { escapeHtml, slowThresholdMs, hostName, setHostNames, latencySeverity, latencyColor, DATE_LOCALE } from './ui/format.js';
 import { apiFetch } from './net.js';
 import { renderHostResources, renderHostDetail } from './ui/host-resources.js';
 
@@ -431,7 +431,9 @@ class _DrawerMethods {
 
     // IP + job
     const titleEl = document.getElementById('drawerTargetTitle');
-    if (titleEl) titleEl.textContent = target.instance;
+    if (titleEl) titleEl.textContent = hostName(target.instance);
+    const nameInput = document.getElementById('drawerHostNameInput');
+    if (nameInput) nameInput.value = target.displayName || '';
     const infoIpEl = document.getElementById('drawerInfoIp');
     if (infoIpEl) infoIpEl.textContent = target.instance;
     const jobEl = document.getElementById('drawerJobBadge');
@@ -786,7 +788,7 @@ class _DrawerMethods {
       activePanel.classList.remove('hidden');
       form.classList.add('hidden');
       const parentEl = document.getElementById('drawerDependencyParent');
-      if (parentEl) parentEl.textContent = target.dependsOn;
+      if (parentEl) parentEl.textContent = hostName(target.dependsOn);
     } else {
       activePanel.classList.add('hidden');
       form.classList.remove('hidden');
@@ -794,10 +796,32 @@ class _DrawerMethods {
       select.innerHTML = '<option value="">Select parent host…</option>' +
         this.data
           .filter(t => t.instance !== target.instance)
-          .map(t => `<option value="${this._esc(t.instance)}">${this._esc(t.instance)}</option>`)
+          .map(t => `<option value="${this._esc(t.instance)}">${this._esc(t.displayName ? `${t.displayName} (${t.instance})` : t.instance)}</option>`)
           .join('');
       select.value = current;
     }
+  }
+
+  async _setHostName(instance, name) {
+    const res = await apiFetch(`/api/host-names/${encodeURIComponent(instance)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim() })
+    });
+    if (res.ok) {
+      const saved = (await res.json()).name;
+      const target = this.data.find(t => t.instance === instance);
+      if (target) target.displayName = saved;
+      setHostNames(this.data);
+      if (this.selectedTarget && this.selectedTarget.instance === instance) {
+        this.selectedTarget.displayName = saved;
+        const titleEl = document.getElementById('drawerTargetTitle');
+        if (titleEl) titleEl.textContent = hostName(instance);
+      }
+      this._lastDataSignature = null;
+      this.load();
+    }
+    return res.ok;
   }
 
   async _setDependency(child, parent) {

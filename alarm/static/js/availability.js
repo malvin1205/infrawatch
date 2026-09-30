@@ -4,7 +4,7 @@
  * methods keep their original `this` and every existing call site works
  * unchanged. */
 import { apiFetch } from './net.js';
-import { DATE_LOCALE } from './ui/format.js';
+import { DATE_LOCALE, hostName } from './ui/format.js';
 
 // An SLA target is an exact operator-set value, not a measurement — unlike
 // availability/coverage %, it must never get silently rounded for display.
@@ -1008,7 +1008,7 @@ class _AvailabilityMethods {
 
       return `<tr>
         <td>
-          <span class="audit-host-name">${this._esc(e.name || e.id || '—')}</span>
+          <span class="audit-host-name">${this._esc(hostName(e.name || e.id) || '—')}</span>
           <span class="audit-host-job">${this._esc(e.job || '—')}</span>
         </td>
         <td${covTitle}>
@@ -2683,7 +2683,7 @@ class _AvailabilityMethods {
         : '';
       return `
         <button type="button" class="avb-cal-host" data-instance="${this._esc(e.instance)}" title="Open ${this._esc(e.name || e.instance)}">
-          <span class="avb-evd-host">${this._esc(e.name || e.instance)}</span>
+          <span class="avb-evd-host">${this._esc(hostName(e.name || e.instance))}</span>
           <span class="avb-cal-host-dur">${this._compactDur(e.duration_sec)}</span>
           <span class="avb-cal-host-meta">${n}× · ${range}</span>
         </button>`;
@@ -3669,7 +3669,7 @@ class _AvailabilityMethods {
           <div class="ara-host-col">
             <span class="ara-severity-dot ${sevClass}" aria-hidden="true"></span>
             <div class="ara-host-meta">
-              <span class="ara-hostname">${this._esc(h.name)}</span>
+              <span class="ara-hostname">${this._esc(hostName(h.name))}</span>
               <div class="ara-badges-row">
                 <span class="ara-job-badge">${this._esc(roleLabel)}</span>
                 ${badgeHtml}

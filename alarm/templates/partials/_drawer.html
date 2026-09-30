@@ -387,6 +387,15 @@
 
       <!-- ── TAB PANE 5: RAW METRICS ────────────────────── -->
       <div class="modal-tab-pane hidden" id="tabPaneRaw">
+        <div class="drawer-section-card" id="drawerHostNameSection">
+          <div class="drawer-section-title" style="margin-bottom: 8px;">Host name <em style="font-weight:400; text-transform:none; letter-spacing:normal;">(display label)</em></div>
+          <form id="drawerHostNameForm" style="display:flex; gap:8px;">
+            <input type="text" id="drawerHostNameInput" class="form-input" style="flex:1;" maxlength="64" placeholder="e.g. Core Router Jakarta" aria-label="Host name">
+            <button type="submit" class="btn btn-primary btn-sm">Save</button>
+          </form>
+          <span class="form-help" style="margin-top:6px; display:block;">Shown instead of the IP on the wallboard, drawer, history, logs, availability and Telegram alerts. Leave empty and save to go back to the IP.</span>
+        </div>
+
         <div class="drawer-section-card" id="drawerDependencySection">
           <div class="drawer-section-title" style="margin-bottom: 8px;">Parent host <em style="font-weight:400; text-transform:none; letter-spacing:normal;">(groups related outages)</em></div>
 

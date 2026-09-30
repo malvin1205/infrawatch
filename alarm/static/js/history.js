@@ -1,5 +1,5 @@
 /* History page — incident timeline + per-incident detail. */
-import { epochToWibInput, escapeHtml, formatDuration, formatWib, isoWib, wibInputToEpoch } from './ui/format.js';
+import { epochToWibInput, escapeHtml, hostName, formatDuration, formatWib, isoWib, wibInputToEpoch } from './ui/format.js';
 import { apiFetch } from './net.js';
 import { isAdminLike } from './auth.js';
 import { LogsPage } from './logs.js';
@@ -462,6 +462,7 @@ export class HistoryPage {
       rows = rows.filter(r =>
         (r.name || '').toLowerCase().includes(this.searchQ) ||
         (r.instance || '').toLowerCase().includes(this.searchQ) ||
+        hostName(r.instance || '').toLowerCase().includes(this.searchQ) ||
         (r.summary || '').toLowerCase().includes(this.searchQ)
       );
     }
@@ -603,7 +604,7 @@ export class HistoryPage {
     return `<div class="history-row-full${ongoing ? ' history-row-active' : ''}" data-row-key="${this._esc(rowKey)}" tabindex="0" role="button" aria-label="Open details for ${this._esc(inc.instance || 'incident')}">
       <div class="history-chip">
         <div>
-          <div class="history-host">${this._esc(inc.instance || '—')}</div>
+          <div class="history-host">${this._esc(inc.instance ? hostName(inc.instance) : '—')}</div>
           <div class="history-sub">${this._esc(jobSub || '—')}${errDetail ? ` — ${this._esc(errDetail)}` : ''}</div>
           ${ackLine}
           ${resolveLine}

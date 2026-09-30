@@ -214,6 +214,19 @@ def send_telegram_raw(bot_token: str, chat_id: str, text: str, parse_mode: str =
         return False, str(e)
 
 
+def _host_label(instance) -> str:
+    """'Name (instance)' when the host has a display name, else the instance."""
+    try:
+        try:
+            from storage import HostNameRepository
+        except ImportError:
+            from alarm.storage import HostNameRepository
+        name = HostNameRepository.get_all().get(instance)
+    except Exception:
+        name = None
+    return f"{name} ({instance})" if name else str(instance or "-")
+
+
 def build_alert_message(
     name: str,
     severity: str,
@@ -226,7 +239,7 @@ def build_alert_message(
     latency_ms: Optional[float] = None,
 ) -> str:
     """Build a clean, structured HTML message for Telegram."""
-    safe_instance = html.escape(str(instance or "-"))
+    safe_instance = html.escape(_host_label(instance))
     safe_job = html.escape(str(job or "blackbox"))
     safe_summary = html.escape(str(summary).strip()) if summary else ""
     time_str = format_timestamp(event_time)

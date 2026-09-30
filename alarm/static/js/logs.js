@@ -1,5 +1,5 @@
 /* Alert Logs / Incident History list page. */
-import { escapeHtml, formatDuration, formatWib } from './ui/format.js';
+import { escapeHtml, formatDuration, formatWib, hostName } from './ui/format.js';
 import { addJobs, bindJobSelect, currentJob } from './ui/job-filter.js';
 
 const store = {
@@ -249,6 +249,7 @@ export class LogsPage {
       rows = rows.filter(r =>
         (r.name || '').toLowerCase().includes(this.searchQ) ||
         (r.instance || '').toLowerCase().includes(this.searchQ) ||
+        hostName(r.instance || '').toLowerCase().includes(this.searchQ) ||
         (r.summary || '').toLowerCase().includes(this.searchQ)
       );
     }
@@ -312,7 +313,7 @@ export class LogsPage {
         <div class="al-row ${rowCls}">
           <span class="al-dot ${dotCls}"></span>
           <div class="al-chip">
-            <span class="al-host">${this._esc(r.instance || '—')}</span>
+            <span class="al-host">${this._esc(r.instance ? hostName(r.instance) : '—')}</span>
             <span class="al-sub">${this._esc(jobSub || '—')}${flapChip}</span>
             ${ackLine}
           </div>

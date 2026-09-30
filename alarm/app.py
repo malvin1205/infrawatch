@@ -36,7 +36,7 @@ try:
     from storage import (
         init_db, IncidentRepository, INCIDENT_RETENTION_LIMIT, EventLogRepository,
         MaintenanceRepository, DependencyRepository, EndpointRepository, DeletedTargetRepository,
-        AvailabilityBucketRepository, AggregationLeaseRepository, SlaTargetRepository, SlowThresholdRepository,
+        AvailabilityBucketRepository, AggregationLeaseRepository, SlaTargetRepository, SlowThresholdRepository, HostNameRepository,
         UserRepository, AcknowledgmentRepository, AuditLogRepository,
         load_json, save_json,
         load_deleted_targets, save_deleted_targets,
@@ -147,7 +147,7 @@ except ImportError:
     from alarm.storage import (
         init_db, IncidentRepository, INCIDENT_RETENTION_LIMIT, EventLogRepository,
         MaintenanceRepository, DependencyRepository, EndpointRepository, DeletedTargetRepository,
-        AvailabilityBucketRepository, AggregationLeaseRepository, SlaTargetRepository, SlowThresholdRepository,
+        AvailabilityBucketRepository, AggregationLeaseRepository, SlaTargetRepository, SlowThresholdRepository, HostNameRepository,
         UserRepository, AcknowledgmentRepository, AuditLogRepository,
         load_json, save_json,
         load_deleted_targets, save_deleted_targets,
@@ -1525,6 +1525,32 @@ def delete_slow_threshold_api(instance):
         details="SlowResponse threshold override removed (reverted to default)"
     )
     return jsonify({"ok": True, "instance": instance})
+
+# ── Per-target display name API ─────────────────────────────────────────────
+# Optional human name shown in place of the raw instance everywhere in the UI.
+@app.route('/api/host-names/<path:instance>', methods=['PUT'])
+@rate_limit(30, 60)
+@require_permission('targets.write')
+def set_host_name_api(instance):
+    instance = (instance or '').strip()
+    name = str((request.json or {}).get('name') or '').strip()
+    if not instance:
+        return jsonify({"ok": False, "error": "Instance is required"}), 400
+    if len(name) > 64:
+        return jsonify({"ok": False, "error": "Name must be 64 characters or fewer"}), 400
+    actor = g.current_user.get("username", "admin")
+    if name:
+        HostNameRepository.set_name(instance, name, updated_by=actor)
+    else:
+        HostNameRepository.delete_name(instance)
+    AuditLogRepository.record_action(
+        actor_username=actor,
+        actor_role=g.current_user.get("role", "admin"),
+        action="SET_HOST_NAME",
+        resource=instance,
+        details=f"Display name set to '{name}'" if name else "Display name cleared"
+    )
+    return jsonify({"ok": True, "instance": instance, "name": name or None})
 
 @app.route('/api/dependencies', methods=['GET'])
 def list_dependencies_api():

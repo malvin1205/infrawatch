@@ -32,6 +32,7 @@ try:
     from storage import (
         load_deleted_targets,
         SlowThresholdRepository,
+        HostNameRepository,
         AcknowledgmentRepository,
         IncidentRepository,
     )
@@ -56,6 +57,7 @@ except (ImportError, ValueError):
     from alarm.storage import (
         load_deleted_targets,
         SlowThresholdRepository,
+        HostNameRepository,
         AcknowledgmentRepository,
         IncidentRepository,
     )
@@ -508,6 +510,11 @@ class FleetStateEngine:
         except Exception:
             slow_thresholds = {}
 
+        try:
+            host_names = HostNameRepository.get_all()
+        except Exception:
+            host_names = {}
+
         def _slow_threshold_for(inst):
             return slow_thresholds.get(inst, DEFAULT_SLOW_RESPONSE_THRESHOLD_MS)
 
@@ -664,6 +671,7 @@ class FleetStateEngine:
             is_supp = bool(item.get('suppressedBy'))
             slow_threshold_ms = _slow_threshold_for(item['instance'])
             item['slowThresholdMs'] = slow_threshold_ms
+            item['displayName'] = host_names.get(item['instance'])
             is_slow = (
                 item['health'] == 'up'
                 and item['responseTimeMs'] is not None

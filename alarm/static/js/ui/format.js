@@ -22,6 +22,20 @@ export function slowThresholdMs(t) {
 }
 
 /**
+ * Operator-set display names (HostNameRepository, sent as `displayName` on
+ * each /instances row). The dashboard refreshes the map on every poll so any
+ * page can label a bare instance string without a target object in hand.
+ */
+const _hostNames = new Map();
+export function setHostNames(targets) {
+  _hostNames.clear();
+  for (const t of targets || []) if (t.displayName) _hostNames.set(t.instance, t.displayName);
+}
+export function hostName(instance) {
+  return _hostNames.get(instance) || instance;
+}
+
+/**
  * Latency severity for one reading, anchored to the target's own configured
  * threshold rather than a literal. Every "is this slow?" decision in the UI
  * goes through here.

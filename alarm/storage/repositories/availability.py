@@ -146,6 +146,36 @@ class SlowThresholdRepository:
             return cur.rowcount > 0
 
 
+class HostNameRepository:
+    """Per-instance display name. Absent -> the UI shows the raw instance."""
+
+    @staticmethod
+    def get_all(db_path: Optional[str] = None) -> Dict[str, str]:
+        with db_read(db_path) as conn:
+            rows = conn.execute("SELECT instance, name FROM host_names").fetchall()
+            return {r["instance"]: r["name"] for r in rows}
+
+    @staticmethod
+    def set_name(instance: str, name: str, updated_by: Optional[str] = None,
+                 db_path: Optional[str] = None) -> str:
+        with db_transaction(db_path) as conn:
+            conn.execute(
+                """INSERT INTO host_names (instance, name, updated_by, updated_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(instance) DO UPDATE SET
+                       name = excluded.name,
+                       updated_by = excluded.updated_by,
+                       updated_at = excluded.updated_at""",
+                (instance, name, updated_by, time.time()),
+            )
+        return name
+
+    @staticmethod
+    def delete_name(instance: str, db_path: Optional[str] = None) -> bool:
+        with db_transaction(db_path) as conn:
+            return conn.execute("DELETE FROM host_names WHERE instance = ?", (instance,)).rowcount > 0
+
+
 class AvailabilityBucketRepository:
     @staticmethod
     def save_buckets(buckets: List[Dict[str, Any]], source: str, db_path: Optional[str] = None):
