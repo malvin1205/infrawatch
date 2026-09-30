@@ -264,8 +264,7 @@ export class ServerMonitor {
     const ackQuietInput = $('apAckQuietInput');
     const repeatLimitInput = $('apRepeatLimitInput');
     const repeatLimitRow = $('apRepeatLimitRow');
-    const newOutageRingRadio = $('apNewOutageRingRadio');
-    const newOutageWaitRadio = $('apNewOutageWaitRadio');
+    const ignoreCooldownCheckbox = $('apIgnoreCooldownCheckbox');
 
     const soundSelect = $('apSoundSelect');
     const soundPreviewBtn = $('apSoundPreviewBtn');
@@ -541,7 +540,7 @@ export class ServerMonitor {
         ack_reminder_ring_duration_s: num(ackReminderRingInput, 10),
         ack_quiet_s: num(ackQuietInput, 300),
         repeat_limit: num(repeatLimitInput, 0),
-        new_outage_mode: newOutageWaitRadio.checked ? 'wait' : 'ring',
+        new_outage_mode: ignoreCooldownCheckbox.checked ? 'ring' : 'wait',
         sound_id: soundSelect.value || 'alarm-default',
         sound_start_s: clip ? Math.round(clip.start * 10) / 10 : null,
         sound_end_s: clip ? Math.round(clip.end * 10) / 10 : null,
@@ -606,7 +605,7 @@ export class ServerMonitor {
       ackReminderRingInput.value = p.ack_reminder_ring_duration_s;
       ackQuietInput.value = p.ack_quiet_s ?? p.ack_reminder_interval_s;
       repeatLimitInput.value = p.repeat_limit ?? 0;
-      (p.new_outage_mode === 'wait' ? newOutageWaitRadio : newOutageRingRadio).checked = true;
+      ignoreCooldownCheckbox.checked = p.new_outage_mode !== 'wait';
       if (p.sound_id && availableSounds.some(s => s.id === p.sound_id)) soundSelect.value = p.sound_id;
       const clip = clipOf(p);
       setClipEnabled(Boolean(clip), clip);
@@ -617,7 +616,7 @@ export class ServerMonitor {
     /* ── Wiring ──────────────────────────────── */
     [initialDelayInput, ringDurationInput, repeatIntervalInput, repeatEnabledCheckbox,
       ackSilenceRadio, ackRemindRadio, ackReminderIntervalInput, ackReminderRingInput,
-      ackQuietInput, repeatLimitInput, newOutageRingRadio, newOutageWaitRadio].forEach(el => {
+      ackQuietInput, repeatLimitInput, ignoreCooldownCheckbox].forEach(el => {
       el.addEventListener('input', onInputChange);
       el.addEventListener('change', onInputChange);
     });

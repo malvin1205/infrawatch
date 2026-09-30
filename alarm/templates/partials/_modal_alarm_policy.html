@@ -83,18 +83,13 @@
                 <span class="ap-unit">repeats</span>
               </div>
             </div>
-            <div class="ap-field">
-              <span class="ap-row-label" id="apNewOutageTitle">When another host goes down during cooldown</span>
-              <div class="ap-choice-list" role="radiogroup" aria-labelledby="apNewOutageTitle">
-                <label class="ap-choice" for="apNewOutageRingRadio">
-                  <input type="radio" name="apNewOutage" value="ring" id="apNewOutageRingRadio" checked>
-                  <span>Ring right away and restart the repeat cycle</span>
-                </label>
-                <label class="ap-choice" for="apNewOutageWaitRadio">
-                  <input type="radio" name="apNewOutage" value="wait" id="apNewOutageWaitRadio">
-                  <span>Wait for the next scheduled ring</span>
-                </label>
-              </div>
+            <div class="ap-row">
+              <label class="ap-row-label ap-check" for="apIgnoreCooldownCheckbox">
+                <input type="checkbox" id="apIgnoreCooldownCheckbox" checked>
+                <span>Ignore cooldown for new outage
+                  <span class="ap-row-help">On = a newly detected outage rings right away, even during cooldown from an earlier outage, and restarts the repeat cycle. Cooldown still spaces out repeats of the same ongoing outage. Off = a new outage waits for the next scheduled ring.</span>
+                </span>
+              </label>
             </div>
           </section>
 
