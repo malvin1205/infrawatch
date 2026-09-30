@@ -48,3 +48,23 @@ def test_dead_active_endpoint_never_fails_over_to_another_server():
         assert client.fetch_prometheus_json("/q", cache_ttl=60) == (None, None)
         assert client.fetch_prometheus_json("/q", cache_ttl=60) == (None, None)
     assert calls == [f"{dead}/q"], calls
+
+
+def test_heavy_query_failure_does_not_open_breaker():
+    """A backfill chunk given a long timeout failing must not make the next
+    query fail without trying; a normal-sized failure still opens it."""
+    client.PROMETHEUS_CACHE.clear()
+    client._FAILED_CANDIDATES.clear()
+    calls = []
+
+    def fake_fetch(url, timeout=None):
+        calls.append(url)
+        return None if url.endswith("/slow") else '{"status":"success","data":{"n":1}}'
+
+    with mock.patch.object(client, "fetch_url", side_effect=fake_fetch), \
+         mock.patch.object(client, "_filter_safe_candidates", side_effect=lambda urls: urls):
+        assert client.fetch_prometheus_json("/slow", source=BASE, timeout=60.0) == (None, None)
+        assert client.fetch_prometheus_json("/chunk", source=BASE)[0]["data"]["n"] == 1
+        assert client.fetch_prometheus_json("/slow", source=BASE) == (None, None)   # opens the breaker
+        assert client.fetch_prometheus_json("/other", source=BASE) == (None, None)  # fails fast
+    assert calls == [f"{BASE}/slow", f"{BASE}/chunk", f"{BASE}/slow"], calls

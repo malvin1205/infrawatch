@@ -263,14 +263,20 @@ def _fetch_from_source(path, source, use_cache, cache_ttl, timeout):
     # a dead server's connect timeout (there is no failover to fall back on).
     if not hit and _tripped(base):
         return None, None
-    raw = fetch_url(f"{base}{path}", timeout=6.0 if timeout is None else timeout)
+    timeout = 6.0 if timeout is None else timeout
+    raw = fetch_url(f"{base}{path}", timeout=timeout)
     try:
         data = json.loads(raw) if raw else None
     except Exception:
         data = None
     if data is None:
-        with _FAILED_CANDIDATES_LOCK:
-            _FAILED_CANDIDATES[base] = time.time()
+        # Only a normal-sized request failing says the server is down. A heavy
+        # query given a long timeout (e.g. a 60s `up[1h]` backfill chunk) can
+        # fail on its own; tripping on it made every following chunk fail
+        # instantly without being tried.
+        if timeout <= 6.0:
+            with _FAILED_CANDIDATES_LOCK:
+                _FAILED_CANDIDATES[base] = time.time()
         # Same last-good fallback as the failover path: an empty answer here
         # (e.g. /targets) emptied the host list and blanked the zoom trend.
         if hit:
