@@ -806,29 +806,30 @@ class _AvailabilityMethods {
       const scoredHosts = data.counts?.scored || 0;
       const usedSec = sla.window.observed_downtime_seconds || 0;
       const allowedSec = sla.window.allowed_downtime_seconds || 0;
+      // One line, every number next to its limit; the fleet host-hour totals
+      // and the formulas live in the tooltip (they read as impossible next to
+      // a 24h window: 140h "used" is summed across hosts).
       if (budgetUsedEl) {
-        if (scoredHosts > 1) {
-          const perHostUsed = fmtDur(usedSec / scoredHosts);
-          const perHostAllowed = fmtDur(allowedSec / scoredHosts);
-          const overTxt = allowedSec > 0
-            ? (usedSec > allowedSec
-              ? `${(usedSec / allowedSec).toFixed(usedSec / allowedSec >= 10 ? 0 : 1)}× over budget`
-              : `${((usedSec / allowedSec) * 100).toFixed(0)}% of budget used`)
-            : '—';
-          budgetUsedEl.innerHTML =
-            `<strong>${this._esc(overTxt)}</strong> — avg <strong>${this._esc(perHostUsed)}</strong> downtime per host ` +
-            `vs ${this._esc(perHostAllowed)} allowed each` +
-            `<span class="audit-budget-raw">fleet total ${this._esc(fmtDur(usedSec))} used of ${this._esc(fmtDur(allowedSec))} allowed · ${scoredHosts} hosts</span>`;
-        } else {
-          budgetUsedEl.textContent = `${fmtDur(usedSec)} used of ${fmtDur(allowedSec)} allowed`;
-        }
+        const n = Math.max(1, scoredHosts);
+        const ratio = allowedSec > 0 ? usedSec / allowedSec : null;
+        const ratioTxt = ratio === null ? ''
+          : ratio > 1 ? ` · ${ratio.toFixed(ratio >= 10 ? 0 : 1)}× over`
+          : ` · ${(ratio * 100).toFixed(0)}% used`;
+        const scope = n > 1 ? ' per host' : '';
+        budgetUsedEl.innerHTML =
+          `<strong>${this._esc(fmtDur(usedSec / n))}</strong> down${scope} · limit ${this._esc(fmtDur(allowedSec / n))}${this._esc(ratioTxt)}`;
+        budgetUsedEl.title =
+          `Limit = (1 − ${fmtTargetPct(sla.target_pct)}% target) × window` +
+          (n > 1 ? `\nFleet total: ${fmtDur(usedSec)} used of ${fmtDur(allowedSec)} allowed across ${n} hosts (host-hours)` : '');
       }
+      // "Projected to breach in 30d" sat next to an already-BREACHED badge and
+      // read as "not yet". State the 30-day figure against its own limit.
       if (budgetProjEl) {
-        budgetProjEl.textContent = sla.projected
-          ? (sla.projected.breach
-            ? `⚠ Projected to breach in ${sla.projected.days}d at current rate`
-            : `On track for ${sla.projected.days}d projection`)
+        const p = sla.projected;
+        budgetProjEl.textContent = p
+          ? `${p.breach ? '⚠ ' : ''}30-day forecast: ${fmtDur(p.downtime_seconds)}${scoredHosts > 1 ? ' per host' : ''} · limit ${fmtDur(p.allowed_downtime_seconds)}`
           : '';
+        budgetProjEl.title = p ? 'Current downtime rate × 30 days, against the 30-day limit at the same target' : '';
       }
     } else {
       if (budgetFillEl) { budgetFillEl.style.width = '0%'; budgetFillEl.className = 'audit-budget-fill'; }
