@@ -108,9 +108,10 @@ def test_alarm_policy_api_endpoints(monkeypatch, tmp_path):
     import app as alarm_app
     client = alarm_app.app.test_client()
 
-    with client.session_transaction() as sess:
-        sess["user_id"] = 1
-        sess["epoch"] = 0
+    # Stub the authenticated user: a session user_id only works if that row
+    # happens to exist in whatever DB the app points at.
+    monkeypatch.setitem(alarm_app.require_permission.__globals__, "get_current_authenticated_user",
+                        lambda: {"id": 1, "username": "t", "role": "admin", "is_m2m": False})
 
     # 1. GET endpoint
     res = client.get("/api/settings/alarm-policy")
